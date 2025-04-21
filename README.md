@@ -68,15 +68,3 @@ Integration med bookingsystem og SMS
 👤 Udviklet af
 Simon Nirfalk
 github.com/simonnirfalk
-
-🧼 Git .gitignore
-Hvis du mangler en .gitignore, brug:
-
-bash
-Kopiér
-Rediger
-node_modules/
-dist/
-.vite/
-.env
-.DS_Store

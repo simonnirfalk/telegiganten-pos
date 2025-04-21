@@ -1,5 +1,6 @@
 import { Routes, Route } from "react-router-dom";
 import Dashboard from "./pages/Dashboard";
+import NewRepair from "./pages/NewRepair";
 
 export default function App() {
   return (
@@ -20,6 +21,8 @@ export default function App() {
       <main style={{ padding: "2rem" }}>
         <Routes>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/opret" element={<NewRepair />} />
         </Routes>
       </main>
     </div>

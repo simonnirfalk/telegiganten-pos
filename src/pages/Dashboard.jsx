@@ -1,4 +1,5 @@
 import DashboardStats from "../components/DashboardStats";
+import { useNavigate } from "react-router-dom";
 
 const navBoxStyle = {
   backgroundColor: "white",
@@ -13,11 +14,13 @@ const navBoxStyle = {
 };
 
 export default function Dashboard() {
+  const navigate = useNavigate();
+  
   return (
     <div>
       {/* Top-knapper */}
       <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap", marginBottom: "2rem" }}>
-        <div style={navBoxStyle}>Opret reparation</div>
+        <div style={navBoxStyle} onClick={() => navigate("/opret")}>Opret reparation</div>
         <div style={navBoxStyle}>Bookinger</div>
         <div style={navBoxStyle}>Kunder</div>
         <div style={navBoxStyle}>Priser</div>
