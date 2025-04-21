@@ -1,92 +1,104 @@
-// src/pages/NewRepair.jsx
-import { useState } from "react";
+import React, { useState } from "react";
 import Step1_SelectDevice from "../components/Step1_SelectDevice";
 import Step2_SelectRepair from "../components/Step2_SelectRepair";
 import Step3_SelectCustomer from "../components/Step3_SelectCustomer";
 import Step4_Confirm from "../components/Step4_Confirm";
-
-const allDevices = [
-  { id: 1, name: "iPhone 13", brand: "Apple" },
-  { id: 2, name: "iPhone 12", brand: "Apple" },
-  { id: 3, name: "iPhone SE 2022", brand: "Apple" },
-  { id: 4, name: "iPad Pro 12.9", brand: "Apple" },
-  { id: 5, name: "MacBook Air M1", brand: "Apple" },
-  { id: 6, name: "Galaxy S22", brand: "Samsung" },
-  { id: 7, name: "Galaxy S21 FE", brand: "Samsung" },
-  { id: 8, name: "Galaxy A52", brand: "Samsung" },
-  { id: 9, name: "Galaxy Tab S8", brand: "Samsung" },
-];
-
-const allRepairs = {
-  "iPhone 13": [
-    { name: "Skærmskift", price: 1699, time: "1 time" },
-    { name: "Batteriskift", price: 599, time: "30 min" },
-    { name: "Bagglas", price: 799, time: "1-2 timer" }
-  ],
-  "Galaxy S22": [
-    { name: "Skærm", price: 1799, time: "1 time" },
-    { name: "Batteri", price: 499, time: "30 min" },
-    { name: "Kamera", price: 699, time: "1 time" }
-  ],
-  "MacBook Air M1": [
-    { name: "Tastatur", price: 2199, time: "2 timer" },
-    { name: "Skærm", price: 3499, time: "3 timer" },
-    { name: "SSD", price: 1199, time: "1 time" }
-  ]
-};
-
-const mockCustomers = [
-  { name: "Jonas Jensen", phone: "22223333", email: "jonas@example.com", password: "1234", notes: "" },
-  { name: "Emma Hansen", phone: "44445555", email: "emma@kunde.dk", password: "", notes: "iPhone låst" }
-];
+import { useNavigate } from "react-router-dom";
 
 export default function NewRepair() {
+  const navigate = useNavigate();
+
   const [step, setStep] = useState(1);
-  const [selectedDevice, setSelectedDevice] = useState(null);
-  const [selectedRepair, setSelectedRepair] = useState(null);
-  const [customerForm, setCustomerForm] = useState({ name: "", phone: "", email: "", password: "", notes: "" });
-  const [selectedCustomer, setSelectedCustomer] = useState(null);
+
+  // Step 1
+  const [devices] = useState([
+    { name: "iPhone 13" },
+    { name: "iPhone 14" },
+    { name: "Samsung Galaxy S22" }
+  ]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [selectedDevice, setSelectedDevice] = useState(null);
+
+  // Step 2
+  const [selectedRepair, setSelectedRepair] = useState(null);
+
+  // Step 3
+  const [customers, setCustomers] = useState([
+    {
+      id: 1,
+      name: "Mads Andersen",
+      phone: "22223333",
+      email: "mads@eksempel.dk",
+      password: "kode123",
+      notes: "Foretrækker afhentning før kl. 16"
+    },
+    {
+      id: 2,
+      name: "Laura Jensen",
+      phone: "44445555",
+      email: "laura@eksempel.dk",
+      password: "hemmelig",
+      notes: ""
+    }
+  ]);
+  
+  const [customerForm, setCustomerForm] = useState({});
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [searchResults, setSearchResults] = useState([]);
   const [error, setError] = useState("");
 
-  const repairOptions = selectedDevice?.name ? allRepairs[selectedDevice.name] || [] : [];
-
-  const handleCustomerSearch = () => {
-    const results = mockCustomers.filter(c =>
-      c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.phone.includes(searchTerm)
-    );
-    setSearchResults(results);
+  const handleReset = () => {
+    setStep(1);
+    setSelectedDevice(null);
+    setSelectedRepair(null);
+    setSelectedCustomer(null);
+    setCustomerForm({});
+    setSearchTerm("");
+    setSearchResults([]);
+    setError("");
   };
-
-  const handleCreateCustomer = () => {
-    const exists = mockCustomers.some(c => c.phone === customerForm.phone);
-    if (exists) {
-      setError("Telefonnummeret er allerede registreret.");
+  
+  const handleCreateOrUpdateCustomer = () => {
+    const isEditing =
+      selectedCustomer && customerForm.phone === selectedCustomer.phone;
+  
+    if (!customerForm.name || !customerForm.phone) {
+      setError("Navn og telefonnummer skal udfyldes.");
+      return;
+    }
+  
+    if (isEditing) {
+      // Opdater eksisterende kunde
+      const updatedList = customers.map((c) =>
+        c.phone === selectedCustomer.phone ? { ...c, ...customerForm } : c
+      );
+      setCustomers(updatedList);
+      setSelectedCustomer({ ...selectedCustomer, ...customerForm });
+      setCustomerForm({});
+      setError("");
     } else {
-      setSelectedCustomer({ ...customerForm });
-      setCustomerForm({ name: "", phone: "", email: "", password: "", notes: "" });
+      const exists = customers.find((c) => c.phone === customerForm.phone);
+      if (exists) {
+        setError("Der findes allerede en kunde med det telefonnummer.");
+        return;
+      }
+  
+      const newCustomer = {
+        ...customerForm,
+        id: Date.now()
+      };
+      setCustomers([...customers, newCustomer]);
+      setSelectedCustomer(newCustomer);
+      setCustomerForm({});
       setError("");
     }
   };
-
-  const handleSubmit = () => {
-    console.log("Opretter reparation:", {
-      device: selectedDevice,
-      repair: selectedRepair,
-      customer: selectedCustomer
-    });
-    // Her skal vi sende data til backend i næste trin
-  };
-
+  
   return (
-    <div style={{ paddingBottom: "4rem" }}>
-      <h2 style={{ fontFamily: "Archivo Black", textTransform: "uppercase", marginBottom: "1rem" }}>Opret reparation</h2>
-
+    <div style={{ maxWidth: "960px", margin: "0 auto", padding: "2rem" }}>
       {step === 1 && (
         <Step1_SelectDevice
-          devices={allDevices}
+          devices={devices}
           searchTerm={searchTerm}
           setSearchTerm={setSearchTerm}
           selectedDevice={selectedDevice}
@@ -97,7 +109,7 @@ export default function NewRepair() {
 
       {step === 2 && (
         <Step2_SelectRepair
-          repairs={repairOptions}
+          selectedDevice={selectedDevice}
           selectedRepair={selectedRepair}
           setSelectedRepair={setSelectedRepair}
           onBack={() => setStep(1)}
@@ -115,27 +127,27 @@ export default function NewRepair() {
           setSearchTerm={setSearchTerm}
           searchResults={searchResults}
           setSearchResults={setSearchResults}
+          customers={customers}
+          setCustomers={setCustomers}
           error={error}
           setError={setError}
-          onSearch={handleCustomerSearch}
-          onCreateCustomer={handleCreateCustomer}
-          onUpdateCustomer={(updated) => {
-            setSelectedCustomer(updated);
-            setCustomerForm(updated);
-            setError("");
-          }}       
           onBack={() => setStep(2)}
           onNext={() => setStep(4)}
+          onCreateCustomer={handleCreateOrUpdateCustomer}
         />
       )}
 
       {step === 4 && (
         <Step4_Confirm
-          selectedDevice={selectedDevice}
-          selectedRepair={selectedRepair}
-          selectedCustomer={selectedCustomer}
+          device={selectedDevice}
+          repair={selectedRepair}
+          customer={selectedCustomer}
           onBack={() => setStep(3)}
-          onSubmit={handleSubmit}
+          onFinish={() => {
+            alert("Reparation oprettet!");
+            handleReset();
+            navigate("/");
+          }}
         />
       )}
     </div>
