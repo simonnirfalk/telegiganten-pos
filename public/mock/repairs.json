@@ -1,0 +1,6 @@
+[
+  { "id": 1, "device_id": 1, "name": "Skærmskift", "price": 999, "time_estimate": "1 time" },
+  { "id": 2, "device_id": 1, "name": "Batteriskift", "price": 699, "time_estimate": "45 min" },
+  { "id": 3, "device_id": 2, "name": "Skærmskift", "price": 1299, "time_estimate": "1 time" },
+  { "id": 4, "device_id": 3, "name": "Skærmskift", "price": 899, "time_estimate": "1 time" }
+]
