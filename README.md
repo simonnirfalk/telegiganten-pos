@@ -1,70 +1,12 @@
-# Telegiganten POS
+# React + Vite
 
-Et performanceoptimeret, touch-venligt Point-of-Sale-system udviklet til Telegiganten – med fokus på reparationer, lagerstyring og kundeoplysninger.
+This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
-## 🚀 Funktioner
+Currently, two official plugins are available:
 
-- Trinbaseret oprettelse af reparationer (Vælg enhed → Vælg reparation → Kunde → Bekræft)
-- Touch-optimeret dashboard til butik (iPad/desktop)
-- Seneste reparationer vises i overskueligt format
-- Integreret statistik og analyser med grafer og live-filtrering
-- Forberedt til integration med:
-  - Google Sheets (reservedelslager)
-  - SMS API
-  - Eksisterende WordPress-bookingsystem
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
+- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
 
-## 🧑‍💻 Teknologier
+## Expanding the ESLint configuration
 
-- [React](https://react.dev/) + [Vite](https://vitejs.dev/) – frontend framework
-- [Recharts](https://recharts.org/) – datavisualisering
-- [React Router](https://reactrouter.com/) – navigation
-- Google Fonts (Archivo Black & Inter)
-- Git + GitHub til versionsstyring og backup
-
-## ⚙️ Installation
-
-1. Klon projektet:
-
-```bash
-git clone https://github.com/simonnirfalk/telegiganten-pos.git
-cd telegiganten-pos
-Installer afhængigheder:
-
-bash
-Kopiér
-Rediger
-npm install
-Start udviklingsserver:
-
-bash
-Kopiér
-Rediger
-npm run dev
-Åbn http://localhost:5173 i din browser.
-
-📁 Projektstruktur
-css
-Kopiér
-Rediger
-src/
-├── components/          → UI-komponenter (eks. DashboardStats)
-├── pages/               → Overordnede views (Dashboard osv.)
-├── App.jsx              → Main layout + routing
-├── main.jsx             → Root React entry
-├── index.css            → Global styling
-public/
-├── logo.png             → Telegigantens logo
-📊 Kommende funktioner
-Databaseintegration (MySQL)
-
-Live-reparationstracking
-
-Lagertræk ved reparationer
-
-Brugerlogin og adgangskontrol
-
-Integration med bookingsystem og SMS
-
-👤 Udviklet af
-Simon Nirfalk
-github.com/simonnirfalk
+If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.

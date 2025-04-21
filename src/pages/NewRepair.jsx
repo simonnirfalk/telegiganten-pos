@@ -119,6 +119,11 @@ export default function NewRepair() {
           setError={setError}
           onSearch={handleCustomerSearch}
           onCreateCustomer={handleCreateCustomer}
+          onUpdateCustomer={(updated) => {
+            setSelectedCustomer(updated);
+            setCustomerForm(updated);
+            setError("");
+          }}       
           onBack={() => setStep(2)}
           onNext={() => setStep(4)}
         />
