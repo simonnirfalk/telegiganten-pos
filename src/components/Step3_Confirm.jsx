@@ -1,63 +1,68 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 
 export default function Step3_Confirm({ order, onBack, onFinish }) {
+  const navigate = useNavigate();
+
   const totalPrice = order.repairs.reduce((sum, r) => sum + r.price, 0);
   const totalTime = order.repairs.reduce((sum, r) => sum + r.time, 0);
 
+  const buttonStyle = {
+    backgroundColor: "#2166AC",
+    color: "white",
+    padding: "0.6rem 1.5rem",
+    borderRadius: "8px",
+    border: "none",
+    cursor: "pointer"
+  };
+
   return (
     <div>
-      <h2 style={{ textTransform: "uppercase", fontWeight: "bold" }}>Bekræft ordre</h2>
-
-      {/* Kundeoplysninger */}
-      <div style={cardStyle}>
-        <h4>Kunde</h4>
-        <p><strong>{order.customer.name}</strong></p>
-        <p>📞 {order.customer.phone}</p>
-        {order.customer.extraPhone && <p>📱 Ekstra: {order.customer.extraPhone}</p>}
-        <p>✉️ {order.customer.email}</p>
-        <p>📝 {order.customer.notes}</p>
-      </div>
-
-      {/* Reparationer */}
-      <div style={cardStyle}>
-        <h4>Reparationer ({order.repairs.length})</h4>
-        <ul style={{ listStyle: "none", paddingLeft: 0 }}>
-          {order.repairs.map((r, i) => (
-            <li key={i} style={{ marginBottom: "0.5rem" }}>
-              <strong>{r.device}</strong> – {r.repair} ({r.price} kr / {r.time} min)
-            </li>
-          ))}
-        </ul>
-        <p style={{ marginTop: "1rem" }}>
-          <strong>Total:</strong> {totalPrice} kr / {totalTime} min
-        </p>
-      </div>
-
-      {/* Handling */}
-      <div style={{ marginTop: "2rem" }}>
-        <button onClick={onBack} style={btnStyle}>⬅️ Tilbage</button>
-        <button onClick={onFinish} style={{ ...btnStyle, backgroundColor: "#2166AC" }}>
-          ✅ Opret ordre
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1rem" }}>
+        <button onClick={() => navigate("/")} style={{ ...buttonStyle, marginRight: "auto" }}>
+          🏠 Dashboard
         </button>
       </div>
+
+      <h2 style={{ textTransform: "uppercase", fontWeight: "bold" }}>Bekræft ordre</h2>
+
+      <div style={{
+        background: "#fff",
+        padding: "1rem",
+        borderRadius: "10px",
+        border: "1px solid #ddd",
+        maxWidth: "600px",
+        marginBottom: "2rem"
+      }}>
+        <h3>📱 Reparationer</h3>
+        {order.repairs.map((r, i) => (
+          <div key={i} style={{ padding: "0.5rem 0", borderBottom: "1px solid #eee" }}>
+            <strong>{r.device}</strong><br />
+            {r.repair} – {r.price} kr / {r.time} min
+          </div>
+        ))}
+        <p style={{ marginTop: "1rem" }}><strong>Samlet:</strong> {totalPrice} kr • {totalTime} min</p>
+
+        <h3 style={{ marginTop: "2rem" }}>👤 Kunde</h3>
+        {order.customer ? (
+          <div>
+            <p><strong>{order.customer.name}</strong></p>
+            <p>{order.customer.phone}</p>
+            <p>{order.customer.email}</p>
+            {order.customer.extraPhone && <p>Ekstra nummer: {order.customer.extraPhone}</p>}
+            {order.customer.notes && <p><em>{order.customer.notes}</em></p>}
+          </div>
+        ) : (
+          <p style={{ color: "red" }}>Ingen kunde tilføjet!</p>
+        )}
+      </div>
+
+      <button onClick={onBack} style={{ ...buttonStyle, marginRight: "1rem" }}>
+        ⬅️ Tilbage
+      </button>
+      <button onClick={onFinish} style={{ ...buttonStyle, backgroundColor: "#22b783" }}>
+        ✅ Bekræft og opret reparation
+      </button>
     </div>
   );
 }
-
-const cardStyle = {
-  background: "white",
-  padding: "1.5rem",
-  borderRadius: "10px",
-  border: "1px solid #ccc",
-  marginBottom: "1.5rem",
-  boxShadow: "0 1px 4px rgba(0,0,0,0.05)"
-};
-
-const btnStyle = {
-  backgroundColor: "#22b783",
-  color: "white",
-  padding: "0.6rem 1.5rem",
-  borderRadius: "8px",
-  border: "none",
-  marginRight: "1rem"
-};
