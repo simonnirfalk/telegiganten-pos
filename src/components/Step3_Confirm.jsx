@@ -1,5 +1,6 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
+import { FaHome, FaArrowLeft, FaCheck } from "react-icons/fa";
 
 export default function Step3_Confirm({ order, onBack, onFinish }) {
   const navigate = useNavigate();
@@ -13,14 +14,23 @@ export default function Step3_Confirm({ order, onBack, onFinish }) {
     padding: "0.6rem 1.5rem",
     borderRadius: "8px",
     border: "none",
-    cursor: "pointer"
+    cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.5rem"
+  };
+
+  const greenButtonStyle = {
+    ...buttonStyle,
+    backgroundColor: "#22b783"
   };
 
   return (
     <div>
+      {/* Topbar med dashboard */}
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1rem" }}>
         <button onClick={() => navigate("/")} style={{ ...buttonStyle, marginRight: "auto" }}>
-          🏠 Dashboard
+          <FaHome /> Dashboard
         </button>
       </div>
 
@@ -58,10 +68,10 @@ export default function Step3_Confirm({ order, onBack, onFinish }) {
       </div>
 
       <button onClick={onBack} style={{ ...buttonStyle, marginRight: "1rem" }}>
-        ⬅️ Tilbage
+        <FaArrowLeft /> Tilbage
       </button>
-      <button onClick={onFinish} style={{ ...buttonStyle, backgroundColor: "#22b783" }}>
-        ✅ Bekræft og opret reparation
+      <button onClick={onFinish} style={greenButtonStyle}>
+        <FaCheck /> Bekræft og opret reparation
       </button>
     </div>
   );

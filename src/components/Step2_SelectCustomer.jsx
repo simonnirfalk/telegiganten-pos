@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { FaHome, FaArrowLeft, FaEdit, FaTrash, FaUserPlus, FaCheck } from "react-icons/fa";
 
 export default function Step2_SelectCustomer({
   customers,
@@ -117,7 +118,15 @@ export default function Step2_SelectCustomer({
     borderRadius: "6px",
     border: "none",
     marginRight: "0.5rem",
-    cursor: "pointer"
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem"
+  };
+
+  const redButtonStyle = {
+    ...buttonStyle,
+    backgroundColor: "red"
   };
 
   const totalPrice = order.repairs.reduce((sum, r) => sum + r.price, 0);
@@ -125,12 +134,14 @@ export default function Step2_SelectCustomer({
 
   return (
     <div>
-      {/* Faste knapper øverst */}
+      {/* Topknapper */}
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1rem" }}>
         <button onClick={() => navigate("/")} style={{ ...buttonStyle, marginRight: "auto" }}>
-          🏠 Dashboard
+          <FaHome /> Dashboard
         </button>
-        <button onClick={onBack} style={buttonStyle}>⬅️ Tilbage</button>
+        <button onClick={onBack} style={buttonStyle}>
+          <FaArrowLeft /> Tilbage
+        </button>
       </div>
 
       <div style={{ display: "flex", gap: "2rem" }}>
@@ -142,7 +153,7 @@ export default function Step2_SelectCustomer({
             <>
               <h4>Søg eksisterende kunde</h4>
               <input type="text" placeholder="Navn eller telefonnummer" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={inputStyle} />
-              <button onClick={handleSearch} style={buttonStyle}>Søg</button>
+              <button onClick={handleSearch} style={buttonStyle}><FaUserPlus /> Søg</button>
 
               {searchResults.map((c, i) => (
                 <div key={i} style={{
@@ -155,7 +166,7 @@ export default function Step2_SelectCustomer({
                   <strong>{c.name}</strong><br />
                   {c.phone} • {c.email}<br />
                   <button onClick={() => handleSelectCustomer(c)} style={{ ...buttonStyle, marginTop: "0.5rem" }}>
-                    Vælg kunde
+                    <FaCheck /> Vælg kunde
                   </button>
                 </div>
               ))}
@@ -172,7 +183,7 @@ export default function Step2_SelectCustomer({
               <input placeholder="Adgangskode" value={formData.password} onChange={(e) => setFormData({ ...formData, password: e.target.value })} style={inputStyle} />
               <textarea placeholder="Kommentar" value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} style={inputStyle} rows={3} />
               {error && <p style={{ color: "red" }}>{error}</p>}
-              <button onClick={handleCreateCustomer} style={buttonStyle}>Opret kunde</button>
+              <button onClick={handleCreateCustomer} style={buttonStyle}><FaUserPlus /> Opret kunde</button>
             </>
           )}
 
@@ -184,12 +195,12 @@ export default function Step2_SelectCustomer({
               <input placeholder="E-mail" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} style={inputStyle} />
               <input placeholder="Adgangskode" value={formData.password} onChange={(e) => setFormData({ ...formData, password: e.target.value })} style={inputStyle} />
               <textarea placeholder="Kommentar" value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} style={inputStyle} rows={3} />
-              <button onClick={handleSaveChanges} style={buttonStyle}>Gem ændringer</button>
+              <button onClick={handleSaveChanges} style={buttonStyle}><FaCheck /> Gem ændringer</button>
             </>
           )}
         </div>
 
-        {/* Højreside */}
+        {/* Ordreoversigt */}
         <div style={{
           width: "320px",
           border: "1px solid #ddd",
@@ -219,8 +230,8 @@ export default function Step2_SelectCustomer({
               {order.customer.extraPhone && <p>{order.customer.extraPhone}</p>}
               <p>{order.customer.email}</p>
               <p>{order.customer.notes}</p>
-              <button onClick={handleEdit} style={buttonStyle}>✏️ Rediger</button>
-              <button onClick={handleRemoveCustomer} style={{ ...buttonStyle, backgroundColor: "red", marginLeft: "0.5rem" }}>❌ Fjern</button>
+              <button onClick={handleEdit} style={buttonStyle}><FaEdit /> Rediger</button>
+              <button onClick={handleRemoveCustomer} style={redButtonStyle}><FaTrash /> Fjern</button>
             </div>
           ) : (
             <p>Ingen kunde valgt.</p>
@@ -230,7 +241,7 @@ export default function Step2_SelectCustomer({
             onClick={onNext}
             style={{ ...buttonStyle, marginTop: "1rem", width: "100%" }}
           >
-            Fortsæt
+            <FaCheck /> Fortsæt
           </button>
         </div>
       </div>
