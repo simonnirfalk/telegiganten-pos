@@ -1,0 +1,122 @@
+[
+  {
+    "id": "device-1",
+    "name": "iPhone 12"
+  },
+  {
+    "id": "device-2",
+    "name": "iPhone 13"
+  },
+  {
+    "id": "device-3",
+    "name": "iPhone 14"
+  },
+  {
+    "id": "device-4",
+    "name": "iPhone 15"
+  },
+  {
+    "id": "device-5",
+    "name": "iPhone 16"
+  },
+  {
+    "id": "device-6",
+    "name": "iPhone SE 2020"
+  },
+  {
+    "id": "device-7",
+    "name": "Samsung Galaxy A55"
+  },
+  {
+    "id": "device-8",
+    "name": "Samsung Galaxy S22"
+  },
+  {
+    "id": "device-9",
+    "name": "iPhone 13 Pro"
+  },
+  {
+    "id": "device-10",
+    "name": "iPhone Xs"
+  },
+  {
+    "id": "device-11",
+    "name": "Samsung Galaxy Note 10"
+  },
+  {
+    "id": "device-12",
+    "name": "iPhone 11 Pro"
+  },
+  {
+    "id": "device-13",
+    "name": "iPhone 16e"
+  },
+  {
+    "id": "device-14",
+    "name": "iPhone 12 Pro Max"
+  },
+  {
+    "id": "device-15",
+    "name": "Samsung Galaxy A12"
+  },
+  {
+    "id": "device-16",
+    "name": "Samsung Galaxy A13"
+  },
+  {
+    "id": "device-17",
+    "name": "Samsung Galaxy A14 5G"
+  },
+  {
+    "id": "device-18",
+    "name": "Samsung Galaxy A15"
+  },
+  {
+    "id": "device-19",
+    "name": "Samsung Galaxy A16"
+  },
+  {
+    "id": "device-20",
+    "name": "Samsung Galaxy A52"
+  },
+  {
+    "id": "device-21",
+    "name": "Samsung Galaxy A35"
+  },
+  {
+    "id": "device-22",
+    "name": "Samsung Galaxy S22 Ultra"
+  },
+  {
+    "id": "device-23",
+    "name": "Samsung Galaxy S23"
+  },
+  {
+    "id": "device-24",
+    "name": "Samsung Galaxy S21+"
+  },
+  {
+    "id": "device-25",
+    "name": "Samsung Galaxy Z Flip3"
+  },
+  {
+    "id": "device-26",
+    "name": "Samsung Galaxy S25 Ultra"
+  },
+  {
+    "id": "device-27",
+    "name": "Samsung Galaxy S24"
+  },
+  {
+    "id": "device-28",
+    "name": "Samsung Galaxy S24+"
+  },
+  {
+    "id": "device-29",
+    "name": "Huawei 12"
+  },
+  {
+    "id": "device-30",
+    "name": "Huawei 13"
+  }
+]

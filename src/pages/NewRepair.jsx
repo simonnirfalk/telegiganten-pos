@@ -26,7 +26,7 @@ export default function NewRepair() {
   const [customers, setCustomers] = useState([]);
 
   return (
-    <div style={{ maxWidth: "960px", margin: "0 auto", padding: "2rem" }}>
+    <div style={{ padding: "2rem", width: "100%", boxSizing: "border-box" }}>
       {step === 1 && (
         <Step1_AddRepairToOrder
           devices={availableDevices}

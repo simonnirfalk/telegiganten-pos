@@ -1,6 +1,7 @@
 import { Routes, Route } from "react-router-dom";
 import Dashboard from "./pages/Dashboard";
 import NewRepair from "./pages/NewRepair";
+import TestLayout from "./pages/TestLayout";
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/opret" element={<NewRepair />} />
+          <Route path="/test-layout" element={<TestLayout />} />
         </Routes>
       </main>
     </div>
