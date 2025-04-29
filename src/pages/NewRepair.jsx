@@ -1,12 +1,10 @@
 import React, { useState } from "react";
 import Step1_AddRepairToOrder from "../components/Step1_AddRepairToOrder";
-import Step2_SelectCustomer from "../components/Step2_SelectCustomer";
-import Step3_Confirm from "../components/Step3_Confirm";
+import Step2_ReviewAndPayment from "../components/Step2_ReviewAndPayment";
 
 export default function NewRepair() {
   const [step, setStep] = useState(1);
 
-  // Dummy data
   const availableDevices = [
     { name: "iPhone 13" },
     { name: "Samsung Galaxy A55" }
@@ -19,14 +17,36 @@ export default function NewRepair() {
   ];
 
   const [order, setOrder] = useState({
+    repairs: [],
     customer: null,
-    repairs: []
+    password: "",
+    note: "",
+    payment: {
+      method: "efter", // "efter", "betalt", "delvis", "garanti"
+      upfront: 0
+    }
   });
 
   const [customers, setCustomers] = useState([]);
 
+  const handleFinish = () => {
+    console.log("Reparation oprettet:", order);
+    alert("Reparation oprettet!");
+    setStep(1);
+    setOrder({
+      repairs: [],
+      customer: null,
+      password: "",
+      note: "",
+      payment: {
+        method: "efter",
+        upfront: 0
+      }
+    });
+  };
+
   return (
-    <div style={{ padding: "2rem", width: "100%", boxSizing: "border-box" }}>
+    <div style={{ width: "100%", height: "100vh", overflow: "hidden" }}>
       {step === 1 && (
         <Step1_AddRepairToOrder
           devices={availableDevices}
@@ -40,25 +60,11 @@ export default function NewRepair() {
       )}
 
       {step === 2 && (
-        <Step2_SelectCustomer
-          customers={customers}
-          setCustomers={setCustomers}
+        <Step2_ReviewAndPayment
           order={order}
           setOrder={setOrder}
+          onSubmit={handleFinish}
           onBack={() => setStep(1)}
-          onNext={() => setStep(3)}
-        />
-      )}
-
-      {step === 3 && (
-        <Step3_Confirm
-          order={order}
-          onBack={() => setStep(2)}
-          onFinish={() => {
-            alert("Reparation oprettet!");
-            setStep(1);
-            setOrder({ customer: null, repairs: [] });
-          }}
         />
       )}
     </div>

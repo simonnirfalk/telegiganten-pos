@@ -1,4 +1,5 @@
 import React from "react";
+import { FaPlus, FaEdit, FaTrashAlt, FaPhone, FaEnvelope, FaUserPlus, FaUser, FaHome, FaLock } from "react-icons/fa";
 
 export default function RepairModal({ device, repairs, onAdd, onClose }) {
   if (!device) return null;
@@ -56,7 +57,7 @@ export default function RepairModal({ device, repairs, onAdd, onClose }) {
                       cursor: "pointer"
                     }}
                   >
-                    ➕
+                    <FaPlus />
                   </button>
                 </td>
               </tr>

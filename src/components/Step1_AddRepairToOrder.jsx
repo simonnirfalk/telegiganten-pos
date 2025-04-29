@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FaHome, FaTrashAlt, FaEdit, FaPlus } from "react-icons/fa";
+import { FaPlus, FaEdit, FaTrashAlt, FaPhone, FaEnvelope, FaUserPlus, FaUser, FaHome, FaLock } from "react-icons/fa";
 import devices from "../data/devices.json";
 import repairs from "../data/repairs.json";
 import RepairModal from "../components/RepairModal";
@@ -16,6 +16,8 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
   const [openCreateCustomer, setOpenCreateCustomer] = useState(false);
   const [openSelectCustomer, setOpenSelectCustomer] = useState(false);
   const [openEditCustomer, setOpenEditCustomer] = useState(false);
+  const [editingRepairIndex, setEditingRepairIndex] = useState(null);
+  const [editingRepair, setEditingRepair] = useState({});
 
   const categories = ["Alle", "iPhone", "Samsung", "Motorola", "iPad", "MacBook"];
 
@@ -113,26 +115,29 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
     setOrder({ ...order, customer: null });
   };
 
+  const startEditingRepair = (index) => {
+    setEditingRepairIndex(index);
+    setEditingRepair({ ...order.repairs[index] });
+  };
+
+  const saveEditedRepair = (index) => {
+    const updated = [...order.repairs];
+    updated[index] = { ...editingRepair };
+    setOrder({ ...order, repairs: updated });
+    setEditingRepairIndex(null);
+  };
+
+  const removeRepair = (index) => {
+    const updated = [...order.repairs];
+    updated.splice(index, 1);
+    setOrder({ ...order, repairs: updated });
+  };
+
   return (
     <div style={{ display: "flex", height: "calc(100vh - 80px)", overflow: "hidden" }}>
       {/* Venstre side */}
       <div style={{ flex: 1, padding: "2rem", overflowY: "auto" }}>
-        <button
-          onClick={() => navigate("/")}
-          style={{
-            backgroundColor: "#2166AC",
-            color: "white",
-            padding: "0.4rem 1rem",
-            borderRadius: "6px",
-            border: "none",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: "0.5rem",
-            marginBottom: "1rem",
-            width: "fit-content"
-          }}
-        >
+        <button onClick={() => navigate("/")} style={{ ...buttonStyle, width: "fit-content" }}>
           <FaHome /> Dashboard
         </button>
 
@@ -189,100 +194,115 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
         </div>
       </div>
 
-      {/* Sidebar */}
-      <div style={{
-        width: "360px",
-        backgroundColor: "#fff",
-        borderLeft: "1px solid #ddd",
-        padding: "2rem 1rem",
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "space-between",
-        height: "100vh",
-        position: "sticky",
-        top: 0,
-        overflowY: "auto"
-      }}>
-        <div>
-          <h4 style={{ textTransform: "uppercase" }}>Oversigt</h4>
+{/* Sidebar */}
+<div style={{
+  width: "400px",
+  backgroundColor: "#fff",
+  borderLeft: "1px solid #ddd",
+  padding: "2rem 1rem",
+  display: "flex",
+  flexDirection: "column",
+  height: "100vh",
+  position: "sticky",
+  top: 0,
+  overflow: "hidden"
+}}>
+  {/* Scrollbart indhold */}
+  <div style={{ flexGrow: 1, overflowY: "auto" }}>
+    {/* REPARATIONER */}
+    <h4 style={{ textTransform: "uppercase", borderBottom: "1px solid #ddd", marginBottom: "1rem" }}>Reparationer</h4>
+    {order.repairs.length === 0 ? (
+      <p>Ingen reparationer valgt endnu.</p>
+    ) : (
+      <table style={{ width: "100%", fontSize: "0.85rem", marginBottom: "1rem" }}>
+        <thead>
+          <tr style={{ borderBottom: "1px solid #eee" }}>
+            <th style={{ textAlign: "left" }}>Model</th>
+            <th>Reparation</th>
+            <th>Pris</th>
+            <th>Min</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {order.repairs.map((r, i) => (
+            <tr key={i}>
+              <td>{editingRepairIndex === i
+                ? <input value={editingRepair.device} onChange={(e) => setEditingRepair({ ...editingRepair, device: e.target.value })} />
+                : r.device}
+              </td>
+              <td>{editingRepairIndex === i
+                ? <input value={editingRepair.repair} onChange={(e) => setEditingRepair({ ...editingRepair, repair: e.target.value })} />
+                : r.repair}
+              </td>
+              <td>{editingRepairIndex === i
+                ? <input value={editingRepair.price} onChange={(e) => setEditingRepair({ ...editingRepair, price: e.target.value })} />
+                : `${r.price} kr`}</td>
+              <td>{editingRepairIndex === i
+                ? <input value={editingRepair.time} onChange={(e) => setEditingRepair({ ...editingRepair, time: e.target.value })} />
+                : `${r.time}`}</td>
+              <td>
+                {editingRepairIndex === i ? (
+                  <button onClick={() => saveEditedRepair(i)}>✔️</button>
+                ) : (
+                  <>
+                    <button onClick={() => startEditingRepair(i)}><FaEdit /></button>
+                    <button onClick={() => removeRepair(i)}><FaTrashAlt /></button>
+                  </>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )}
 
-          {order.repairs.length === 0 ? (
-            <p>Ingen reparationer valgt endnu.</p>
-          ) : (
-            <>
-              {order.repairs.map((r, i) => (
-                <div key={i} style={{ marginBottom: "1rem", borderBottom: "1px solid #eee", paddingBottom: "0.5rem" }}>
-                  <strong>{r.device}</strong><br />
-                  {r.repair}<br />
-                  <small>{r.price} kr • {r.time} min</small>
-                </div>
-              ))}
-              <p><strong>Samlet:</strong> {order.repairs.reduce((sum, r) => sum + r.price, 0)} kr • {order.repairs.reduce((sum, r) => sum + r.time, 0)} min</p>
-            </>
-          )}
-
-          {/* Kundevisning */}
-          {order.customer && (
-            <div style={{ marginTop: "1rem", padding: "0.5rem", backgroundColor: "#f9f9f9", borderRadius: "6px" }}>
-              <strong>{order.customer.name}</strong><br />
-              📞 {order.customer.phone}<br />
-              ✉️ {order.customer.email || "-"}
-              <div style={{ marginTop: "0.5rem" }}>
-                <button style={smallButtonStyle} onClick={() => setOpenEditCustomer(true)}>✏️ Rediger</button>
-                <button style={smallButtonStyle} onClick={handleRemoveCustomer}>🗑️ Fjern</button>
-              </div>
-            </div>
-          )}
-
-          {/* Kundehandlinger */}
-          {!order.customer && (
-            <>
-              <button style={buttonStyle} onClick={() => setOpenCreateCustomer(true)}>➕ Opret kunde</button>
-              <button style={buttonStyle} onClick={() => setOpenSelectCustomer(true)}>👤 Vælg kunde</button>
-            </>
-          )}
-
-          {/* Adgangskode + Note */}
-          <div style={{ marginTop: "1rem" }}>
-            <label style={{ fontWeight: "bold", fontSize: "0.9rem" }}>🔒 Adgangskode</label>
-            <input
-              type="text"
-              placeholder="Adgangskode"
-              style={inputStyle}
-              value={order.password || ""}
-              onChange={(e) => setOrder({ ...order, password: e.target.value })}
-            />
-
-            <label style={{ fontWeight: "bold", fontSize: "0.9rem", marginTop: "0.5rem" }}>📝 Note</label>
-            <textarea
-              placeholder="Skriv en note her..."
-              style={{ ...inputStyle, height: "80px", resize: "vertical" }}
-              value={order.note || ""}
-              onChange={(e) => setOrder({ ...order, note: e.target.value })}
-            />
-          </div>
+    {/* KUNDE */}
+    <h4 style={{ textTransform: "uppercase", borderBottom: "1px solid #ddd", marginTop: "2rem", marginBottom: "1rem" }}>Kunde</h4>
+    {order.customer ? (
+      <div style={{ marginBottom: "1rem" }}>
+        <strong>{order.customer.name}</strong><br />
+        <FaPhone /> {order.customer.phone}<br />
+        <FaEnvelope /> {order.customer.email || "-"}
+        <div style={{ marginTop: "0.5rem" }}>
+          <button style={smallButtonStyle} onClick={() => setOpenEditCustomer(true)}><FaEdit /> Rediger</button>
+          <button style={smallButtonStyle} onClick={handleRemoveCustomer}><FaTrashAlt /> Fjern</button>
         </div>
-
-        {/* Fortsæt-knap */}
-        <button
-          onClick={onNext}
-          disabled={order.repairs.length === 0}
-          style={{
-            backgroundColor: "#22b783",
-            color: "white",
-            border: "none",
-            padding: "1rem",
-            borderRadius: "8px",
-            fontWeight: "bold",
-            marginTop: "2rem",
-            width: "100%",
-            fontSize: "1rem"
-          }}
-        >
-          <FaPlus /> Fortsæt
-        </button>
       </div>
+    ) : (
+      <>
+        <button style={buttonStyle} onClick={() => setOpenCreateCustomer(true)}><FaUserPlus /> Opret kunde</button>
+        <button style={buttonStyle} onClick={() => setOpenSelectCustomer(true)}><FaUser /> Vælg kunde</button>
+      </>
+    )}
 
+    {/* NOTE & ADGANGSKODE */}
+    <h4 style={{ textTransform: "uppercase", borderBottom: "1px solid #ddd", marginTop: "2rem", marginBottom: "1rem" }}>Adgangskode & Note</h4>
+    <label style={{ fontWeight: "bold", fontSize: "0.9rem" }}><FaLock /> Adgangskode</label>
+    <input
+      type="text"
+      placeholder="Adgangskode"
+      style={inputStyle}
+      value={order.password || ""}
+      onChange={(e) => setOrder({ ...order, password: e.target.value })}
+    />
+    <label style={{ fontWeight: "bold", fontSize: "0.9rem", marginTop: "0.5rem" }}><FaEdit /> Note</label>
+    <textarea
+      placeholder="Skriv en note her..."
+      style={{ ...inputStyle, height: "80px", resize: "vertical" }}
+      value={order.note || ""}
+      onChange={(e) => setOrder({ ...order, note: e.target.value })}
+    />
+    {/* KNAP – altid synlig */}
+  <div style={{ paddingTop: "1rem" }}>
+    <button style={buttonStyle}
+      onClick={onNext}
+      disabled={order.repairs.length === 0}>
+      <FaPlus /> Fortsæt
+    </button>
+  </div>
+  </div> 
+</div>
       {/* Modaler */}
       <RepairModal
         device={modalDevice}
