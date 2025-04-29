@@ -33,6 +33,8 @@ export default function NewRepair() {
           repairs={availableRepairs}
           order={order}
           setOrder={setOrder}
+          customers={customers}
+          setCustomers={setCustomers}
           onNext={() => setStep(2)}
         />
       )}

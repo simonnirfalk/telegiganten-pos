@@ -4,12 +4,18 @@ import { FaHome, FaTrashAlt, FaEdit, FaPlus } from "react-icons/fa";
 import devices from "../data/devices.json";
 import repairs from "../data/repairs.json";
 import RepairModal from "../components/RepairModal";
+import CreateCustomerModal from "../components/CreateCustomerModal";
+import SelectCustomerModal from "../components/SelectCustomerModal";
+import EditCustomerModal from "../components/EditCustomerModal";
 
-export default function Step1_AddRepairToOrder({ order, setOrder, onNext }) {
+export default function Step1_AddRepairToOrder({ order, setOrder, onNext, customers, setCustomers }) {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
   const [modalDevice, setModalDevice] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState("Alle");
+  const [openCreateCustomer, setOpenCreateCustomer] = useState(false);
+  const [openSelectCustomer, setOpenSelectCustomer] = useState(false);
+  const [openEditCustomer, setOpenEditCustomer] = useState(false);
 
   const categories = ["Alle", "iPhone", "Samsung", "Motorola", "iPad", "MacBook"];
 
@@ -26,6 +32,17 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext }) {
     width: "100%",
     justifyContent: "center",
     marginBottom: "0.5rem"
+  };
+
+  const smallButtonStyle = {
+    backgroundColor: "#ccc",
+    color: "#333",
+    padding: "0.3rem 0.6rem",
+    borderRadius: "6px",
+    border: "none",
+    cursor: "pointer",
+    fontSize: "0.8rem",
+    marginRight: "0.5rem"
   };
 
   const deviceStyle = {
@@ -72,11 +89,50 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext }) {
     });
   };
 
+  const handleCreateCustomer = (newCustomer) => {
+    setCustomers([...customers, newCustomer]);
+    setOrder({ ...order, customer: newCustomer });
+    setOpenCreateCustomer(false);
+  };
+
+  const handleSelectCustomer = (selectedCustomer) => {
+    setOrder({ ...order, customer: selectedCustomer });
+    setOpenSelectCustomer(false);
+  };
+
+  const handleSaveCustomer = (editedCustomer) => {
+    const updatedCustomers = customers.map(c =>
+      c.id === editedCustomer.id ? editedCustomer : c
+    );
+    setCustomers(updatedCustomers);
+    setOrder({ ...order, customer: editedCustomer });
+    setOpenEditCustomer(false);
+  };
+
+  const handleRemoveCustomer = () => {
+    setOrder({ ...order, customer: null });
+  };
+
   return (
     <div style={{ display: "flex", height: "calc(100vh - 80px)", overflow: "hidden" }}>
       {/* Venstre side */}
       <div style={{ flex: 1, padding: "2rem", overflowY: "auto" }}>
-        <button onClick={() => navigate("/")} style={{ ...buttonStyle, marginBottom: "2rem" }}>
+        <button
+          onClick={() => navigate("/")}
+          style={{
+            backgroundColor: "#2166AC",
+            color: "white",
+            padding: "0.4rem 1rem",
+            borderRadius: "6px",
+            border: "none",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            marginBottom: "1rem",
+            width: "fit-content"
+          }}
+        >
           <FaHome /> Dashboard
         </button>
 
@@ -165,17 +221,45 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext }) {
             </>
           )}
 
+          {/* Kundevisning */}
+          {order.customer && (
+            <div style={{ marginTop: "1rem", padding: "0.5rem", backgroundColor: "#f9f9f9", borderRadius: "6px" }}>
+              <strong>{order.customer.name}</strong><br />
+              📞 {order.customer.phone}<br />
+              ✉️ {order.customer.email || "-"}
+              <div style={{ marginTop: "0.5rem" }}>
+                <button style={smallButtonStyle} onClick={() => setOpenEditCustomer(true)}>✏️ Rediger</button>
+                <button style={smallButtonStyle} onClick={handleRemoveCustomer}>🗑️ Fjern</button>
+              </div>
+            </div>
+          )}
+
           {/* Kundehandlinger */}
-          <button style={buttonStyle}>Opret kunde</button>
-          <button style={buttonStyle}>Vælg kunde</button>
+          {!order.customer && (
+            <>
+              <button style={buttonStyle} onClick={() => setOpenCreateCustomer(true)}>➕ Opret kunde</button>
+              <button style={buttonStyle} onClick={() => setOpenSelectCustomer(true)}>👤 Vælg kunde</button>
+            </>
+          )}
 
           {/* Adgangskode + Note */}
           <div style={{ marginTop: "1rem" }}>
             <label style={{ fontWeight: "bold", fontSize: "0.9rem" }}>🔒 Adgangskode</label>
-            <input type="text" placeholder="Adgangskode" style={inputStyle} />
+            <input
+              type="text"
+              placeholder="Adgangskode"
+              style={inputStyle}
+              value={order.password || ""}
+              onChange={(e) => setOrder({ ...order, password: e.target.value })}
+            />
 
             <label style={{ fontWeight: "bold", fontSize: "0.9rem", marginTop: "0.5rem" }}>📝 Note</label>
-            <textarea placeholder="Skriv en note her..." style={{ ...inputStyle, height: "80px", resize: "vertical" }} />
+            <textarea
+              placeholder="Skriv en note her..."
+              style={{ ...inputStyle, height: "80px", resize: "vertical" }}
+              value={order.note || ""}
+              onChange={(e) => setOrder({ ...order, note: e.target.value })}
+            />
           </div>
         </div>
 
@@ -199,13 +283,33 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext }) {
         </button>
       </div>
 
-      {/* Modal */}
+      {/* Modaler */}
       <RepairModal
         device={modalDevice}
         repairs={repairs.filter(r => r.deviceId === modalDevice?.id)}
         onAdd={handleAddRepair}
         onClose={() => setModalDevice(null)}
       />
+      {openCreateCustomer && (
+        <CreateCustomerModal
+          onCreate={handleCreateCustomer}
+          onClose={() => setOpenCreateCustomer(false)}
+        />
+      )}
+      {openSelectCustomer && (
+        <SelectCustomerModal
+          customers={customers}
+          onSelect={handleSelectCustomer}
+          onClose={() => setOpenSelectCustomer(false)}
+        />
+      )}
+      {openEditCustomer && order.customer && (
+        <EditCustomerModal
+          customer={order.customer}
+          onSave={handleSaveCustomer}
+          onClose={() => setOpenEditCustomer(false)}
+        />
+      )}
     </div>
   );
 }
