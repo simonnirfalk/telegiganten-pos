@@ -21,8 +21,8 @@ export default function Dashboard() {
       {/* Top-knapper */}
       <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap", marginBottom: "2rem" }}>
         <div onClick={() => navigate("/opret")} style={navBoxStyle}>Opret reparation</div>
-        <div style={navBoxStyle}>Bookinger</div>
-        <div style={navBoxStyle}>Kunder</div>
+        <div onClick={() => navigate("/bookings")} style={navBoxStyle}>Bookinger</div>
+        <div onClick={() => navigate("/customers")} style={navBoxStyle}>Kunder</div>
         <div style={navBoxStyle}>Priser</div>
         <div style={navBoxStyle}>Reservedele</div>
       </div>
