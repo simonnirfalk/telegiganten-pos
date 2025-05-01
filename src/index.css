@@ -74,3 +74,17 @@ a {
 a:hover {
   text-decoration: underline;
 }
+
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+
+  .receipt {
+    visibility: visible !important;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+  }
+}
