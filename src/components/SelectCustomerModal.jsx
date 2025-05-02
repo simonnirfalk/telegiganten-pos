@@ -1,13 +1,23 @@
 // SelectCustomerModal.jsx
 import React, { useState, useEffect } from "react";
 
-export default function SelectCustomerModal({ customers, onSelect, onClose }) {
+export default function SelectCustomerModal({ onSelect, onClose }) {
   const [searchTerm, setSearchTerm] = useState("");
+  const [fetchedCustomers, setFetchedCustomers] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const filteredCustomers = customers.filter(c =>
-    c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.phone.includes(searchTerm)
-  );
+  useEffect(() => {
+    fetch("https://telegiganten.dk/wp-json/telegiganten/v1/customers")
+      .then(res => res.json())
+      .then(data => {
+        setFetchedCustomers(data);
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error("Fejl ved hentning af kunder:", err);
+        setLoading(false);
+      });
+  }, []);
 
   useEffect(() => {
     const handleKey = (e) => {
@@ -16,6 +26,11 @@ export default function SelectCustomerModal({ customers, onSelect, onClose }) {
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, [onClose]);
+
+  const filteredCustomers = fetchedCustomers.filter(c =>
+    c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (c.phone && c.phone.includes(searchTerm))
+  );
 
   return (
     <div
@@ -51,7 +66,9 @@ export default function SelectCustomerModal({ customers, onSelect, onClose }) {
           style={{ marginBottom: "1rem", width: "100%", padding: "0.5rem" }}
         />
 
-        {filteredCustomers.length === 0 ? (
+        {loading ? (
+          <p>Indlæser kunder...</p>
+        ) : filteredCustomers.length === 0 ? (
           <p>Ingen kunder matcher.</p>
         ) : (
           filteredCustomers.map((c) => (
@@ -72,7 +89,7 @@ export default function SelectCustomerModal({ customers, onSelect, onClose }) {
               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
             >
               <strong>{c.name}</strong><br />
-              {c.phone} • {c.email}
+              {c.phone} • {c.email || "-"}
             </div>
           ))
         )}

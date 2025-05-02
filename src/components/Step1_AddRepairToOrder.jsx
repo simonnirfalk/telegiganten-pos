@@ -1,18 +1,17 @@
+// Step1_AddRepairToOrder.jsx
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaPlus, FaEdit, FaTrashAlt, FaPhone, FaEnvelope, FaUserPlus, FaUser, FaHome, FaLock } from "react-icons/fa";
-import devices from "../data/devices.json";
-import repairs from "../data/repairs.json";
 import RepairModal from "../components/RepairModal";
 import CreateCustomerModal from "../components/CreateCustomerModal";
 import SelectCustomerModal from "../components/SelectCustomerModal";
 import EditCustomerModal from "../components/EditCustomerModal";
+import { useRepairContext } from "../context/RepairContext";
 
-// Generér ordre-ID
 function generateOrderId() {
   const last = Number(localStorage.getItem("lastOrderId") || 0) + 1;
   localStorage.setItem("lastOrderId", last);
-  return `40${String(last).padStart(3, "0")}`; // fx 40001
+  return `40${String(last).padStart(3, "0")}`;
 }
 
 export default function Step1_AddRepairToOrder({ order, setOrder, onNext, customers, setCustomers }) {
@@ -26,21 +25,29 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
   const [editingRepairIndex, setEditingRepairIndex] = useState(null);
   const [editingRepair, setEditingRepair] = useState({});
 
-  // Sæt ordre-id ved første load, hvis det mangler
+  const { data: repairStructure, loading } = useRepairContext();
+
   useEffect(() => {
     if (!order.id) {
       setOrder((prev) => ({ ...prev, id: generateOrderId() }));
     }
   }, [order.id, setOrder]);
 
-  const categories = ["Alle", "iPhone", "Samsung", "Motorola", "iPad", "MacBook"];
-
-  const dummyCustomer = {
-    id: "test-kunde",
-    name: "Test Kunde",
-    phone: "12345678",
-    email: "test@telegiganten.dk"
-  };
+  useEffect(() => {
+    fetch("https://telegiganten.dk/wp-json/wp/v2/telegiganten_customer?per_page=100")
+      .then(res => res.json())
+      .then(data => {
+        const mapped = data.map(c => ({
+          id: c.id,
+          name: c.title.rendered,
+          phone: c.meta?.phone || "",
+          email: c.meta?.email || "",
+          extraPhone: c.meta?.extra_phone || ""
+        }));
+        setCustomers(mapped);
+      })
+      .catch(err => console.error("Fejl ved hentning af kunder:", err));
+  }, []);
 
   const buttonStyle = {
     backgroundColor: "#2166AC",
@@ -92,31 +99,94 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
     fontSize: "0.9rem"
   };
 
-  const filteredDevices = devices
-    .filter((d) => {
-      const matchesSearch = d.name.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesCategory = selectedCategory === "Alle" || d.name.toLowerCase().includes(selectedCategory.toLowerCase());
-      return matchesSearch && matchesCategory;
-    })
-    .slice(0, searchTerm || selectedCategory !== "Alle" ? undefined : 20);
+  const popularModelNames = [
+    "iPhone 11", "iPhone 12", "iPhone 13", "iPhone 14", "iPhone 15",
+    "iPhone 11 Pro", "iPhone 12 Mini", "iPhone 13 Pro Max", "iPhone 14 Plus", "iPhone 15 Pro",
+    "Samsung Galaxy S20 FE", "Samsung Galaxy S21+", "Samsung Galaxy S22", "Samsung Galaxy S23 Ultra", "Samsung Galaxy S24",
+    "Samsung Galaxy A55", "Samsung Galaxy A34", "Samsung Galaxy A14", "Samsung Galaxy A54", "Samsung Galaxy A72",
+    "iPad 10.2 (2021)", "iPad Pro 11 (2018)",
+    "MacBook Pro 13 inch A1708", "MacBook Air 13 inch, A2179",
+    "Motorola Moto G54"
+  ];
+
+  const customCategoryOrder = [
+    "Alle", "iPhone", "Samsung", "iPad", "MacBook", "iMac", "Samsung Galaxy Tab", "Motorola",
+    "OnePlus", "Nokia", "Huawei", "Xiaomi", "Sony Xperia", "Oppo", "Microsoft", "Honor",
+    "Google Pixel", "Apple Watch", "Samsung Book", "Huawei tablet"
+  ];
+
+  const allCategories = customCategoryOrder.filter(cat =>
+    cat === "Alle" || repairStructure.some(b => b.title === cat)
+  );
+
+  const brandsFiltered = selectedCategory === "Alle"
+    ? repairStructure.filter(b => b.models.some(m => popularModelNames.includes(m.title)))
+    : repairStructure.filter(b => b.title === selectedCategory);
+
+  const filteredModels = brandsFiltered.flatMap(b => b.models)
+    .filter(m => selectedCategory !== "Alle" || popularModelNames.includes(m.title))
+    .filter(m => m.title.toLowerCase().includes(searchTerm.toLowerCase()))
+    .sort((a, b) => {
+      if (selectedCategory === "Alle") {
+        return popularModelNames.indexOf(a.title) - popularModelNames.indexOf(b.title);
+      }
+      return 0;
+    });
 
   const handleAddRepair = (deviceName, repair) => {
+    if (repair.model_id) {
+      fetch("https://telegiganten.dk/wp-json/telegiganten/v1/increment-model-usage", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ model_id: repair.model_id })
+      }).catch(err => console.error("Fejl ved opdatering af model-usage:", err));
+    }
+
     setOrder({
       ...order,
       repairs: [...order.repairs, {
         device: deviceName,
-        repair: repair.name,
+        repair: repair.title,
         price: repair.price,
         time: repair.time
       }]
     });
   };
 
-  const handleCreateCustomer = (newCustomer) => {
-    setCustomers([...customers, newCustomer]);
-    setOrder({ ...order, customer: newCustomer });
-    setOpenCreateCustomer(false);
+  const dummyCustomer = {
+    id: "test-kunde",
+    name: "Test Kunde",
+    phone: "12345678",
+    email: "test@telegiganten.dk"
   };
+
+  const handleCreateCustomer = (newCustomer) => {
+    fetch("https://telegiganten.dk/wp-json/telegiganten/v1/create-customer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(newCustomer)
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === "created" || data.status === "exists") {
+          const savedCustomer = {
+            ...newCustomer,
+            id: data.customer_id
+          };
+          setCustomers(prev => [...prev, savedCustomer]);
+          setOrder(prev => ({ ...prev, customer: savedCustomer }));
+        } else {
+          console.error("Uventet svar fra server:", data);
+        }
+        setOpenCreateCustomer(false);
+      })
+      .catch(err => {
+        console.error("Fejl ved oprettelse af kunde:", err);
+      });
+  };
+  
 
   const handleSelectCustomer = (selectedCustomer) => {
     setOrder({ ...order, customer: selectedCustomer });
@@ -156,7 +226,6 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
 
   return (
     <div style={{ display: "flex", height: "calc(100vh - 80px)", overflow: "hidden" }}>
-      {/* Venstre side */}
       <div style={{ flex: 1, padding: "2rem", overflowY: "auto" }}>
         <button onClick={() => navigate("/")} style={{ ...buttonStyle, width: "fit-content" }}>
           <FaHome /> Dashboard
@@ -165,7 +234,7 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
         <div style={{ display: "flex", gap: "1rem", marginBottom: "1rem" }}>
           <div style={{ width: "160px" }}>
             <h4 style={{ textTransform: "uppercase" }}>Kategorier</h4>
-            {categories.map((cat) => (
+            {allCategories.map((cat) => (
               <div
                 key={cat}
                 onClick={() => setSelectedCategory(cat)}
@@ -193,24 +262,26 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
               onChange={(e) => setSearchTerm(e.target.value)}
               style={inputStyle}
             />
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-              gap: "1rem",
-              marginTop: "1rem"
-            }}>
-              {filteredDevices.map((device) => (
-                <div
-                  key={device.id}
-                  style={deviceStyle}
-                  onClick={() => setModalDevice(device)}
-                  onMouseEnter={(e) => e.currentTarget.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.1)"}
-                  onMouseLeave={(e) => e.currentTarget.style.boxShadow = "none"}
-                >
-                  {device.name}
-                </div>
-              ))}
-            </div>
+            {loading ? <p>Indlæser modeller...</p> : (
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                gap: "1rem",
+                marginTop: "1rem"
+              }}>
+                {filteredModels.map((model) => (
+                  <div
+                    key={model.id}
+                    style={deviceStyle}
+                    onClick={() => setModalDevice(model)}
+                    onMouseEnter={(e) => e.currentTarget.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.1)"}
+                    onMouseLeave={(e) => e.currentTarget.style.boxShadow = "none"}
+                  >
+                    {model.title}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -324,13 +395,16 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
   </div>
   </div> 
 </div>
-      {/* Modaler */}
+
       <RepairModal
         device={modalDevice}
-        repairs={repairs.filter(r => r.deviceId === modalDevice?.id)}
+        repairs={repairStructure
+          .flatMap(brand => brand.models)
+          .find(model => model.id === modalDevice?.id)?.repairs || []}
         onAdd={handleAddRepair}
         onClose={() => setModalDevice(null)}
-      />
+/>
+
       {openCreateCustomer && (
         <CreateCustomerModal
           onCreate={handleCreateCustomer}

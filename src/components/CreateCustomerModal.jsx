@@ -11,7 +11,7 @@ export default function CreateCustomerModal({ onClose, onCreate, customers = [] 
 
   const handleChange = (field, value) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
-    setErrors((prev) => ({ ...prev, [field]: "" })); // Ryd fejl ved indtastning
+    setErrors((prev) => ({ ...prev, [field]: "" }));
   };
 
   const validatePhone = (phone) => {
@@ -20,7 +20,7 @@ export default function CreateCustomerModal({ onClose, onCreate, customers = [] 
   };
 
   const validateEmail = (email) => {
-    if (!email) return true; // E-mail er valgfri
+    if (!email) return true;
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   };
 
@@ -32,7 +32,6 @@ export default function CreateCustomerModal({ onClose, onCreate, customers = [] 
     if (formData.extraPhone && !validatePhone(formData.extraPhone)) newErrors.extraPhone = "Ugyldigt ekstra telefonnummer.";
     if (!validateEmail(formData.email)) newErrors.email = "Ugyldig e-mailadresse.";
 
-    // Tjek om telefonnummer allerede findes
     const exists = customers.find(c => c.phone.replace(/\s+/g, "") === formData.phone.replace(/\s+/g, ""));
     if (exists) {
       newErrors.phone = `Telefonnummer findes allerede: ${exists.name}`;
@@ -43,12 +42,29 @@ export default function CreateCustomerModal({ onClose, onCreate, customers = [] 
       return;
     }
 
-    const newCustomer = { ...formData, id: Date.now() };
-
-    if (onCreate) {
-      onCreate(newCustomer);
-    }
-    onClose();
+    // 🟢 API-kald til WordPress for at oprette kunde
+    fetch("https://telegiganten.dk/wp-json/telegiganten/v1/create-customer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(formData)
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === "created" || data.status === "exists") {
+          const newCustomer = {
+            id: data.customer_id,
+            ...formData
+          };
+          if (onCreate) onCreate(newCustomer);
+          onClose();
+        } else {
+          alert("Uventet svar fra serveren: " + JSON.stringify(data));
+        }
+      })
+      .catch(err => {
+        console.error("Fejl ved oprettelse af kunde:", err);
+        alert("Der opstod en fejl under oprettelsen.");
+      });
   };
 
   return (

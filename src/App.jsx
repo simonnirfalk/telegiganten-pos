@@ -4,9 +4,10 @@ import NewRepair from "./pages/NewRepair";
 import BookingsPage from "./pages/BookingsPage";
 import CustomersPage from "./pages/CustomersPage";
 import CustomerDetailPage from "./pages/CustomerDetailPage";
+import { RepairProvider } from "./context/RepairContext"; // ← stadig importeret
+import useRepairData from "./hooks/useRepairData";
 
 export default function App() {
-  // Tilføj dummy data her:
   const customers = [
     {
       id: 1,
@@ -61,29 +62,31 @@ export default function App() {
   ];
 
   return (
-    <div style={{ fontFamily: "Inter, sans-serif", background: "#f8f8f8", minHeight: "100vh" }}>
-      <header style={{
-        display: "flex",
-        justifyContent: "flex-start",
-        alignItems: "center",
-        padding: "1rem 2rem",
-        backgroundColor: "white",
-        boxShadow: "0 1px 4px rgba(0,0,0,0.05)"
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
-          <img src="/logo.png" alt="Telegiganten" style={{ height: 40 }} />
-        </div>
-      </header>
+    <RepairProvider> {/* ← WRAP HELE APP'EN HER */}
+      <div style={{ fontFamily: "Inter, sans-serif", background: "#f8f8f8", minHeight: "100vh" }}>
+        <header style={{
+          display: "flex",
+          justifyContent: "flex-start",
+          alignItems: "center",
+          padding: "1rem 2rem",
+          backgroundColor: "white",
+          boxShadow: "0 1px 4px rgba(0,0,0,0.05)"
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+            <img src="/logo.png" alt="Telegiganten" style={{ height: 40 }} />
+          </div>
+        </header>
 
-      <main style={{ padding: "2rem" }}>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/opret" element={<NewRepair />} />
-          <Route path="/bookings" element={<BookingsPage />} />
-          <Route path="/customers" element={<CustomersPage customers={customers} />} />
-          <Route path="/customers/:id" element={<CustomerDetailPage customers={customers} bookings={bookings} />} />
-        </Routes>
-      </main>
-    </div>
+        <main style={{ padding: "2rem" }}>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/opret" element={<NewRepair />} />
+            <Route path="/bookings" element={<BookingsPage />} />
+            <Route path="/customers" element={<CustomersPage customers={customers} />} />
+            <Route path="/customers/:id" element={<CustomerDetailPage customers={customers} bookings={bookings} />} />
+          </Routes>
+        </main>
+      </div>
+    </RepairProvider>
   );
 }
