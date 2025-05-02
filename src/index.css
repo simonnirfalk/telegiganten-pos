@@ -78,13 +78,28 @@ a:hover {
 @media print {
   body * {
     visibility: hidden !important;
+    height: 0 !important;
+    overflow: hidden !important;
+    position: absolute !important;
+  }
+
+  .receipt,
+  .receipt * {
+    visibility: visible !important;
   }
 
   .receipt {
     visibility: visible !important;
-    position: absolute;
+    position: fixed !important;
     top: 0;
     left: 0;
-    width: 100%;
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: white !important;
+    z-index: 9999 !important;
+    padding: 2rem !important;
+
   }
 }
+

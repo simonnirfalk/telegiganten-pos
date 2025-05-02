@@ -7,28 +7,99 @@ import {
   FaLock,
   FaStickyNote
 } from "react-icons/fa";
-import RepairSlip from "./RepairSlip";
-
 
 export default function Step2_ReviewAndPayment({ order, onBack, onSubmit }) {
   const navigate = useNavigate();
   const [paymentType, setPaymentType] = useState("efter");
   const [depositAmount, setDepositAmount] = useState("");
-  const [showSlip, setShowSlip] = useState(false);
 
-  const handleSubmitAndPrint = () => {
-    setShowSlip(true);
-  
-    setTimeout(() => {
-      window.print();
-      setShowSlip(false);
-      onSubmit(); // evt. gem ordre
-    }, 300);
-  };
-  
   const totalPrice = order.repairs.reduce((sum, r) => sum + (r.price || 0), 0);
   const remaining = Math.max(totalPrice - parseInt(depositAmount || 0, 10), 0);
   const today = new Date().toLocaleDateString("da-DK");
+
+  const handleSubmitAndPrint = () => {
+    const receiptWindow = window.open("", "_blank", "width=800,height=600");
+  
+    const receiptHtml = `
+      <html>
+        <head>
+          <title>Reparationskvittering</title>
+          <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              padding: 2rem;
+            }
+            h1 { margin: 0; }
+            .line { border-top: 1px dashed #ccc; margin: 1rem 0; }
+            svg { margin-top: 1rem; }
+          </style>
+        </head>
+        <body>
+          <h1>Telegiganten</h1>
+          <p>Taastrup Hovedgade 123, 2630 Taastrup<br />
+          Tlf: 70 80 90 00 · kontakt@telegiganten.dk<br />
+          Åbent: Man–Fre 10–18, Lør 10–15</p>
+  
+          <div class="line"></div>
+  
+          <p><strong>Ordre-ID:</strong> #${order.id || "-"}<br />
+          <strong>Dato:</strong> ${new Date().toLocaleDateString("da-DK")}</p>
+  
+          <div class="line"></div>
+  
+          <p><strong>Kunde:</strong><br />
+          ${order.customer?.name || "-"}<br />
+          ${order.customer?.phone || "-"}<br />
+          ${order.customer?.email || "-"}</p>
+  
+          <div class="line"></div>
+  
+          <p><strong>Reparation:</strong><br />
+          ${order.repairs.map(r => `
+            <div>
+              <strong>${r.device}</strong><br />
+              ${r.repair} · ${r.price} kr · ${r.time} min
+            </div>
+          `).join("<br />")}
+          </p>
+  
+          <div class="line"></div>
+  
+          <p><strong>Adgangskode:</strong> ${order.password || "-"}<br />
+          <strong>Note:</strong> ${order.note || "-"}</p>
+  
+          <div class="line"></div>
+  
+          <p><strong>Total:</strong> ${order.repairs.reduce((sum, r) => sum + (r.price || 0), 0)} kr</p>
+  
+          <svg id="barcode"></svg>
+  
+          <script>
+            window.onload = function() {
+              JsBarcode("#barcode", "${order.id || "00000"}", {
+                format: "CODE128",
+                lineColor: "#000",
+                width: 2,
+                height: 50,
+                displayValue: true
+              });
+              window.print();
+              window.onafterprint = function() {
+                window.close();
+              };
+            };
+          </script>
+        </body>
+      </html>
+    `;
+  
+    receiptWindow.document.write(receiptHtml);
+    receiptWindow.document.close();
+  
+    onSubmit();
+  };
+  
 
   const cardStyle = (active) => ({
     border: active ? "2px solid #2166AC" : "1px solid #ddd",
@@ -40,20 +111,12 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit }) {
     cursor: "pointer",
     boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
     transition: "all 0.2s ease"
-    
   });
 
   return (
-      <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
-      {/* Venstre side – kvittering */}
-      <div
-        style={{
-          flex: 1,
-          padding: "2rem",
-          backgroundColor: "#f5f5f5",
-          overflowY: "auto"
-        }}
-      >
+    <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
+      {/* Venstre side – kvitteringsopsummering */}
+      <div style={{ flex: 1, padding: "2rem", backgroundColor: "#f5f5f5", overflowY: "auto" }}>
         <button
           onClick={() => navigate("/")}
           style={{
@@ -72,32 +135,13 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit }) {
           <FaHome /> Dashboard
         </button>
 
-        <div
-          style={{
-            backgroundColor: "#fff",
-            borderRadius: "12px",
-            padding: "2rem",
-            boxShadow: "0 2px 10px rgba(0,0,0,0.05)"
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              marginBottom: "1.5rem"
-            }}
-          >
+        <div style={{ backgroundColor: "#fff", borderRadius: "12px", padding: "2rem", boxShadow: "0 2px 10px rgba(0,0,0,0.05)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1.5rem" }}>
             <div>
               <h4 style={{ margin: 0, fontWeight: "bold" }}>👤 Kunde</h4>
               <p style={{ margin: 0 }}>{order.customer?.name || "-"}</p>
-              <p style={{ margin: 0 }}>
-                <FaPhone style={{ marginRight: "0.5rem" }} />
-                {order.customer?.phone || "-"}
-              </p>
-              <p style={{ margin: 0 }}>
-                <FaEnvelope style={{ marginRight: "0.5rem" }} />
-                {order.customer?.email || "-"}
-              </p>
+              <p style={{ margin: 0 }}><FaPhone style={{ marginRight: "0.5rem" }} />{order.customer?.phone || "-"}</p>
+              <p style={{ margin: 0 }}><FaEnvelope style={{ marginRight: "0.5rem" }} />{order.customer?.email || "-"}</p>
             </div>
             <div style={{ textAlign: "right", fontSize: "0.9rem", color: "#555" }}>
               <p style={{ margin: 0 }}>Dato: {today}</p>
@@ -110,15 +154,9 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit }) {
           <div>
             <h4 style={{ fontWeight: "bold" }}>🔧 Reparation</h4>
             {order.repairs.map((r, i) => (
-              <div
-                key={i}
-                style={{ padding: "0.5rem 0", borderBottom: "1px solid #eee" }}
-              >
-                <strong>{r.device}</strong>
-                <br />
-                <span style={{ color: "#555" }}>
-                  {r.repair} • {r.price} kr • {r.time} min
-                </span>
+              <div key={i} style={{ padding: "0.5rem 0", borderBottom: "1px solid #eee" }}>
+                <strong>{r.device}</strong><br />
+                <span style={{ color: "#555" }}>{r.repair} • {r.price} kr • {r.time} min</span>
               </div>
             ))}
             <div style={{ marginTop: "1rem", fontWeight: "bold" }}>
@@ -129,76 +167,39 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit }) {
           <hr style={{ margin: "1.5rem 0" }} />
 
           <div>
-            <h4 style={{ fontWeight: "bold" }}>
-              <FaLock style={{ marginRight: "0.5rem" }} />
-              Adgangskode
-            </h4>
+            <h4 style={{ fontWeight: "bold" }}><FaLock style={{ marginRight: "0.5rem" }} />Adgangskode</h4>
             <p>{order.password || "-"}</p>
-
-            <h4 style={{ fontWeight: "bold" }}>
-              <FaStickyNote style={{ marginRight: "0.5rem" }} />
-              Note
-            </h4>
+            <h4 style={{ fontWeight: "bold" }}><FaStickyNote style={{ marginRight: "0.5rem" }} />Note</h4>
             <p>{order.note || "-"}</p>
           </div>
         </div>
       </div>
 
       {/* Højre side – betalingsvalg */}
-      <div
-        style={{
-          flex: 1,
-          padding: "2rem",
-          backgroundColor: "#f9f9f9",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "space-between"
-        }}
-      >
+      <div style={{
+        flex: 1,
+        padding: "2rem",
+        backgroundColor: "#f9f9f9",
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "space-between"
+      }}>
         <div>
-          <h3
-            style={{
-              textTransform: "uppercase",
-              fontWeight: "bold",
-              marginBottom: "1.5rem"
-            }}
-          >
-            Betaling
-          </h3>
+          <h3 style={{ textTransform: "uppercase", fontWeight: "bold", marginBottom: "1.5rem" }}>Betaling</h3>
 
-          {/* Kortvalg */}
-          <div
-            onClick={() => setPaymentType("efter")}
-            style={cardStyle(paymentType === "efter")}
-          >
-            Betaling efter reparation
-            <br />
-            <small>{totalPrice} kr</small>
+          <div onClick={() => setPaymentType("efter")} style={cardStyle(paymentType === "efter")}>
+            Betaling efter reparation<br /><small>{totalPrice} kr</small>
           </div>
-
-          <div
-            onClick={() => setPaymentType("betalt")}
-            style={cardStyle(paymentType === "betalt")}
-          >
-            Allerede betalt
-            <br />
-            <small>{totalPrice} kr</small>
+          <div onClick={() => setPaymentType("betalt")} style={cardStyle(paymentType === "betalt")}>
+            Allerede betalt<br /><small>{totalPrice} kr</small>
           </div>
-
-          <div
-            onClick={() => setPaymentType("depositum")}
-            style={cardStyle(paymentType === "depositum")}
-          >
-            Delvis betalt (depositum)
-            <br />
-            <small>Indtast forudbetalt beløb nedenfor</small>
+          <div onClick={() => setPaymentType("depositum")} style={cardStyle(paymentType === "depositum")}>
+            Delvis betalt (depositum)<br /><small>Indtast forudbetalt beløb nedenfor</small>
           </div>
 
           {paymentType === "depositum" && (
             <div style={{ marginTop: "1rem", marginBottom: "1.5rem" }}>
-              <label>
-                <strong>Beløb forudbetalt:</strong>
-              </label>
+              <label><strong>Beløb forudbetalt:</strong></label>
               <input
                 type="number"
                 min="0"
@@ -213,20 +214,14 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit }) {
                   border: "1px solid #ccc"
                 }}
               />
-              <p style={{ marginTop: "0.5rem" }}>
-                <strong>Mangler:</strong> {remaining} kr
-              </p>
+              <p style={{ marginTop: "0.5rem" }}><strong>Mangler:</strong> {remaining} kr</p>
             </div>
           )}
 
-          <div
-            onClick={() => setPaymentType("garanti")}
-            style={cardStyle(paymentType === "garanti")}
-          >
+          <div onClick={() => setPaymentType("garanti")} style={cardStyle(paymentType === "garanti")}>
             Garanti (ingen betaling)
           </div>
 
-          {/* Totalvisning */}
           <div style={{ marginTop: "2rem", fontWeight: "bold" }}>
             <p>
               Total:{" "}
@@ -239,30 +234,25 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit }) {
           </div>
         </div>
 
-{/* Knap */}
-<div>
-  <button
-    onClick={handleSubmitAndPrint} // ← BRUG DEN NYE FUNKTION HER
-    style={{
-      backgroundColor: "#22b783",
-      color: "white",
-      padding: "1rem",
-      borderRadius: "8px",
-      fontSize: "1rem",
-      fontWeight: "bold",
-      border: "none",
-      width: "100%"
-    }}
-  >
-    Opret og print
-  </button>
-</div>
-
+        {/* Knap */}
+        <div>
+          <button
+            onClick={handleSubmitAndPrint}
+            style={{
+              backgroundColor: "#22b783",
+              color: "white",
+              padding: "1rem",
+              borderRadius: "8px",
+              fontSize: "1rem",
+              fontWeight: "bold",
+              border: "none",
+              width: "100%"
+            }}
+          >
+            Opret og print
+          </button>
+        </div>
       </div>
-      <div style={{ marginTop: "3rem" }}>
-  <RepairSlip order={order} />
-</div>
-{showSlip && <RepairSlip order={{ ...order, payment: paymentType }} />}
     </div>
   );
 }

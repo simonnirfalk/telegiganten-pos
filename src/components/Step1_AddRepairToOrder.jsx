@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaPlus, FaEdit, FaTrashAlt, FaPhone, FaEnvelope, FaUserPlus, FaUser, FaHome, FaLock } from "react-icons/fa";
 import devices from "../data/devices.json";
@@ -7,6 +7,13 @@ import RepairModal from "../components/RepairModal";
 import CreateCustomerModal from "../components/CreateCustomerModal";
 import SelectCustomerModal from "../components/SelectCustomerModal";
 import EditCustomerModal from "../components/EditCustomerModal";
+
+// Generér ordre-ID
+function generateOrderId() {
+  const last = Number(localStorage.getItem("lastOrderId") || 0) + 1;
+  localStorage.setItem("lastOrderId", last);
+  return `40${String(last).padStart(3, "0")}`; // fx 40001
+}
 
 export default function Step1_AddRepairToOrder({ order, setOrder, onNext, customers, setCustomers }) {
   const navigate = useNavigate();
@@ -19,7 +26,21 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
   const [editingRepairIndex, setEditingRepairIndex] = useState(null);
   const [editingRepair, setEditingRepair] = useState({});
 
+  // Sæt ordre-id ved første load, hvis det mangler
+  useEffect(() => {
+    if (!order.id) {
+      setOrder((prev) => ({ ...prev, id: generateOrderId() }));
+    }
+  }, [order.id, setOrder]);
+
   const categories = ["Alle", "iPhone", "Samsung", "Motorola", "iPad", "MacBook"];
+
+  const dummyCustomer = {
+    id: "test-kunde",
+    name: "Test Kunde",
+    phone: "12345678",
+    email: "test@telegiganten.dk"
+  };
 
   const buttonStyle = {
     backgroundColor: "#2166AC",
@@ -318,7 +339,7 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
       )}
       {openSelectCustomer && (
         <SelectCustomerModal
-          customers={customers}
+          customers={[...customers, dummyCustomer]}
           onSelect={handleSelectCustomer}
           onClose={() => setOpenSelectCustomer(false)}
         />
