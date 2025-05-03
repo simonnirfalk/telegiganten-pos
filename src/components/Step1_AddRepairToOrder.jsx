@@ -34,7 +34,7 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
   }, [order.id, setOrder]);
 
   useEffect(() => {
-    fetch("https://telegiganten.dk/wp-json/wp/v2/telegiganten_customer?per_page=100")
+    fetch("https://telegiganten.dk/wp-json/telegiganten/v1/customers")
       .then(res => res.json())
       .then(data => {
         const mapped = data.map(c => ({
@@ -163,16 +163,28 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
   };
 
   const handleCreateCustomer = (newCustomer) => {
+    const payload = {
+      name: newCustomer.name?.trim(),
+      phone: newCustomer.phone?.replace(/\s+/g, ""),
+      email: newCustomer.email?.trim() || "",
+      extraPhone: newCustomer.extraPhone?.replace(/\s+/g, "") || ""
+    };
+  
+    if (!payload.name || !payload.phone) {
+      console.error("Navn og telefonnummer mangler. Payload:", payload);
+      return;
+    }
+  
     fetch("https://telegiganten.dk/wp-json/telegiganten/v1/create-customer", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(newCustomer)
+      body: JSON.stringify(payload)
     })
       .then(res => res.json())
       .then(data => {
         if (data.status === "created" || data.status === "exists") {
           const savedCustomer = {
-            ...newCustomer,
+            ...payload,
             id: data.customer_id
           };
           setCustomers(prev => [...prev, savedCustomer]);
@@ -186,7 +198,6 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
         console.error("Fejl ved oprettelse af kunde:", err);
       });
   };
-  
 
   const handleSelectCustomer = (selectedCustomer) => {
     setOrder({ ...order, customer: selectedCustomer });

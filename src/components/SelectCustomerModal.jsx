@@ -1,23 +1,32 @@
-// SelectCustomerModal.jsx
 import React, { useState, useEffect } from "react";
 
 export default function SelectCustomerModal({ onSelect, onClose }) {
+  const [customers, setCustomers] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
-  const [fetchedCustomers, setFetchedCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     fetch("https://telegiganten.dk/wp-json/telegiganten/v1/customers")
       .then(res => res.json())
       .then(data => {
-        setFetchedCustomers(data);
-        setLoading(false);
+        if (Array.isArray(data)) {
+          setCustomers(data);
+        } else {
+          throw new Error("Ugyldigt dataformat");
+        }
       })
       .catch(err => {
         console.error("Fejl ved hentning af kunder:", err);
-        setLoading(false);
-      });
+        setError("Kunder kunne ikke hentes.");
+      })
+      .finally(() => setLoading(false));
   }, []);
+
+  const filteredCustomers = customers.filter(c =>
+    (c.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (c.phone || "").includes(searchTerm)
+  );
 
   useEffect(() => {
     const handleKey = (e) => {
@@ -26,11 +35,6 @@ export default function SelectCustomerModal({ onSelect, onClose }) {
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, [onClose]);
-
-  const filteredCustomers = fetchedCustomers.filter(c =>
-    c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (c.phone && c.phone.includes(searchTerm))
-  );
 
   return (
     <div
@@ -58,6 +62,7 @@ export default function SelectCustomerModal({ onSelect, onClose }) {
         }}
       >
         <h2>Vælg kunde</h2>
+
         <input
           type="text"
           placeholder="Søg navn eller telefonnummer"
@@ -66,33 +71,34 @@ export default function SelectCustomerModal({ onSelect, onClose }) {
           style={{ marginBottom: "1rem", width: "100%", padding: "0.5rem" }}
         />
 
-        {loading ? (
-          <p>Indlæser kunder...</p>
-        ) : filteredCustomers.length === 0 ? (
+        {loading && <p>Indlæser kunder...</p>}
+        {error && <p style={{ color: "red" }}>{error}</p>}
+
+        {!loading && !error && filteredCustomers.length === 0 && (
           <p>Ingen kunder matcher.</p>
-        ) : (
-          filteredCustomers.map((c) => (
-            <div
-              key={c.id}
-              style={{
-                padding: "0.75rem",
-                borderBottom: "1px solid #eee",
-                cursor: "pointer",
-                borderRadius: "6px",
-                transition: "background 0.2s"
-              }}
-              onClick={() => {
-                onSelect(c);
-                onClose();
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f9f9f9")}
-              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-            >
-              <strong>{c.name}</strong><br />
-              {c.phone} • {c.email || "-"}
-            </div>
-          ))
         )}
+
+        {!loading && !error && filteredCustomers.map((c) => (
+          <div
+            key={c.id}
+            style={{
+              padding: "0.75rem",
+              borderBottom: "1px solid #eee",
+              cursor: "pointer",
+              borderRadius: "6px",
+              transition: "background 0.2s"
+            }}
+            onClick={() => {
+              onSelect(c);
+              onClose();
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f9f9f9")}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+          >
+            <strong>{c.name}</strong><br />
+            {c.phone} • {c.email || "-"}
+          </div>
+        ))}
 
         <div style={{ marginTop: "1.5rem", textAlign: "right" }}>
           <button onClick={onClose} style={{ background: "#ccc", padding: "0.5rem 1rem", border: "none", borderRadius: "6px" }}>
