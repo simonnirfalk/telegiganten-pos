@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { FaPlus, FaEdit, FaTrashAlt, FaPhone, FaEnvelope, FaUserPlus, FaUser, FaHome, FaLock } from "react-icons/fa";
 
 export default function CustomersPage() {
   const navigate = useNavigate();
@@ -66,7 +67,7 @@ export default function CustomersPage() {
           onClick={() => navigate("/")}
           style={{ backgroundColor: "#2166AC", color: "white", padding: "0.6rem 1rem", borderRadius: "6px", border: "none", cursor: "pointer" }}
         >
-          🏠 Dashboard
+          <FaHome /> Dashboard
         </button>
       </div>
       <h2 style={{ textTransform: "uppercase", fontWeight: "bold" }}>Kunder</h2>

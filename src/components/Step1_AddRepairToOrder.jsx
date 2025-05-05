@@ -110,8 +110,8 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
   ];
 
   const customCategoryOrder = [
-    "Alle", "iPhone", "Samsung", "iPad", "MacBook", "iMac", "Samsung Galaxy Tab", "Motorola",
-    "OnePlus", "Nokia", "Huawei", "Xiaomi", "Sony Xperia", "Oppo", "Microsoft", "Honor",
+    "Alle", "iPhone", "Samsung mobil", "iPad", "MacBook", "iMac", "Samsung Galaxy Tab", "Motorola mobil",
+    "OnePlus mobil", "Nokia mobil", "Huawei mobil", "Xiaomi mobil", "Sony Xperia", "Oppo mobil", "Microsoft mobil", "Honor mobil",
     "Google Pixel", "Apple Watch", "Samsung Book", "Huawei tablet"
   ];
 
@@ -150,7 +150,8 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
         device: deviceName,
         repair: repair.title,
         price: repair.price,
-        time: repair.time
+        time: repair.time,
+        model_id: repair.model_id
       }]
     });
   };

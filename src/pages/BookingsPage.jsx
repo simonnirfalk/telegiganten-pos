@@ -96,7 +96,7 @@ export default function BookingsPage() {
     <div style={{ padding: "2rem" }}>
       {/* Dashboard-knap */}
       <button onClick={() => navigate("/")} style={buttonStyle}>
-        <FaHome /> Dashboard
+         Dashboard
       </button>
 
       <h2 style={{ textTransform: "uppercase", fontWeight: "bold" }}>Bookinger</h2>

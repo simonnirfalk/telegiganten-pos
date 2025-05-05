@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { FaPlus, FaEdit, FaTrashAlt, FaPhone, FaEnvelope, FaUserPlus, FaUser, FaHome, FaLock } from "react-icons/fa";
 
 export default function CustomerDetailPage({ customers, bookings, setBookings }) {
   const { id } = useParams();
@@ -37,7 +38,7 @@ export default function CustomerDetailPage({ customers, bookings, setBookings })
     onClick={() => navigate("/")}
     style={{ backgroundColor: "#2166AC", color: "white", padding: "0.6rem 1rem", borderRadius: "6px", border: "none", cursor: "pointer" }}
   >
-    🏠 Dashboard
+    <FaHome /> Dashboard
   </button>
 
   <button

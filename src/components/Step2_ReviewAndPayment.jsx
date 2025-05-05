@@ -8,7 +8,7 @@ import {
   FaStickyNote
 } from "react-icons/fa";
 
-export default function Step2_ReviewAndPayment({ order, onBack, onSubmit }) {
+export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrder }) {
   const navigate = useNavigate();
   const [paymentType, setPaymentType] = useState("efter");
   const [depositAmount, setDepositAmount] = useState("");
@@ -17,9 +17,45 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit }) {
   const remaining = Math.max(totalPrice - parseInt(depositAmount || 0, 10), 0);
   const today = new Date().toLocaleDateString("da-DK");
 
-  const handleSubmitAndPrint = () => {
+  const saveRepairsToWordPress = async () => {
+    const updatedRepairs = [];
+
+    for (const r of order.repairs) {
+      try {
+        const response = await fetch("https://telegiganten.dk/wp-json/telegiganten/v1/create-repair", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: r.repair,
+            device: r.device,
+            price: r.price,
+            time: r.time,
+            model_id: r.model_id,
+            order_id: order.id,
+            customer_id: order.customer?.id || null  // 👈 Dette manglede
+          })
+        });
+        const result = await response.json();
+        if (result.status === "created" && result.repair_id) {
+          updatedRepairs.push({ ...r, id: result.repair_id });
+        } else {
+          console.warn("Uventet svar:", result);
+          updatedRepairs.push(r);
+        }
+      } catch (error) {
+        console.error("Fejl ved gem af reparation:", error);
+        updatedRepairs.push(r);
+      }
+    }
+    
+
+    setOrder((prev) => ({ ...prev, repairs: updatedRepairs }));
+  };
+
+  const handleSubmitAndPrint = async () => {
+    await saveRepairsToWordPress();
+
     const receiptWindow = window.open("", "_blank", "width=800,height=600");
-  
     const receiptHtml = `
       <html>
         <head>
@@ -40,41 +76,41 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit }) {
           <p>Taastrup Hovedgade 123, 2630 Taastrup<br />
           Tlf: 70 80 90 00 · kontakt@telegiganten.dk<br />
           Åbent: Man–Fre 10–18, Lør 10–15</p>
-  
+
           <div class="line"></div>
-  
+
           <p><strong>Ordre-ID:</strong> #${order.id || "-"}<br />
           <strong>Dato:</strong> ${new Date().toLocaleDateString("da-DK")}</p>
-  
+
           <div class="line"></div>
-  
+
           <p><strong>Kunde:</strong><br />
           ${order.customer?.name || "-"}<br />
           ${order.customer?.phone || "-"}<br />
           ${order.customer?.email || "-"}</p>
-  
+
           <div class="line"></div>
-  
+
           <p><strong>Reparation:</strong><br />
           ${order.repairs.map(r => `
             <div>
-              <strong>${r.device}</strong><br />
+              <strong>#${r.id || "-"} – ${r.device}</strong><br />
               ${r.repair} · ${r.price} kr · ${r.time} min
             </div>
           `).join("<br />")}
           </p>
-  
+
           <div class="line"></div>
-  
+
           <p><strong>Adgangskode:</strong> ${order.password || "-"}<br />
           <strong>Note:</strong> ${order.note || "-"}</p>
-  
+
           <div class="line"></div>
-  
+
           <p><strong>Total:</strong> ${order.repairs.reduce((sum, r) => sum + (r.price || 0), 0)} kr</p>
-  
+
           <svg id="barcode"></svg>
-  
+
           <script>
             window.onload = function() {
               JsBarcode("#barcode", "${order.id || "00000"}", {
@@ -93,13 +129,12 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit }) {
         </body>
       </html>
     `;
-  
+
     receiptWindow.document.write(receiptHtml);
     receiptWindow.document.close();
-  
+
     onSubmit();
   };
-  
 
   const cardStyle = (active) => ({
     border: active ? "2px solid #2166AC" : "1px solid #ddd",
@@ -115,7 +150,6 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit }) {
 
   return (
     <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
-      {/* Venstre side – kvitteringsopsummering */}
       <div style={{ flex: 1, padding: "2rem", backgroundColor: "#f5f5f5", overflowY: "auto" }}>
         <button
           onClick={() => navigate("/")}
@@ -155,7 +189,7 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit }) {
             <h4 style={{ fontWeight: "bold" }}>🔧 Reparation</h4>
             {order.repairs.map((r, i) => (
               <div key={i} style={{ padding: "0.5rem 0", borderBottom: "1px solid #eee" }}>
-                <strong>{r.device}</strong><br />
+                <strong>#{r.id || "-"} – {r.device}</strong><br />
                 <span style={{ color: "#555" }}>{r.repair} • {r.price} kr • {r.time} min</span>
               </div>
             ))}
@@ -175,7 +209,6 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit }) {
         </div>
       </div>
 
-      {/* Højre side – betalingsvalg */}
       <div style={{
         flex: 1,
         padding: "2rem",
@@ -187,15 +220,9 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit }) {
         <div>
           <h3 style={{ textTransform: "uppercase", fontWeight: "bold", marginBottom: "1.5rem" }}>Betaling</h3>
 
-          <div onClick={() => setPaymentType("efter")} style={cardStyle(paymentType === "efter")}>
-            Betaling efter reparation<br /><small>{totalPrice} kr</small>
-          </div>
-          <div onClick={() => setPaymentType("betalt")} style={cardStyle(paymentType === "betalt")}>
-            Allerede betalt<br /><small>{totalPrice} kr</small>
-          </div>
-          <div onClick={() => setPaymentType("depositum")} style={cardStyle(paymentType === "depositum")}>
-            Delvis betalt (depositum)<br /><small>Indtast forudbetalt beløb nedenfor</small>
-          </div>
+          <div onClick={() => setPaymentType("efter")} style={cardStyle(paymentType === "efter")}>Betaling efter reparation<br /><small>{totalPrice} kr</small></div>
+          <div onClick={() => setPaymentType("betalt")} style={cardStyle(paymentType === "betalt")}>Allerede betalt<br /><small>{totalPrice} kr</small></div>
+          <div onClick={() => setPaymentType("depositum")} style={cardStyle(paymentType === "depositum")}>Delvis betalt (depositum)<br /><small>Indtast forudbetalt beløb nedenfor</small></div>
 
           {paymentType === "depositum" && (
             <div style={{ marginTop: "1rem", marginBottom: "1.5rem" }}>
@@ -218,23 +245,15 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit }) {
             </div>
           )}
 
-          <div onClick={() => setPaymentType("garanti")} style={cardStyle(paymentType === "garanti")}>
-            Garanti (ingen betaling)
-          </div>
+          <div onClick={() => setPaymentType("garanti")} style={cardStyle(paymentType === "garanti")}>Garanti (ingen betaling)</div>
 
           <div style={{ marginTop: "2rem", fontWeight: "bold" }}>
             <p>
-              Total:{" "}
-              {paymentType === "garanti"
-                ? "Garanti"
-                : paymentType === "depositum"
-                ? `${remaining} kr tilbage`
-                : `${totalPrice} kr`}
+              Total: {paymentType === "garanti" ? "Garanti" : paymentType === "depositum" ? `${remaining} kr tilbage` : `${totalPrice} kr`}
             </p>
           </div>
         </div>
 
-        {/* Knap */}
         <div>
           <button
             onClick={handleSubmitAndPrint}
