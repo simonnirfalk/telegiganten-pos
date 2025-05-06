@@ -32,7 +32,7 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
             time: r.time,
             model_id: r.model_id,
             order_id: order.id,
-            customer_id: order.customer?.id || null  // 👈 Dette manglede
+            customer_id: order.customer?.id || null
           })
         });
         const result = await response.json();
@@ -46,8 +46,7 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
         console.error("Fejl ved gem af reparation:", error);
         updatedRepairs.push(r);
       }
-    }
-    
+    }    
 
     setOrder((prev) => ({ ...prev, repairs: updatedRepairs }));
   };
