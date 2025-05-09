@@ -39,10 +39,10 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
       .then(data => {
         const mapped = data.map(c => ({
           id: c.id,
-          name: c.title.rendered,
-          phone: c.meta?.phone || "",
-          email: c.meta?.email || "",
-          extraPhone: c.meta?.extra_phone || ""
+          name: c.title,
+          phone: c.phone || "",
+          email: c.email || "",
+          extraPhone: c.extra_phone || ""
         }));
         setCustomers(mapped);
       })

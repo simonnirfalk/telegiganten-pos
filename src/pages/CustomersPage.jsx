@@ -1,55 +1,25 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaPlus, FaEdit, FaTrashAlt, FaPhone, FaEnvelope, FaUserPlus, FaUser, FaHome, FaLock } from "react-icons/fa";
 
 export default function CustomersPage() {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
+  const [customers, setCustomers] = useState([]);
 
-  const customers = [
-    {
-      id: 1,
-      name: "Mads Andersen",
-      phone: "22223333",
-      extraPhone: "",
-      email: "mads@eksempel.dk",
-      repairs: [
-        {
-          device: "iPhone 13",
-          repair: "Skærmskift",
-          price: 899,
-          time: 60,
-          status: "afsluttet",
-          date: "2024-04-20T12:00"
-        },
-        {
-          device: "iPhone 13",
-          repair: "Batteriskift",
-          price: 599,
-          time: 45,
-          status: "afsluttet",
-          date: "2024-06-01T10:00"
-        }
-      ]
-    },
-    {
-      id: 2,
-      name: "Laura Jensen",
-      phone: "44445555",
-      extraPhone: "50505050",
-      email: "laura@eksempel.dk",
-      repairs: [
-        {
-          device: "Samsung S22",
-          repair: "Batteriskift",
-          price: 699,
-          time: 45,
-          status: "afventer",
-          date: "2024-06-07T12:00"
-        }
-      ]
-    }
-  ];
+  useEffect(() => {
+    const fetchCustomers = async () => {
+      try {
+        const res = await fetch("https://telegiganten.dk/wp-json/telegiganten/v1/customers-with-repairs");
+        const data = await res.json();
+        setCustomers(data);
+      } catch (err) {
+        console.error("Fejl ved hentning af kunder:", err);
+      }
+    };
+  
+    fetchCustomers();
+  }, []);
 
   const filteredCustomers = customers
     .filter(c =>
@@ -104,9 +74,10 @@ export default function CustomersPage() {
               <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>{c.email}</td>
               <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>{c.repairs.length}</td>
               <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>
-                {c.repairs.length > 0
-                  ? new Date(c.repairs[c.repairs.length - 1].date).toLocaleDateString()
-                  : "-"}
+              {c.repairs.length > 0
+              ? new Date(c.repairs[c.repairs.length - 1].created_at).toLocaleDateString("da-DK")
+              : "-"}
+
               </td>
             </tr>
           ))}
