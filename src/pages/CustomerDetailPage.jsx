@@ -58,7 +58,17 @@ export default function CustomerDetailPage({ customers }) {
           <tbody>
             {customer.repairs.map((r) => (
               <tr key={r.id}>
-                <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>{new Date(r.created_at).toLocaleString()}</td>
+                <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>
+                  {new Date(r.created_at).toLocaleDateString("da-DK", {
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric"
+                  })}, kl.{" "}
+                  {new Date(r.created_at).toLocaleTimeString("da-DK", {
+                    hour: "2-digit",
+                    minute: "2-digit"
+                  })}
+                </td>
                 <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>{r.device}</td>
                 <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>{r.repair}</td>
                 <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>{r.price} kr</td>
