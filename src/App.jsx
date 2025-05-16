@@ -6,7 +6,9 @@ import BookingsPage from "./pages/BookingsPage";
 import CustomersPage from "./pages/CustomersPage";
 import CustomerDetailPage from "./pages/CustomerDetailPage";
 import { RepairProvider } from "./context/RepairContext";
-import useRepairData from "./hooks/useRepairData"; // stadig relevant
+import useRepairData from "./hooks/useRepairData";
+import EditRepairsPage from "./pages/EditRepairsPage";
+
 
 export default function App() {
   const [customers, setCustomers] = useState([]);
@@ -53,6 +55,7 @@ export default function App() {
             <Route path="/bookings" element={<BookingsPage />} />
             <Route path="/customers" element={<CustomersPage customers={customers} />} />
             <Route path="/customers/:id" element={<CustomerDetailPage customers={customers} />} />
+            <Route path="/edit-repairs" element={<EditRepairsPage />} />
           </Routes>
         </main>
       </div>

@@ -42,7 +42,7 @@ button {
   padding: 0.6rem 1.2rem;
   border-radius: 12px;
   cursor: pointer;
-  background-color: #22b783;
+  background-color: #2166AC;
   color: white;
   transition: background-color 0.2s ease;
 }
