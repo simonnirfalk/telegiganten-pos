@@ -17,6 +17,7 @@ export default function EditRepairsPage() {
   const [repairsPerPage, setRepairsPerPage] = useState(50);
   const [pageInput, setPageInput] = useState("");
 
+  const [showCreateForm, setShowCreateForm] = useState(false);
   const [newRepair, setNewRepair] = useState({
     brand: "",
     model: "",
@@ -87,8 +88,6 @@ export default function EditRepairsPage() {
       alert("Der opstod en fejl ved oprettelse.");
     }
   };
-
-
 
   useEffect(() => {
     fetch("https://telegiganten.dk/wp-json/telegiganten/v1/all-repairs")
@@ -216,6 +215,8 @@ const handleSave = async (repairId) => {
     }
   };
 
+  
+
   // ➤ Kombineret filtrering
   const filteredData = data
   .filter(brand => !selectedBrand || brand.brand === selectedBrand)
@@ -285,81 +286,84 @@ const paginatedRepairs = allFilteredRepairs.slice(
           </div>
           <h2 style={{ textTransform: "uppercase", fontWeight: "bold" }}>Redigér reparationer</h2>
 
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: "1rem",
-          alignItems: "center",
-          margin: "1rem 0"
-        }}
-      >
-        <select
-          value={newRepair.brand}
-          onChange={(e) => {
-            setNewRepair({ ...newRepair, brand: e.target.value, model: "" });
-          }}
-          style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "180px" }}
-        >
-          <option value="">Vælg enhed</option>
-          {data.map(b => (
-            <option key={b.brand} value={b.brand}>{b.brand}</option>
-          ))}
-        </select>
-
-        <select
-          value={newRepair.model}
-          onChange={(e) => setNewRepair({ ...newRepair, model: e.target.value })}
-          style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "180px" }}
-          disabled={!newRepair.brand}
-        >
-          <option value="">Vælg model</option>
-          {data.find(b => b.brand === newRepair.brand)?.models.map(m => (
-            <option key={m.model} value={m.model}>{m.model}</option>
-          )) ?? []}
-        </select>
-
-        <input
-          type="text"
-          placeholder="Titel"
-          value={newRepair.title}
-          onChange={(e) => setNewRepair({ ...newRepair, title: e.target.value })}
-          style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "180px" }}
-        />
-
-        <input
-          type="number"
-          placeholder="Pris"
-          value={newRepair.price}
-          onChange={(e) => setNewRepair({ ...newRepair, price: e.target.value })}
-          style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "100px" }}
-        />
-
-        <input
-          type="number"
-          placeholder="Tid (min)"
-          value={newRepair.duration}
-          onChange={(e) => setNewRepair({ ...newRepair, duration: e.target.value })}
-          style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "100px" }}
-        />
-
-        <button
-          onClick={handleCreateRepair}
+      {showCreateForm && (
+        <div
           style={{
-            backgroundColor: "#22b783",
-            color: "white",
-            padding: "10px 16px",
-            border: "none",
-            borderRadius: "6px",
-            cursor: "pointer"
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "1rem",
+            alignItems: "center",
+            margin: "1rem 0"
           }}
-          disabled={
-            !newRepair.brand || !newRepair.model || !newRepair.title || !newRepair.price || !newRepair.duration
-          }
         >
-          Opret reparation
-        </button>
-      </div>
+          <select
+            value={newRepair.brand}
+            onChange={(e) => {
+              setNewRepair({ ...newRepair, brand: e.target.value, model: "" });
+            }}
+            style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "180px" }}
+          >
+            <option value="">Vælg enhed</option>
+            {data.map(b => (
+              <option key={b.brand} value={b.brand}>{b.brand}</option>
+            ))}
+          </select>
+
+          <select
+            value={newRepair.model}
+            onChange={(e) => setNewRepair({ ...newRepair, model: e.target.value })}
+            style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "180px" }}
+            disabled={!newRepair.brand}
+          >
+            <option value="">Vælg model</option>
+            {data.find(b => b.brand === newRepair.brand)?.models.map(m => (
+              <option key={m.model} value={m.model}>{m.model}</option>
+            )) ?? []}
+          </select>
+
+          <input
+            type="text"
+            placeholder="Titel"
+            value={newRepair.title}
+            onChange={(e) => setNewRepair({ ...newRepair, title: e.target.value })}
+            style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "180px" }}
+          />
+
+          <input
+            type="number"
+            placeholder="Pris"
+            value={newRepair.price}
+            onChange={(e) => setNewRepair({ ...newRepair, price: e.target.value })}
+            style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "100px" }}
+          />
+
+          <input
+            type="number"
+            placeholder="Tid (min)"
+            value={newRepair.duration}
+            onChange={(e) => setNewRepair({ ...newRepair, duration: e.target.value })}
+            style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "100px" }}
+          />
+
+          <button
+            onClick={handleCreateRepair}
+            style={{
+              backgroundColor: "#22b783",
+              color: "white",
+              padding: "10px 16px",
+              border: "none",
+              borderRadius: "6px",
+              cursor: "pointer"
+            }}
+            disabled={
+              !newRepair.brand || !newRepair.model || !newRepair.title || !newRepair.price || !newRepair.duration
+            }
+          >
+            Opret reparation
+          </button>
+        </div>
+      )}
+
 
       <div
           style={{
@@ -432,6 +436,22 @@ const paginatedRepairs = allFilteredRepairs.slice(
               </span>
             )}
           </div>
+
+          <button
+            onClick={() => setShowCreateForm(prev => !prev)}
+            style={{
+              backgroundColor: "#2166AC",
+              color: "white",
+              padding: "10px 16px",
+              border: "none",
+              borderRadius: "6px",
+              marginTop: "0.5rem",
+              cursor: "pointer"
+            }}
+          >
+            {showCreateForm ? "Skjul opretformular" : "Opret reparation"}
+          </button>
+
         </div>
 
 
