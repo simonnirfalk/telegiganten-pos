@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import Select from "react-select";
 import { FaHome } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 
@@ -25,6 +26,30 @@ export default function EditRepairsPage() {
     price: "",
     duration: ""
   });
+
+  const [showGlobalModal, setShowGlobalModal] = useState(false);
+  const [globalTitle, setGlobalTitle] = useState("");
+  const [globalPrice, setGlobalPrice] = useState("");
+  const [globalDuration, setGlobalDuration] = useState("");
+  const [globalScope, setGlobalScope] = useState("all"); // 'all', 'brands', 'models'
+  const [globalBrands, setGlobalBrands] = useState([]);
+  const [globalModels, setGlobalModels] = useState([]);
+  const [repairTitleOptions, setRepairTitleOptions] = useState([]);
+  const [expandedBrands, setExpandedBrands] = useState([]);
+
+    const resetGlobalModal = () => {
+      setGlobalTitle("");
+      setGlobalPrice("");
+      setGlobalDuration("");
+      setGlobalScope("all");
+      setGlobalBrands([]);
+      setGlobalModels([]);
+    };
+
+    const handleModalClose = () => {
+      setShowGlobalModal(false);
+      resetGlobalModal();
+    };
 
   const handleCreateRepair = async () => {
     const brand = data.find(b => b.brand === newRepair.brand);
@@ -92,7 +117,18 @@ export default function EditRepairsPage() {
   useEffect(() => {
     fetch("https://telegiganten.dk/wp-json/telegiganten/v1/all-repairs")
       .then(res => res.json())
-      .then(setData)
+      .then(data => {
+        setData(data);
+        const titles = [];
+        data.forEach(b =>
+          b.models.forEach(m =>
+            m.options.forEach(o => {
+              if (!titles.includes(o.title)) titles.push(o.title);
+            })
+          )
+        );
+        setRepairTitleOptions(titles.sort());
+      })
       .catch(err => console.error("Fejl ved hentning:", err));
   }, []);
 
@@ -215,7 +251,61 @@ const handleSave = async (repairId) => {
     }
   };
 
-  
+  const handleApplyGlobalChange = async () => {
+    if (!globalTitle || (!globalPrice && !globalDuration)) {
+      alert("Udfyld titel og mindst ét felt (pris eller tid).");
+      return;
+    }
+
+    const confirm = window.confirm("Er du sikker på, at du vil opdatere reparationer globalt?");
+    if (!confirm) return;
+
+    // Find model- og brand-id'er
+    const brandIds = globalBrands.map(brandName =>
+      data.find(b => b.brand === brandName)?.models.map(m => m.options?.[0]?.model_id)
+    ).flat().filter(Boolean);
+
+    const modelIds = globalModels.map(modelName =>
+      data.flatMap(b => b.models).find(m => m.model === modelName)?.options?.[0]?.model_id
+    ).filter(Boolean);
+
+    const body = {
+      title: globalTitle.trim(),
+      fields: {
+        ...(globalPrice && { _telegiganten_repair_repair_price: globalPrice }),
+        ...(globalDuration && { _telegiganten_repair_repair_time: globalDuration })
+      },
+      scope: globalScope,
+      brands: globalScope === "brands" ? brandIds : [],
+      models: globalScope === "models" ? modelIds : []
+    };
+
+    try {
+      const res = await fetch("https://telegiganten.dk/wp-json/telegiganten/v1/apply-repair-changes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+
+      const result = await res.json();
+      if (result.status === "success") {
+        alert(result.message);
+        setShowGlobalModal(false);
+        setGlobalTitle("");
+        setGlobalPrice("");
+        setGlobalDuration("");
+        setGlobalBrands([]);
+        setGlobalModels([]);
+        setGlobalScope("all");
+      } else {
+        alert("Der opstod en fejl: " + (result.message || "Ukendt fejl"));
+      }
+    } catch (err) {
+      console.error("Fejl ved global opdatering:", err);
+      alert("Fejl ved opdatering. Prøv igen.");
+    }
+  };
+
 
   // ➤ Kombineret filtrering
   const filteredData = data
@@ -272,6 +362,14 @@ const paginatedRepairs = allFilteredRepairs.slice(
   (currentPage - 1) * repairsPerPage,
   currentPage * repairsPerPage
 );
+
+useEffect(() => {
+  const escHandler = (e) => {
+    if (e.key === "Escape") handleModalClose();
+  };
+  document.addEventListener("keydown", escHandler);
+  return () => document.removeEventListener("keydown", escHandler);
+}, []);
 
   return (
         <div style={{ padding: "2rem" }}>
@@ -364,7 +462,6 @@ const paginatedRepairs = allFilteredRepairs.slice(
         </div>
       )}
 
-
       <div
           style={{
             position: "sticky",
@@ -429,6 +526,22 @@ const paginatedRepairs = allFilteredRepairs.slice(
             >
               {savingAll ? "Gemmer..." : "Gem alle ændringer"}
             </button>
+
+              <button
+                onClick={() => setShowGlobalModal(true)}
+                style={{
+                  marginTop: "0.5rem",
+                  backgroundColor: "#2166AC",
+                  color: "white",
+                  padding: "10px 16px",
+                  border: "none",
+                  borderRadius: "6px",
+                  cursor: "pointer"
+                }}
+              >
+                Global opdatering
+              </button>
+
 
             {Object.keys(editedRepairs).length > 0 && !savingAll && (
               <span style={{ color: "#cc0000", fontSize: "0.85rem", marginTop: "0.25rem" }}>
@@ -658,6 +771,212 @@ const paginatedRepairs = allFilteredRepairs.slice(
       <option value={200}>200</option>
     </select>
   </div>
+
+
+  {/* Global opdatering */}
+  {showGlobalModal && (
+    <div
+      style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        width: "100vw",
+        height: "100vh",
+        backgroundColor: "rgba(0,0,0,0.5)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 1000
+      }}
+      onClick={() => setShowGlobalModal(false)}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "white",
+          padding: "2rem",
+          borderRadius: "8px",
+          width: "600px",
+          maxWidth: "90%",
+          maxHeight: "80vh",
+          overflowY: "auto"
+        }}
+      >
+        <h3 style={{ marginBottom: "1rem" }}>Global opdatering</h3>
+
+        <Select
+          options={repairTitleOptions.map(title => ({ value: title, label: title }))}
+          value={globalTitle ? { value: globalTitle, label: globalTitle } : null}
+          onChange={(selectedOption) => setGlobalTitle(selectedOption?.value || "")}
+          placeholder="Vælg reparationstitel..."
+          isClearable
+          styles={{
+            container: base => ({ ...base, marginBottom: "1rem" }),
+            control: base => ({ ...base, padding: "2px" }),
+          }}
+        />
+
+        <input
+          type="number"
+          placeholder="Ny pris"
+          value={globalPrice}
+          onChange={(e) => setGlobalPrice(e.target.value)}
+          style={{ width: "100%", marginBottom: "1rem", padding: "0.5rem" }}
+        />
+        <input
+          type="number"
+          placeholder="Ny tid (min)"
+          value={globalDuration}
+          onChange={(e) => setGlobalDuration(e.target.value)}
+          style={{ width: "100%", marginBottom: "1rem", padding: "0.5rem" }}
+        />
+
+        <div style={{ marginBottom: "1rem" }}>
+          <strong>Vælg forekomster:</strong>
+          <div style={{
+            marginTop: "0.5rem",
+            border: "1px solid #ddd",
+            borderRadius: "6px",
+            padding: "0.75rem",
+            maxHeight: "300px",
+            overflowY: "auto"
+          }}>
+            {/* Alle forekomster */}
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              marginBottom: "0.75rem",
+              gap: "0.5rem"
+            }}>
+              <input
+                type="checkbox"
+                checked={globalScope === "all"}
+                onChange={() => {
+                  setGlobalScope("all");
+                  setGlobalBrands([]);
+                  setGlobalModels([]);
+                }}
+              />
+              <span style={{ fontWeight: 500 }}>Alle forekomster</span>
+            </div>
+
+            {/* Enheder og modeller */}
+            {data.map(b => (
+              <div key={b.brand} style={{ marginBottom: "0.75rem" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: "1rem"
+                  }}
+                >
+                  <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    <input
+                      type="checkbox"
+                      checked={globalScope === "brands" && globalBrands.includes(b.brand)}
+                      onChange={() => {
+                        const checked = globalBrands.includes(b.brand);
+                        setGlobalScope("brands");
+                        setGlobalBrands(prev =>
+                          checked ? prev.filter(x => x !== b.brand) : [...prev, b.brand]
+                        );
+                        setGlobalModels([]);
+                      }}
+                    />
+                    <span style={{ fontWeight: 500 }}>{b.brand}</span>
+                  </label>
+
+                  <button
+                    onClick={() =>
+                      setExpandedBrands(prev =>
+                        prev.includes(b.brand)
+                          ? prev.filter(x => x !== b.brand)
+                          : [...prev, b.brand]
+                      )
+                    }
+                    style={{
+                      fontSize: "0.75rem",
+                      background: "none",
+                      border: "1px solid #ccc",
+                      padding: "2px 6px",
+                      borderRadius: "4px",
+                      color: "#2166AC",
+                      cursor: "pointer",
+                      whiteSpace: "nowrap"
+                    }}
+                  >
+                    {expandedBrands.includes(b.brand) ? "Skjul modeller" : "Vis modeller"}
+                  </button>
+                </div>
+
+                {expandedBrands.includes(b.brand) && (
+                  <div style={{ paddingLeft: "1.75rem", marginTop: "0.5rem" }}>
+                    {b.models.map(m => (
+                      <label
+                        key={m.model}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "0.5rem",
+                          fontSize: "0.9rem",
+                          marginBottom: "0.25rem"
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={globalScope === "models" && globalModels.includes(m.model)}
+                          onChange={() => {
+                            const checked = globalModels.includes(m.model);
+                            setGlobalScope("models");
+                            setGlobalModels(prev =>
+                              checked ? prev.filter(x => x !== m.model) : [...prev, m.model]
+                            );
+                            setGlobalBrands([]);
+                          }}
+                        />
+                        {m.model}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+
+          </div>
+        </div>
+
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: "1rem" }}>
+          <button
+            onClick={() => setShowGlobalModal(false)}
+            style={{
+              backgroundColor: "#ccc",
+              color: "#000",
+              padding: "0.5rem 1rem",
+              borderRadius: "6px",
+              border: "none"
+            }}
+          >
+            Annuller
+          </button>
+          <button
+            onClick={handleApplyGlobalChange}
+            style={{
+              backgroundColor: "#22b783",
+              color: "white",
+              padding: "0.5rem 1rem",
+              borderRadius: "6px",
+              border: "none"
+            }}
+          >
+            Opdater globalt
+          </button>
+        </div>
+      </div>
+    </div>
+  )}
+
     </div>
   );
 }
