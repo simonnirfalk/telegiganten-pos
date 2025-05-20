@@ -213,7 +213,7 @@ const handleSave = async (repairId) => {
     setSavingAll(true);
 
     for (const id of allIds) {
-      await handleSave(id); // bruger vores optimerede enkeltsave med lokal setData
+      await handleSave(id);
     }
 
     setSavingAll(false);
@@ -372,201 +372,131 @@ useEffect(() => {
 }, []);
 
   return (
-        <div style={{ padding: "2rem" }}>
-          {/* Top-knap */}
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1.5rem" }}>
-            <button
-              onClick={() => navigate("/")}
-              style={{ backgroundColor: "#2166AC", color: "white", padding: "0.6rem 1rem", borderRadius: "6px", border: "none", cursor: "pointer" }}
-            >
-              <FaHome /> Dashboard
-            </button>
-          </div>
-          <h2 style={{ textTransform: "uppercase", fontWeight: "bold" }}>Redigér reparationer</h2>
+  <div style={{ padding: "2rem" }}>
+    {/* Top-knap */}
+    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1.5rem" }}>
+      <button
+        onClick={() => navigate("/")}
+        style={{
+          backgroundColor: "#2166AC",
+          color: "white",
+          padding: "0.6rem 1rem",
+          borderRadius: "6px",
+          border: "none",
+          cursor: "pointer"
+        }}
+      >
+        <FaHome /> Dashboard
+      </button>
+    </div>
 
-      {showCreateForm && (
-        <div
+    <h2 style={{ textTransform: "uppercase", fontWeight: "bold", marginBottom: "1rem" }}>
+      Redigér reparationer
+    </h2>
+
+    {/* Handling-knapper (ikke sticky) */}
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "1rem", marginBottom: "2rem" }}>
+      <button
+        onClick={() => setShowGlobalModal(true)}
+        style={{
+          backgroundColor: "#2166AC",
+          color: "white",
+          padding: "10px 16px",
+          border: "none",
+          borderRadius: "6px",
+          cursor: "pointer"
+        }}
+      >
+        Global opdatering
+      </button>
+
+      <button
+        onClick={() => setShowCreateForm(prev => !prev)}
+        style={{
+          backgroundColor: "#2166AC",
+          color: "white",
+          padding: "10px 16px",
+          border: "none",
+          borderRadius: "6px",
+          cursor: "pointer"
+        }}
+      >
+        {showCreateForm ? "Skjul opretformular" : "Opret reparation"}
+      </button>
+    </div>
+
+    {/* Sticky header: søg + filtrér + gem */}
+    <div
+      style={{
+        position: "sticky",
+        top: 0,
+        zIndex: 10,
+        background: "#f9f9f9",
+        padding: "1rem 0",
+        display: "flex",
+        flexWrap: "wrap",
+        gap: "1rem",
+        alignItems: "center",
+        marginBottom: "1.5rem",
+        borderBottom: "1px solid #ddd"
+      }}
+    >
+      <input
+        type="text"
+        placeholder="Søg model eller reparation..."
+        value={searchTerm}
+        onChange={e => setSearchTerm(e.target.value)}
+        style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "250px" }}
+      />
+
+      <select
+        value={selectedBrand}
+        onChange={e => {
+          setSelectedBrand(e.target.value);
+          setSelectedModel("");
+        }}
+        style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "180px" }}
+      >
+        <option value="">Alle enheder</option>
+        {data.map(b => (
+          <option key={b.brand} value={b.brand}>{b.brand}</option>
+        ))}
+      </select>
+
+      <select
+        value={selectedModel}
+        onChange={e => setSelectedModel(e.target.value)}
+        style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "180px" }}
+      >
+        <option value="">Alle modeller</option>
+        {data.find(b => b.brand === selectedBrand)?.models.map(m => (
+          <option key={m.model} value={m.model}>{m.model}</option>
+        )) ?? []}
+      </select>
+
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        <button
+          onClick={handleSaveAll}
           style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: "1rem",
-            alignItems: "center",
-            margin: "1rem 0"
+            backgroundColor: Object.keys(editedRepairs).length === 0 ? "#ccc" : "#2166AC",
+            color: "white",
+            padding: "10px 16px",
+            border: "none",
+            borderRadius: "6px",
+            cursor: Object.keys(editedRepairs).length === 0 ? "not-allowed" : "pointer"
           }}
+          disabled={Object.keys(editedRepairs).length === 0 || savingAll}
         >
-          <select
-            value={newRepair.brand}
-            onChange={(e) => {
-              setNewRepair({ ...newRepair, brand: e.target.value, model: "" });
-            }}
-            style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "180px" }}
-          >
-            <option value="">Vælg enhed</option>
-            {data.map(b => (
-              <option key={b.brand} value={b.brand}>{b.brand}</option>
-            ))}
-          </select>
+          {savingAll ? "Gemmer..." : "Gem alle ændringer"}
+        </button>
 
-          <select
-            value={newRepair.model}
-            onChange={(e) => setNewRepair({ ...newRepair, model: e.target.value })}
-            style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "180px" }}
-            disabled={!newRepair.brand}
-          >
-            <option value="">Vælg model</option>
-            {data.find(b => b.brand === newRepair.brand)?.models.map(m => (
-              <option key={m.model} value={m.model}>{m.model}</option>
-            )) ?? []}
-          </select>
-
-          <input
-            type="text"
-            placeholder="Titel"
-            value={newRepair.title}
-            onChange={(e) => setNewRepair({ ...newRepair, title: e.target.value })}
-            style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "180px" }}
-          />
-
-          <input
-            type="number"
-            placeholder="Pris"
-            value={newRepair.price}
-            onChange={(e) => setNewRepair({ ...newRepair, price: e.target.value })}
-            style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "100px" }}
-          />
-
-          <input
-            type="number"
-            placeholder="Tid (min)"
-            value={newRepair.duration}
-            onChange={(e) => setNewRepair({ ...newRepair, duration: e.target.value })}
-            style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "100px" }}
-          />
-
-          <button
-            onClick={handleCreateRepair}
-            style={{
-              backgroundColor: "#22b783",
-              color: "white",
-              padding: "10px 16px",
-              border: "none",
-              borderRadius: "6px",
-              cursor: "pointer"
-            }}
-            disabled={
-              !newRepair.brand || !newRepair.model || !newRepair.title || !newRepair.price || !newRepair.duration
-            }
-          >
-            Opret reparation
-          </button>
-        </div>
-      )}
-
-      <div
-          style={{
-            position: "sticky",
-            top: 0,
-            zIndex: 10,
-            background: "#f9f9f9",
-            padding: "1rem 0",
-            display: "flex",
-            flexWrap: "wrap",
-            gap: "1rem",
-            alignItems: "center",
-            marginBottom: "1.5rem",
-            borderBottom: "1px solid #ddd"
-          }}
-        >
-          <input
-            type="text"
-            placeholder="Søg model eller reparation..."
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-            style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "250px" }}
-          />
-
-          <select
-            value={selectedBrand}
-            onChange={e => {
-              setSelectedBrand(e.target.value);
-              setSelectedModel("");
-            }}
-            style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "180px" }}
-          >
-            <option value="">Alle enheder</option>
-            {data.map(b => (
-              <option key={b.brand} value={b.brand}>{b.brand}</option>
-            ))}
-          </select>
-
-          <select
-            value={selectedModel}
-            onChange={e => setSelectedModel(e.target.value)}
-            style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "180px" }}
-          >
-            <option value="">Alle modeller</option>
-            {data
-              .find(b => b.brand === selectedBrand)?.models.map(m => (
-                <option key={m.model} value={m.model}>{m.model}</option>
-              )) ?? []}
-          </select>
-
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            <button
-              onClick={handleSaveAll}
-              style={{
-                backgroundColor: Object.keys(editedRepairs).length === 0 ? "#ccc" : "#2166AC",
-                color: "white",
-                padding: "10px 16px",
-                border: "none",
-                borderRadius: "6px",
-                cursor: Object.keys(editedRepairs).length === 0 ? "not-allowed" : "pointer"
-              }}
-              disabled={Object.keys(editedRepairs).length === 0 || savingAll}
-            >
-              {savingAll ? "Gemmer..." : "Gem alle ændringer"}
-            </button>
-
-              <button
-                onClick={() => setShowGlobalModal(true)}
-                style={{
-                  marginTop: "0.5rem",
-                  backgroundColor: "#2166AC",
-                  color: "white",
-                  padding: "10px 16px",
-                  border: "none",
-                  borderRadius: "6px",
-                  cursor: "pointer"
-                }}
-              >
-                Global opdatering
-              </button>
-
-
-            {Object.keys(editedRepairs).length > 0 && !savingAll && (
-              <span style={{ color: "#cc0000", fontSize: "0.85rem", marginTop: "0.25rem" }}>
-                Husk at gemme ændringer!
-              </span>
-            )}
-          </div>
-
-          <button
-            onClick={() => setShowCreateForm(prev => !prev)}
-            style={{
-              backgroundColor: "#2166AC",
-              color: "white",
-              padding: "10px 16px",
-              border: "none",
-              borderRadius: "6px",
-              marginTop: "0.5rem",
-              cursor: "pointer"
-            }}
-          >
-            {showCreateForm ? "Skjul opretformular" : "Opret reparation"}
-          </button>
-
-        </div>
-
+        {Object.keys(editedRepairs).length > 0 && !savingAll && (
+          <span style={{ color: "#cc0000", fontSize: "0.85rem", marginTop: "0.25rem" }}>
+            Husk at gemme ændringer!
+          </span>
+        )}
+      </div>
+    </div>
 
       {/* LISTE */}
       <table className="w-full text-sm border mt-4">
@@ -580,12 +510,27 @@ useEffect(() => {
           </tr>
         </thead>
         <tbody>
-          {paginatedRepairs.map((repair) => {
+          {paginatedRepairs.map((repair, index) => {
             const edited = editedRepairs[repair.id] || {};
             const status = savingStatus[repair.id];
+            const isFirstOfModel = index === 0 || repair.model !== paginatedRepairs[index - 1].model;
+            const isOddModelGroup = (() => {
+              let groupIndex = 0;
+              for (let i = 0; i <= index; i++) {
+                if (i === 0 || paginatedRepairs[i].model !== paginatedRepairs[i - 1].model) {
+                  groupIndex++;
+                }
+              }
+              return groupIndex % 2 === 1;
+            })();
+
+            const rowStyle = {
+              backgroundColor: isOddModelGroup ? "#f8f8f8" : "#ffffff",
+              borderLeft: "4px solid " + (isOddModelGroup ? "#2166AC" : "#22b783")
+            };
 
             return (
-              <tr key={repair.id} className="border-t">
+              <tr key={repair.id} className="border-t" style={rowStyle}>
                 <td className="p-2 pr-6">
                   <div>
                     <div style={{ fontWeight: "bold", fontSize: "1rem", lineHeight: "1.3" }}>{repair.model}</div>
@@ -618,18 +563,12 @@ useEffect(() => {
                     onClick={() => handleSave(repair.id)}
                     disabled={status === "saving"}
                     style={{
-                      backgroundColor: status === "saving" ? "#ccc" : "#2166AC", // grå hvis gemmer
+                      backgroundColor: status === "saving" ? "#ccc" : "#2166AC",
                       color: "white",
                       padding: "4px 12px",
                       borderRadius: "6px",
                       border: "none",
                       cursor: status === "saving" ? "not-allowed" : "pointer"
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!status === "saving") e.target.style.backgroundColor = "#1fa374";
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!status === "saving") e.target.style.backgroundColor = "#22b783";
                     }}
                   >
                     {status === "saving" ? "Gemmer..." : "GEM"}
@@ -833,21 +772,26 @@ useEffect(() => {
 
         <div style={{ marginBottom: "1rem" }}>
           <strong>Vælg forekomster:</strong>
-          <div style={{
-            marginTop: "0.5rem",
-            border: "1px solid #ddd",
-            borderRadius: "6px",
-            padding: "0.75rem",
-            maxHeight: "300px",
-            overflowY: "auto"
-          }}>
+          <div
+            style={{
+              marginTop: "0.5rem",
+              border: "1px solid #ddd",
+              borderRadius: "6px",
+              padding: "0.75rem",
+              maxHeight: "300px",
+              overflowY: "auto"
+            }}
+          >
             {/* Alle forekomster */}
-            <div style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.75rem",
-              gap: "0.5rem"
-            }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "30px 120px 1fr",
+                alignItems: "center",
+                gap: "0.5rem",
+                marginBottom: "0.75rem"
+              }}
+            >
               <input
                 type="checkbox"
                 checked={globalScope === "all"}
@@ -857,7 +801,8 @@ useEffect(() => {
                   setGlobalModels([]);
                 }}
               />
-              <span style={{ fontWeight: 500 }}>Alle forekomster</span>
+              <span style={{ fontSize: "0.75rem", color: "#666" }}></span>
+              <span style={{ fontWeight: "500" }}>Alle forekomster</span>
             </div>
 
             {/* Enheder og modeller */}
@@ -865,28 +810,24 @@ useEffect(() => {
               <div key={b.brand} style={{ marginBottom: "0.75rem" }}>
                 <div
                   style={{
-                    display: "flex",
-                    justifyContent: "space-between",
+                    display: "grid",
+                    gridTemplateColumns: "30px 120px 1fr",
                     alignItems: "center",
-                    gap: "1rem"
+                    gap: "0.5rem"
                   }}
                 >
-                  <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                    <input
-                      type="checkbox"
-                      checked={globalScope === "brands" && globalBrands.includes(b.brand)}
-                      onChange={() => {
-                        const checked = globalBrands.includes(b.brand);
-                        setGlobalScope("brands");
-                        setGlobalBrands(prev =>
-                          checked ? prev.filter(x => x !== b.brand) : [...prev, b.brand]
-                        );
-                        setGlobalModels([]);
-                      }}
-                    />
-                    <span style={{ fontWeight: 500 }}>{b.brand}</span>
-                  </label>
-
+                  <input
+                    type="checkbox"
+                    checked={globalScope === "brands" && globalBrands.includes(b.brand)}
+                    onChange={() => {
+                      const checked = globalBrands.includes(b.brand);
+                      setGlobalScope("brands");
+                      setGlobalBrands(prev =>
+                        checked ? prev.filter(x => x !== b.brand) : [...prev, b.brand]
+                      );
+                      setGlobalModels([]);
+                    }}
+                  />
                   <button
                     onClick={() =>
                       setExpandedBrands(prev =>
@@ -908,18 +849,19 @@ useEffect(() => {
                   >
                     {expandedBrands.includes(b.brand) ? "Skjul modeller" : "Vis modeller"}
                   </button>
+                  <span>{b.brand}</span>
                 </div>
 
                 {expandedBrands.includes(b.brand) && (
-                  <div style={{ paddingLeft: "1.75rem", marginTop: "0.5rem" }}>
+                  <div style={{ paddingLeft: "2.5rem", marginTop: "0.5rem" }}>
                     {b.models.map(m => (
-                      <label
+                      <div
                         key={m.model}
                         style={{
-                          display: "flex",
+                          display: "grid",
+                          gridTemplateColumns: "30px 120px 1fr",
                           alignItems: "center",
                           gap: "0.5rem",
-                          fontSize: "0.9rem",
                           marginBottom: "0.25rem"
                         }}
                       >
@@ -935,17 +877,16 @@ useEffect(() => {
                             setGlobalBrands([]);
                           }}
                         />
-                        {m.model}
-                      </label>
+                        <span></span>
+                        <span style={{ fontSize: "0.9rem" }}>{m.model}</span>
+                      </div>
                     ))}
                   </div>
                 )}
               </div>
             ))}
-
           </div>
         </div>
-
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: "1rem" }}>
           <button
