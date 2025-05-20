@@ -51,6 +51,41 @@ export default function EditRepairsPage() {
       resetGlobalModal();
     };
 
+  const toggleRepairActive = async (repairId, isActive) => {
+    try {
+      const res = await fetch("https://telegiganten.dk/wp-json/telegiganten/v1/update-repair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          repair_id: repairId,
+          fields: {
+            repair_option_active: isActive ? 1 : 0
+          }
+        })
+      });
+
+      const result = await res.json();
+      if (result.status === "updated") {
+        setData(prev =>
+          prev.map(brand => ({
+            ...brand,
+            models: brand.models.map(model => ({
+              ...model,
+              options: model.options.map(opt =>
+                opt.id === repairId ? { ...opt, repair_option_active: isActive ? 1 : 0 } : opt
+              )
+            }))
+          }))
+        );
+      } else {
+        alert("Kunne ikke opdatere status.");
+      }
+    } catch (err) {
+      console.error("Fejl:", err);
+      alert("Der opstod en fejl.");
+    }
+  };
+
   const handleCreateRepair = async () => {
     const brand = data.find(b => b.brand === newRepair.brand);
     const model = brand?.models.find(m => m.model === newRepair.model);
@@ -423,6 +458,35 @@ useEffect(() => {
       >
         {showCreateForm ? "Skjul opretformular" : "Opret reparation"}
       </button>
+      <button
+        onClick={async () => {
+          const allIds = data
+            .flatMap(b => b.models)
+            .flatMap(m => m.options)
+            .filter(o => o.repair_option_active !== 1) // kun deaktiverede
+            .map(o => o.id);
+
+          const confirm = window.confirm(`Er du sikker på, at du vil aktivere ${allIds.length} reparationer?`);
+          if (!confirm) return;
+
+          for (const id of allIds) {
+            await toggleRepairActive(id, true);
+          }
+
+          alert("Alle reparationer er nu aktiveret!");
+        }}
+        style={{
+          backgroundColor: "#22b783",
+          color: "white",
+          padding: "10px 16px",
+          border: "none",
+          borderRadius: "6px",
+          cursor: "pointer"
+        }}
+      >
+        Aktivér alle
+      </button>
+
     </div>
 
     {/* Sticky header: søg + filtrér + gem */}
@@ -524,9 +588,12 @@ useEffect(() => {
               return groupIndex % 2 === 1;
             })();
 
+            const isActive = repair.repair_option_active === 1 || repair.repair_option_active === "1";
+
             const rowStyle = {
               backgroundColor: isOddModelGroup ? "#f8f8f8" : "#ffffff",
-              borderLeft: "4px solid " + (isOddModelGroup ? "#2166AC" : "#22b783")
+              borderLeft: "4px solid " + (isOddModelGroup ? "#2166AC" : "#22b783"),
+              opacity: isActive ? 1 : 0.5,
             };
 
             return (
@@ -559,6 +626,28 @@ useEffect(() => {
                   />
                 </td>
                 <td className="p-2 flex gap-2 items-center">
+                  {/* Aktiver/deaktiver-switch */}
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem" }}>
+                    <span style={{ fontSize: "0.8rem", color: "#666" }}>Aktiv</span>
+                    <input
+                      type="checkbox"
+                      checked={repair.repair_option_active === "1" || repair.repair_option_active === 1}
+                      onChange={(e) => toggleRepairActive(repair.id, e.target.checked)}
+                      style={{
+                        position: "relative",
+                        width: "40px",
+                        height: "20px",
+                        backgroundColor: "#ccc",
+                        borderRadius: "20px",
+                        appearance: "none",
+                        outline: "none",
+                        cursor: "pointer",
+                        transition: "background-color 0.2s",
+                        backgroundColor: repair.repair_option_active === "1" || repair.repair_option_active === 1 ? "#22b783" : "#ccc"
+                      }}
+                    />
+                  </label>
+
                   <button
                     onClick={() => handleSave(repair.id)}
                     disabled={status === "saving"}
