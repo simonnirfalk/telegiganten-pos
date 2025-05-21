@@ -81,7 +81,7 @@ export default function EditRepairsPage() {
         alert("Kunne ikke opdatere status.");
       }
     } catch (err) {
-      console.error("Fejl:", err);
+      console.error("Mandarash:", err);
       alert("Der opstod en fejl.");
     }
   };
@@ -153,9 +153,23 @@ export default function EditRepairsPage() {
     fetch("https://telegiganten.dk/wp-json/telegiganten/v1/all-repairs")
       .then(res => res.json())
       .then(data => {
-        setData(data);
+        // ✅ Normaliser aktiv-flaget som tal (1 eller 0)
+        const normalized = data.map(brand => ({
+          ...brand,
+          models: brand.models.map(model => ({
+            ...model,
+            options: model.options.map(opt => ({
+              ...opt,
+              repair_option_active: Number(opt.repair_option_active) === 1 ? 1 : 0
+            }))
+          }))
+        }));
+
+        setData(normalized);
+
+        // 💡 Opsæt titler til Select
         const titles = [];
-        data.forEach(b =>
+        normalized.forEach(b =>
           b.models.forEach(m =>
             m.options.forEach(o => {
               if (!titles.includes(o.title)) titles.push(o.title);
@@ -166,6 +180,7 @@ export default function EditRepairsPage() {
       })
       .catch(err => console.error("Fejl ved hentning:", err));
   }, []);
+
 
   const handleEdit = (repairId, field, value) => {
     setEditedRepairs(prev => ({
@@ -588,7 +603,7 @@ useEffect(() => {
               return groupIndex % 2 === 1;
             })();
 
-            const isActive = repair.repair_option_active === 1 || repair.repair_option_active === "1";
+            const isActive = Number(repair.repair_option_active) === 1;
 
             const rowStyle = {
               backgroundColor: isOddModelGroup ? "#f8f8f8" : "#ffffff",
@@ -631,19 +646,18 @@ useEffect(() => {
                     <span style={{ fontSize: "0.8rem", color: "#666" }}>Aktiv</span>
                     <input
                       type="checkbox"
-                      checked={repair.repair_option_active === "1" || repair.repair_option_active === 1}
+                      checked={Number(repair.repair_option_active) === 1}
                       onChange={(e) => toggleRepairActive(repair.id, e.target.checked)}
                       style={{
                         position: "relative",
                         width: "40px",
                         height: "20px",
-                        backgroundColor: "#ccc",
                         borderRadius: "20px",
                         appearance: "none",
                         outline: "none",
                         cursor: "pointer",
                         transition: "background-color 0.2s",
-                        backgroundColor: repair.repair_option_active === "1" || repair.repair_option_active === 1 ? "#22b783" : "#ccc"
+                        backgroundColor: Number(repair.repair_option_active) === 1 ? "#22b783" : "#ccc"
                       }}
                     />
                   </label>
@@ -681,7 +695,7 @@ useEffect(() => {
                     <span className="text-green-600 text-sm">✔ Gemt</span>
                   )}
                   {status === "error" && (
-                    <span className="text-red-600 text-sm">Fejl!</span>
+                    <span className="text-red-600 text-sm">Mandarash!</span>
                   )}
                 </td>
               </tr>
