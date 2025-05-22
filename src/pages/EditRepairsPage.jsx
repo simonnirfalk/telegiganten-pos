@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import Select from "react-select";
 import { FaHome } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
+import SwitchToggle from "../components/SwitchToggle";
 
 export default function EditRepairsPage() {
   const [data, setData] = useState([]);
@@ -603,7 +604,7 @@ useEffect(() => {
               return groupIndex % 2 === 1;
             })();
 
-            const isActive = Number(repair.repair_option_active) === 1;
+            const isActive = String(repair.repair_option_active) === "1";
 
             const rowStyle = {
               backgroundColor: isOddModelGroup ? "#f8f8f8" : "#ffffff",
@@ -644,24 +645,11 @@ useEffect(() => {
                   {/* Aktiver/deaktiver-switch */}
                   <label style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem" }}>
                     <span style={{ fontSize: "0.8rem", color: "#666" }}>Aktiv</span>
-                    <input
-                      type="checkbox"
-                      checked={Number(repair.repair_option_active) === 1}
-                      onChange={(e) => toggleRepairActive(repair.id, e.target.checked)}
-                      style={{
-                        position: "relative",
-                        width: "40px",
-                        height: "20px",
-                        borderRadius: "20px",
-                        appearance: "none",
-                        outline: "none",
-                        cursor: "pointer",
-                        transition: "background-color 0.2s",
-                        backgroundColor: Number(repair.repair_option_active) === 1 ? "#22b783" : "#ccc"
-                      }}
+                    <SwitchToggle
+                      checked={Number(repair.repair_option_active) === "1"}
+                      onChange={(checked) => toggleRepairActive(repair.id, checked)}
                     />
                   </label>
-
                   <button
                     onClick={() => handleSave(repair.id)}
                     disabled={status === "saving"}
