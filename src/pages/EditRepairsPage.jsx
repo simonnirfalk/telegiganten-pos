@@ -4,6 +4,50 @@ import { FaHome } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import SwitchToggle from "../components/SwitchToggle";
 
+// Sorteringsrækkefølge for brands
+const brandOrder = [
+  "iPhone", "Samsung mobil", "iPad", "MacBook", "iMac", "Samsung Galaxy Tab", "Motorola mobil",
+  "OnePlus mobil", "Nokia mobil", "Huawei mobil", "Xiaomi mobil", "Sony Xperia", "Oppo mobil",
+  "Microsoft mobil", "Honor mobil", "Google Pixel", "Apple Watch", "Samsung Book", "Huawei tablet"
+];
+
+// Sorteringsfunktion for brands
+const sortBrands = (a, b) => {
+  return brandOrder.indexOf(a.brand) - brandOrder.indexOf(b.brand);
+};
+
+// Rækkefølge for model-varianter
+const variantOrder = ["", " Plus", " Pro", " Pro Max"];
+
+const extractModelRank = modelName => {
+  const match = modelName.match(/\d+/);
+  const number = match ? parseInt(match[0]) : 0;
+  const variant = variantOrder.findIndex(v => modelName.includes(v));
+  return { number, variant };
+};
+
+const sortModels = (a, b) => {
+  const aRank = extractModelRank(a.model);
+  const bRank = extractModelRank(b.model);
+
+  if (aRank.number !== bRank.number) {
+    return bRank.number - aRank.number; // Nyeste først
+  }
+
+  return aRank.variant - bRank.variant; // Standard → Plus → Pro → Pro Max
+};
+
+// Rækkefølge for reparationstyper
+const repairTitleOrder = [
+  "Skærm", "Skærm A+", "Skærm OEM", "Skærm (Officiel - pulled)", "Beskyttelsesglas", "Batteri",
+  "Bundstik", "Bagcover (glas)", "Bagcover (inkl. ramme)", "Bagkamera", "Frontkamera", "Højtaler",
+  "Ørehøjtaler", "Vandskade", "Tænd/sluk", "Volumeknap", "Software", "Overfør data til ny enhed", "Diagnose"
+];
+
+const sortRepairs = (a, b) => {
+  return repairTitleOrder.indexOf(a.title) - repairTitleOrder.indexOf(b.title);
+};
+
 export default function EditRepairsPage() {
   const [data, setData] = useState([]);
   const [editedRepairs, setEditedRepairs] = useState({});
@@ -157,16 +201,20 @@ export default function EditRepairsPage() {
         // ✅ Normaliser aktiv-flaget som tal (1 eller 0)
         const normalized = data.map(brand => ({
           ...brand,
-          models: brand.models.map(model => ({
-            ...model,
-            options: model.options.map(opt => ({
-              ...opt,
-              repair_option_active: Number(opt.repair_option_active) === 1 ? 1 : 0
+          models: brand.models
+            .map(model => ({
+              ...model,
+              options: model.options
+                .map(opt => ({
+                  ...opt,
+                  repair_option_active: Number(opt.repair_option_active) === 1 ? 1 : 0
+                }))
+                .sort(sortRepairs) // ← Her!
             }))
-          }))
+            .sort(sortModels)
         }));
 
-        setData(normalized);
+        (normalized);setData(normalized.sort(sortBrands));
 
         // 💡 Opsæt titler til Select
         const titles = [];
@@ -505,6 +553,74 @@ useEffect(() => {
 
     </div>
 
+    {showCreateForm && (
+      <div style={{ marginBottom: "2rem", border: "1px solid #ddd", padding: "1rem", borderRadius: "6px" }}>
+        <h4 style={{ marginBottom: "1rem", fontSize: "1.1rem", fontWeight: "bold" }}>Opret ny reparation</h4>
+
+        <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
+          <select
+            value={newRepair.brand}
+            onChange={e => setNewRepair(prev => ({ ...prev, brand: e.target.value }))}
+            style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "200px" }}
+          >
+            <option value="">Vælg enhed</option>
+            {data.map(b => (
+              <option key={b.brand} value={b.brand}>{b.brand}</option>
+            ))}
+          </select>
+
+          <select
+            value={newRepair.model}
+            onChange={e => setNewRepair(prev => ({ ...prev, model: e.target.value }))}
+            style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "200px" }}
+          >
+            <option value="">Vælg model</option>
+            {data.find(b => b.brand === newRepair.brand)?.models.map(m => (
+              <option key={m.model} value={m.model}>{m.model}</option>
+            )) ?? []}
+          </select>
+
+          <input
+            type="text"
+            placeholder="Titel"
+            value={newRepair.title}
+            onChange={e => setNewRepair(prev => ({ ...prev, title: e.target.value }))}
+            style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "180px" }}
+          />
+
+          <input
+            type="number"
+            placeholder="Pris"
+            value={newRepair.price}
+            onChange={e => setNewRepair(prev => ({ ...prev, price: e.target.value }))}
+            style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "120px" }}
+          />
+
+          <input
+            type="number"
+            placeholder="Tid (min)"
+            value={newRepair.duration}
+            onChange={e => setNewRepair(prev => ({ ...prev, duration: e.target.value }))}
+            style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "120px" }}
+          />
+
+          <button
+            onClick={handleCreateRepair}
+            style={{
+              backgroundColor: "#22b783",
+              color: "white",
+              padding: "10px 16px",
+              border: "none",
+              borderRadius: "6px",
+              cursor: "pointer"
+            }}
+          >
+            Opret
+          </button>
+        </div>
+      </div>
+    )}
+
     {/* Sticky header: søg + filtrér + gem */}
     <div
       style={{
@@ -646,7 +762,7 @@ useEffect(() => {
                   <label style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem" }}>
                     <span style={{ fontSize: "0.8rem", color: "#666" }}>Aktiv</span>
                     <SwitchToggle
-                      checked={Number(repair.repair_option_active) === "1"}
+                      checked={repair.repair_option_active === 1}
                       onChange={(checked) => toggleRepairActive(repair.id, checked)}
                     />
                   </label>
