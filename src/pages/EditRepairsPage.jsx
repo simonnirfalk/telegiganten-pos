@@ -522,7 +522,7 @@ useEffect(() => {
       >
         {showCreateForm ? "Skjul opretformular" : "Opret reparation"}
       </button>
-      <button
+      {/* <button
         onClick={async () => {
           const allIds = data
             .flatMap(b => b.models)
@@ -549,7 +549,7 @@ useEffect(() => {
         }}
       >
         Aktivér alle
-      </button>
+      </button> */}
 
     </div>
 
