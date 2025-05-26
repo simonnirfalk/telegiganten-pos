@@ -24,7 +24,8 @@ export default function Dashboard() {
         <div onClick={() => navigate("/bookings")} style={navBoxStyle}>Bookinger</div>
         <div onClick={() => navigate("/customers")} style={navBoxStyle}>Kunder</div>
         <div onClick={() => navigate("/edit-repairs")} style={navBoxStyle}>Priser</div>
-        <div style={navBoxStyle}>Reservedele</div>
+        <div onClick={() => navigate("/spareparts")} style={navBoxStyle}>Reservedele</div>
+
       </div>
 
       {/* Reparationer */}

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { FaUndo, FaTrash, FaPlus, FaHistory } from "react-icons/fa";
+import { FaUndo, FaTrash, FaPlus, FaHistory, FaHome } from "react-icons/fa";
+import { useNavigate } from "react-router-dom";
 
 export default function SparePartsPage() {
   const [parts, setParts] = useState([]);
@@ -8,9 +9,10 @@ export default function SparePartsPage() {
   const [history, setHistory] = useState([]);
   const [newPart, setNewPart] = useState({ model: "", price: "", stock: "", location: "", category: "", cost_price: "", repair: "" });
   const [editingIndex, setEditingIndex] = useState(null);
+  const navigate = useNavigate();
 
   const fetchParts = async () => {
-    const res = await fetch("/wp-json/telegiganten/v1/spareparts");
+    const res = await fetch("https://telegiganten.dk/wp-json/telegiganten/v1/spareparts");
     const data = await res.json();
     setParts(data);
     setFiltered(data);
@@ -66,10 +68,27 @@ export default function SparePartsPage() {
     fetchParts();
   };
 
-  return (
+ return (
+  <>
+    <div className="mb-8 p1-2">
+      <button
+        onClick={() => navigate("/")}
+        style={{
+          backgroundColor: "#2166AC",
+          color: "white",
+          padding: "0.6rem 1rem",
+          borderRadius: "6px",
+          border: "none",
+          cursor: "pointer"
+        }}
+      >
+        <FaHome style={{ marginRight: "6px" }} /> Dashboard
+      </button>
+    </div>
+
     <div className="p-6">
-      <div className="flex justify-between mb-4">
-        <div className="flex gap-2">
+      <div className="flex justify-between items-center mb-6 px-2">
+        <div className="flex gap-3">
           <button onClick={undoLast} className="bg-green-600 text-white p-2 rounded"><FaUndo /></button>
           <button onClick={() => alert(JSON.stringify(history, null, 2))} className="bg-green-600 text-white p-2 rounded"><FaHistory /></button>
         </div>
@@ -100,18 +119,18 @@ export default function SparePartsPage() {
           <button onClick={addPart} className="col-span-1 bg-blue-600 text-white p-2 rounded">Tilføj</button>
         </div>
       )}
-
+      
       <table className="w-full text-sm border">
         <thead className="bg-gray-100">
           <tr>
-            <th className="p-2 text-left">Model</th>
-            <th className="p-2 text-left">Pris</th>
-            <th className="p-2 text-left">Lager</th>
-            <th className="p-2 text-left">Lokation</th>
-            <th className="p-2 text-left">Kategori</th>
-            <th className="p-2 text-left">Kostpris</th>
-            <th className="p-2 text-left">Reparation</th>
-            <th></th>
+            <th className="p-2 text-left" style={{ width: "40%" }}>Model</th>
+            <th className="p-2 text-left" style={{ width: "5%" }}>Pris</th>
+            <th className="p-2 text-left" style={{ width: "5%" }}>Lager</th>
+            <th className="p-2 text-left" style={{ width: "10%" }}>Lokation</th>
+            <th className="p-2 text-left" style={{ width: "10%" }}>Kategori</th>
+            <th className="p-2 text-left" style={{ width: "10%" }}>Kostpris</th>
+            <th className="p-2 text-left" style={{ width: "15%" }}>Reparation</th>
+            <th className="p-2 text-left" style={{ width: "5%" }}></th>
           </tr>
         </thead>
         <tbody>
@@ -134,5 +153,6 @@ export default function SparePartsPage() {
         </tbody>
       </table>
     </div>
+  </>
   );
 }
