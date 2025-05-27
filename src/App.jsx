@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Routes, Route } from "react-router-dom";
 import Dashboard from "./pages/Dashboard";
 import NewRepair from "./pages/NewRepair";
-import BookingsPage from "./pages/BookingsPage";
+import RepairsPage from "./pages/RepairsPage";
 import CustomersPage from "./pages/CustomersPage";
 import CustomerDetailPage from "./pages/CustomerDetailPage";
 import { RepairProvider } from "./context/RepairContext";
@@ -52,7 +52,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/opret" element={<NewRepair />} />
-            <Route path="/bookings" element={<BookingsPage />} />
+            <Route path="/repairs" element={<RepairsPage />} />
             <Route path="/customers" element={<CustomersPage customers={customers} />} />
             <Route path="/customers/:id" element={<CustomerDetailPage customers={customers} />} />
             <Route path="/edit-repairs" element={<EditRepairsPage />} />

@@ -32,9 +32,12 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
             time: r.time,
             model_id: r.model_id,
             order_id: order.id,
-            customer_id: order.customer?.id || null
+            customer_id: order.customer?.id || null,
+            payment: paymentType,
+            status: order.status || "booket"
           })
         });
+
         const result = await response.json();
         if (result.status === "created" && result.repair_id) {
           updatedRepairs.push({ ...r, id: result.repair_id });
@@ -46,7 +49,7 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
         console.error("Fejl ved gem af reparation:", error);
         updatedRepairs.push(r);
       }
-    }    
+    }
 
     setOrder((prev) => ({ ...prev, repairs: updatedRepairs }));
   };
@@ -72,9 +75,9 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
         </head>
         <body>
           <h1>Telegiganten</h1>
-          <p>Taastrup Hovedgade 123, 2630 Taastrup<br />
-          Tlf: 70 80 90 00 · kontakt@telegiganten.dk<br />
-          Åbent: Man–Fre 10–18, Lør 10–15</p>
+          <p>Taastrup Hovedgade 66, 2630 Taastrup<br />
+          Tlf: 70 70 78 56 · info@telegiganten.dk<br />
+          Åbent: Man–Fre 10–18, Lør 10–14</p>
 
           <div class="line"></div>
 
@@ -250,6 +253,19 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
             <p>
               Total: {paymentType === "garanti" ? "Garanti" : paymentType === "depositum" ? `${remaining} kr tilbage` : `${totalPrice} kr`}
             </p>
+          </div>
+          <div style={{ marginTop: "1rem" }}>
+            <label style={{ fontWeight: "bold", marginBottom: "0.5rem", display: "block" }}>Status:</label>
+            <select
+              value={order.status || "booket"}
+              onChange={(e) => setOrder(prev => ({ ...prev, status: e.target.value }))}
+              style={{ width: "100%", padding: "0.5rem", borderRadius: "6px", border: "1px solid #ccc" }}
+            >
+              <option value="booket">Booket</option>
+              <option value="under reparation">Under reparation</option>
+              <option value="afventer">Afventer</option>
+              <option value="afsluttet">Afsluttet</option>
+            </select>
           </div>
         </div>
 
