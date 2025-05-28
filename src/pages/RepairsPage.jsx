@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaHome } from "react-icons/fa";
+import RepairHistory from "../components/RepairHistory"; // tilføj stien efter behov
 
 export default function RepairsPage() {
   const navigate = useNavigate();
@@ -12,6 +13,7 @@ export default function RepairsPage() {
   const [selectedStatus, setSelectedStatus] = useState("Alle");
   const [editingStatusId, setEditingStatusId] = useState(null);
   const [repairs, setRepairs] = useState([]);
+  const [selectedRepair, setSelectedRepair] = useState(null);
 
   useEffect(() => {
     fetch("https://telegiganten.dk/wp-json/telegiganten/v1/repair-orders")
@@ -19,6 +21,12 @@ export default function RepairsPage() {
       .then(data => setRepairs(data))
       .catch(err => console.error("Fejl ved hentning af reparationer:", err));
   }, []);
+
+  const handleSaveRepair = (updatedRepair) => {
+    setRepairs(prev => prev.map(r => r.id === updatedRepair.id ? updatedRepair : r));
+    // TODO: Send til backend med fetch() → POST /update-repair
+    console.log("Ændret reparation klar til gem:", updatedRepair);
+  };
 
   const filtered = repairs
     .filter(r =>
@@ -105,7 +113,7 @@ export default function RepairsPage() {
         </thead>
         <tbody>
           {filtered.map((r) => (
-            <tr key={r.id}>
+            <tr key={r.id} onClick={() => setSelectedRepair(r)} style={{ cursor: "pointer" }}>
               <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>{r.order_id}</td>
               <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>{new Date(r.created_at).toLocaleString()}</td>
               <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>{r.customer}</td>
@@ -120,6 +128,14 @@ export default function RepairsPage() {
       </table>
 
       {filtered.length === 0 && <p style={{ marginTop: "1rem" }}>Ingen reparationer fundet.</p>}
+
+      {selectedRepair && (
+        <RepairHistory
+          repair={selectedRepair}
+          onClose={() => setSelectedRepair(null)}
+          onSave={handleSaveRepair}
+        />
+      )}
     </div>
   );
 }

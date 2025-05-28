@@ -27,6 +27,7 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             title: r.repair,
+            repair: r.repair,
             device: r.device,
             price: r.price,
             time: r.time,
