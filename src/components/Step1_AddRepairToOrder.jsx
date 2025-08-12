@@ -1,5 +1,5 @@
-// Step1_AddRepairToOrder.jsx
-import React, { useState, useEffect } from "react";
+// src/pages/Step1_AddRepairToOrder.jsx
+import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaPlus, FaEdit, FaTrashAlt, FaPhone, FaEnvelope, FaUserPlus, FaUser, FaHome, FaLock } from "react-icons/fa";
 import RepairModal from "../components/RepairModal";
@@ -7,6 +7,7 @@ import CreateCustomerModal from "../components/CreateCustomerModal";
 import SelectCustomerModal from "../components/SelectCustomerModal";
 import EditCustomerModal from "../components/EditCustomerModal";
 import { useRepairContext } from "../context/RepairContext";
+import { api } from "../data/apiClient";
 
 function generateOrderId() {
   const last = Number(localStorage.getItem("lastOrderId") || 0) + 1;
@@ -16,6 +17,7 @@ function generateOrderId() {
 
 export default function Step1_AddRepairToOrder({ order, setOrder, onNext, customers, setCustomers }) {
   const navigate = useNavigate();
+
   const [searchTerm, setSearchTerm] = useState("");
   const [modalDevice, setModalDevice] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState("Alle");
@@ -25,7 +27,7 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
   const [editingRepairIndex, setEditingRepairIndex] = useState(null);
   const [editingRepair, setEditingRepair] = useState({});
 
-  const { data: repairStructure, loading } = useRepairContext();
+  const { data: repairStructure = [], loading } = useRepairContext();
 
   useEffect(() => {
     if (!order.id) {
@@ -33,22 +35,27 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
     }
   }, [order.id, setOrder]);
 
+  // Hent kunder via proxy
   useEffect(() => {
-    fetch("https://telegiganten.dk/wp-json/telegiganten/v1/customers")
-      .then(res => res.json())
-      .then(data => {
-        const mapped = data.map(c => ({
+    let isMounted = true;
+    api.getCustomers()
+      .then((data) => {
+        if (!isMounted) return;
+        // Backend returnerer: { id, name, phone, email, extraPhone }
+        const mapped = (Array.isArray(data) ? data : []).map(c => ({
           id: c.id,
-          name: c.title,
+          name: c.name || "",
           phone: c.phone || "",
           email: c.email || "",
-          extraPhone: c.extra_phone || ""
+          extraPhone: c.extraPhone || ""
         }));
         setCustomers(mapped);
       })
       .catch(err => console.error("Fejl ved hentning af kunder:", err));
-  }, []);
+    return () => { isMounted = false; };
+  }, [setCustomers]);
 
+  /* ---------- UI styles ---------- */
   const buttonStyle = {
     backgroundColor: "#2166AC",
     color: "white",
@@ -99,6 +106,7 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
     fontSize: "0.9rem"
   };
 
+  /* ---------- Model/brand filtrering ---------- */
   const popularModelNames = [
     "iPhone 11", "iPhone 12", "iPhone 13", "iPhone 14", "iPhone 15",
     "iPhone 11 Pro", "iPhone 12 Mini", "iPhone 13 Pro Max", "iPhone 14 Plus", "iPhone 15 Pro",
@@ -115,33 +123,35 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
     "Google Pixel", "Apple Watch", "Samsung Book", "Huawei tablet"
   ];
 
-  const allCategories = customCategoryOrder.filter(cat =>
-    cat === "Alle" || repairStructure.some(b => b.title === cat)
+  const allCategories = useMemo(
+    () => customCategoryOrder.filter(cat => cat === "Alle" || repairStructure.some(b => b.title === cat)),
+    [repairStructure]
   );
 
   const brandsFiltered = selectedCategory === "Alle"
-    ? repairStructure.filter(b => b.models.some(m => popularModelNames.includes(m.title)))
+    ? repairStructure.filter(b => (b.models || []).some(m => popularModelNames.includes(m.title)))
     : repairStructure.filter(b => b.title === selectedCategory);
 
-  const filteredModels = brandsFiltered.flatMap(b => b.models)
-    .filter(m => selectedCategory !== "Alle" || popularModelNames.includes(m.title))
-    .filter(m => m.title.toLowerCase().includes(searchTerm.toLowerCase()))
-    .sort((a, b) => {
-      if (selectedCategory === "Alle") {
-        return popularModelNames.indexOf(a.title) - popularModelNames.indexOf(b.title);
-      }
-      return 0;
-    });
+  const filteredModels = useMemo(() => {
+    return brandsFiltered.flatMap(b => b.models || [])
+      .filter(m => selectedCategory !== "Alle" || popularModelNames.includes(m.title))
+      .filter(m => m.title.toLowerCase().includes(searchTerm.toLowerCase()))
+      .sort((a, b) => {
+        if (selectedCategory === "Alle") {
+          return popularModelNames.indexOf(a.title) - popularModelNames.indexOf(b.title);
+        }
+        return 0;
+      });
+  }, [brandsFiltered, searchTerm, selectedCategory]);
+
+  /* ---------- Handlers ---------- */
 
   const handleAddRepair = (deviceName, repair) => {
     if (repair.model_id) {
-      fetch("https://telegiganten.dk/wp-json/telegiganten/v1/increment-model-usage", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ model_id: repair.model_id })
-      }).catch(err => console.error("Fejl ved opdatering af model-usage:", err));
+      // bump usage via proxy (fire-and-forget)
+      api.incrementModelUsage(repair.model_id).catch(err =>
+        console.error("Fejl ved opdatering af model-usage:", err)
+      );
     }
 
     setOrder({
@@ -163,41 +173,33 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
     email: "test@telegiganten.dk"
   };
 
-  const handleCreateCustomer = (newCustomer) => {
+  const handleCreateCustomer = async (newCustomer) => {
     const payload = {
       name: newCustomer.name?.trim(),
       phone: newCustomer.phone?.replace(/\s+/g, ""),
       email: newCustomer.email?.trim() || "",
       extraPhone: newCustomer.extraPhone?.replace(/\s+/g, "") || ""
     };
-  
+
     if (!payload.name || !payload.phone) {
       console.error("Navn og telefonnummer mangler. Payload:", payload);
       return;
     }
-  
-    fetch("https://telegiganten.dk/wp-json/telegiganten/v1/create-customer", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    })
-      .then(res => res.json())
-      .then(data => {
-        if (data.status === "created" || data.status === "exists") {
-          const savedCustomer = {
-            ...payload,
-            id: data.customer_id
-          };
-          setCustomers(prev => [...prev, savedCustomer]);
-          setOrder(prev => ({ ...prev, customer: savedCustomer }));
-        } else {
-          console.error("Uventet svar fra server:", data);
-        }
-        setOpenCreateCustomer(false);
-      })
-      .catch(err => {
-        console.error("Fejl ved oprettelse af kunde:", err);
-      });
+
+    try {
+      const data = await api.createCustomer(payload);
+      if (data.status === "created" || data.status === "exists") {
+        const savedCustomer = { ...payload, id: data.customer_id };
+        setCustomers(prev => [...prev, savedCustomer]);
+        setOrder(prev => ({ ...prev, customer: savedCustomer }));
+      } else {
+        console.error("Uventet svar fra server:", data);
+      }
+    } catch (err) {
+      console.error("Fejl ved oprettelse af kunde:", err);
+    } finally {
+      setOpenCreateCustomer(false);
+    }
   };
 
   const handleSelectCustomer = (selectedCustomer) => {
@@ -236,6 +238,7 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
     setOrder({ ...order, repairs: updated });
   };
 
+  /* ---------- Render ---------- */
   return (
     <div style={{ display: "flex", height: "calc(100vh - 80px)", overflow: "hidden" }}>
       <div style={{ flex: 1, padding: "2rem", overflowY: "auto" }}>
@@ -298,124 +301,121 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
         </div>
       </div>
 
-{/* Sidebar */}
-<div style={{
-  width: "400px",
-  backgroundColor: "#fff",
-  borderLeft: "1px solid #ddd",
-  padding: "2rem 1rem",
-  display: "flex",
-  flexDirection: "column",
-  height: "100vh",
-  position: "sticky",
-  top: 0,
-  overflow: "hidden"
-}}>
-  {/* Scrollbart indhold */}
-  <div style={{ flexGrow: 1, overflowY: "auto" }}>
-    {/* REPARATIONER */}
-    <h4 style={{ textTransform: "uppercase", borderBottom: "1px solid #ddd", marginBottom: "1rem" }}>Reparationer</h4>
-    {order.repairs.length === 0 ? (
-      <p>Ingen reparationer valgt endnu.</p>
-    ) : (
-      <table style={{ width: "100%", fontSize: "0.85rem", marginBottom: "1rem" }}>
-        <thead>
-          <tr style={{ borderBottom: "1px solid #eee" }}>
-            <th style={{ textAlign: "left" }}>Model</th>
-            <th>Reparation</th>
-            <th>Pris</th>
-            <th>Min</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {order.repairs.map((r, i) => (
-            <tr key={i}>
-              <td>{editingRepairIndex === i
-                ? <input value={editingRepair.device} onChange={(e) => setEditingRepair({ ...editingRepair, device: e.target.value })} />
-                : r.device}
-              </td>
-              <td>{editingRepairIndex === i
-                ? <input value={editingRepair.repair} onChange={(e) => setEditingRepair({ ...editingRepair, repair: e.target.value })} />
-                : r.repair}
-              </td>
-              <td>{editingRepairIndex === i
-                ? <input value={editingRepair.price} onChange={(e) => setEditingRepair({ ...editingRepair, price: e.target.value })} />
-                : `${r.price} kr`}</td>
-              <td>{editingRepairIndex === i
-                ? <input value={editingRepair.time} onChange={(e) => setEditingRepair({ ...editingRepair, time: e.target.value })} />
-                : `${r.time}`}</td>
-              <td>
-                {editingRepairIndex === i ? (
-                  <button onClick={() => saveEditedRepair(i)}>✔️</button>
-                ) : (
-                  <>
-                    <button onClick={() => startEditingRepair(i)}><FaEdit /></button>
-                    <button onClick={() => removeRepair(i)}><FaTrashAlt /></button>
-                  </>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    )}
+      {/* Sidebar */}
+      <div style={{
+        width: "400px",
+        backgroundColor: "#fff",
+        borderLeft: "1px solid #ddd",
+        padding: "2rem 1rem",
+        display: "flex",
+        flexDirection: "column",
+        height: "100vh",
+        position: "sticky",
+        top: 0,
+        overflow: "hidden"
+      }}>
+        <div style={{ flexGrow: 1, overflowY: "auto" }}>
+          {/* Reparationer */}
+          <h4 style={{ textTransform: "uppercase", borderBottom: "1px solid #ddd", marginBottom: "1rem" }}>Reparationer</h4>
+          {order.repairs.length === 0 ? (
+            <p>Ingen reparationer valgt endnu.</p>
+          ) : (
+            <table style={{ width: "100%", fontSize: "0.85rem", marginBottom: "1rem" }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid #eee" }}>
+                  <th style={{ textAlign: "left" }}>Model</th>
+                  <th>Reparation</th>
+                  <th>Pris</th>
+                  <th>Min</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {order.repairs.map((r, i) => (
+                  <tr key={i}>
+                    <td>{editingRepairIndex === i
+                      ? <input value={editingRepair.device} onChange={(e) => setEditingRepair({ ...editingRepair, device: e.target.value })} />
+                      : r.device}
+                    </td>
+                    <td>{editingRepairIndex === i
+                      ? <input value={editingRepair.repair} onChange={(e) => setEditingRepair({ ...editingRepair, repair: e.target.value })} />
+                      : r.repair}
+                    </td>
+                    <td>{editingRepairIndex === i
+                      ? <input value={editingRepair.price} onChange={(e) => setEditingRepair({ ...editingRepair, price: e.target.value })} />
+                      : `${r.price} kr`}</td>
+                    <td>{editingRepairIndex === i
+                      ? <input value={editingRepair.time} onChange={(e) => setEditingRepair({ ...editingRepair, time: e.target.value })} />
+                      : `${r.time}`}</td>
+                    <td>
+                      {editingRepairIndex === i ? (
+                        <button onClick={() => saveEditedRepair(i)}>✔️</button>
+                      ) : (
+                        <>
+                          <button onClick={() => startEditingRepair(i)}><FaEdit /></button>
+                          <button onClick={() => removeRepair(i)}><FaTrashAlt /></button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
 
-    {/* KUNDE */}
-    <h4 style={{ textTransform: "uppercase", borderBottom: "1px solid #ddd", marginTop: "2rem", marginBottom: "1rem" }}>Kunde</h4>
-    {order.customer ? (
-      <div style={{ marginBottom: "1rem" }}>
-        <strong>{order.customer.name}</strong><br />
-        <FaPhone /> {order.customer.phone}<br />
-        <FaEnvelope /> {order.customer.email || "-"}
-        <div style={{ marginTop: "0.5rem" }}>
-          <button style={smallButtonStyle} onClick={() => setOpenEditCustomer(true)}><FaEdit /> Rediger</button>
-          <button style={smallButtonStyle} onClick={handleRemoveCustomer}><FaTrashAlt /> Fjern</button>
+          {/* Kunde */}
+          <h4 style={{ textTransform: "uppercase", borderBottom: "1px solid #ddd", marginTop: "2rem", marginBottom: "1rem" }}>Kunde</h4>
+          {order.customer ? (
+            <div style={{ marginBottom: "1rem" }}>
+              <strong>{order.customer.name}</strong><br />
+              <FaPhone /> {order.customer.phone}<br />
+              <FaEnvelope /> {order.customer.email || "-"}
+              <div style={{ marginTop: "0.5rem" }}>
+                <button style={smallButtonStyle} onClick={() => setOpenEditCustomer(true)}><FaEdit /> Rediger</button>
+                <button style={smallButtonStyle} onClick={handleRemoveCustomer}><FaTrashAlt /> Fjern</button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <button style={buttonStyle} onClick={() => setOpenCreateCustomer(true)}><FaUserPlus /> Opret kunde</button>
+              <button style={buttonStyle} onClick={() => setOpenSelectCustomer(true)}><FaUser /> Vælg kunde</button>
+            </>
+          )}
+
+          {/* Note & adgangskode */}
+          <h4 style={{ textTransform: "uppercase", borderBottom: "1px solid #ddd", marginTop: "2rem", marginBottom: "1rem" }}>Adgangskode & Note</h4>
+          <label style={{ fontWeight: "bold", fontSize: "0.9rem" }}><FaLock /> Adgangskode</label>
+          <input
+            type="text"
+            placeholder="Adgangskode"
+            style={inputStyle}
+            value={order.password || ""}
+            onChange={(e) => setOrder({ ...order, password: e.target.value })}
+          />
+          <label style={{ fontWeight: "bold", fontSize: "0.9rem", marginTop: "0.5rem" }}><FaEdit /> Note</label>
+          <textarea
+            placeholder="Skriv en note her..."
+            style={{ ...inputStyle, height: "80px", resize: "vertical" }}
+            value={order.note || ""}
+            onChange={(e) => setOrder({ ...order, note: e.target.value })}
+          />
+
+          {/* Fortsæt */}
+          <div style={{ paddingTop: "1rem" }}>
+            <button style={buttonStyle} onClick={onNext} disabled={order.repairs.length === 0}>
+              <FaPlus /> Fortsæt
+            </button>
+          </div>
         </div>
       </div>
-    ) : (
-      <>
-        <button style={buttonStyle} onClick={() => setOpenCreateCustomer(true)}><FaUserPlus /> Opret kunde</button>
-        <button style={buttonStyle} onClick={() => setOpenSelectCustomer(true)}><FaUser /> Vælg kunde</button>
-      </>
-    )}
 
-    {/* NOTE & ADGANGSKODE */}
-    <h4 style={{ textTransform: "uppercase", borderBottom: "1px solid #ddd", marginTop: "2rem", marginBottom: "1rem" }}>Adgangskode & Note</h4>
-    <label style={{ fontWeight: "bold", fontSize: "0.9rem" }}><FaLock /> Adgangskode</label>
-    <input
-      type="text"
-      placeholder="Adgangskode"
-      style={inputStyle}
-      value={order.password || ""}
-      onChange={(e) => setOrder({ ...order, password: e.target.value })}
-    />
-    <label style={{ fontWeight: "bold", fontSize: "0.9rem", marginTop: "0.5rem" }}><FaEdit /> Note</label>
-    <textarea
-      placeholder="Skriv en note her..."
-      style={{ ...inputStyle, height: "80px", resize: "vertical" }}
-      value={order.note || ""}
-      onChange={(e) => setOrder({ ...order, note: e.target.value })}
-    />
-    {/* KNAP – altid synlig */}
-  <div style={{ paddingTop: "1rem" }}>
-    <button style={buttonStyle}
-      onClick={onNext}
-      disabled={order.repairs.length === 0}>
-      <FaPlus /> Fortsæt
-    </button>
-  </div>
-  </div> 
-</div>
-
+      {/* Modals */}
       <RepairModal
         device={modalDevice}
-        repairs={repairStructure
-          .flatMap(brand => brand.models)
-          .find(model => model.id === modalDevice?.id)?.repairs || []}
+        repairs={(repairStructure.flatMap(brand => brand.models || []).find(m => m.id === modalDevice?.id)?.repairs) || []}
         onAdd={handleAddRepair}
         onClose={() => setModalDevice(null)}
-/>
+      />
 
       {openCreateCustomer && (
         <CreateCustomerModal

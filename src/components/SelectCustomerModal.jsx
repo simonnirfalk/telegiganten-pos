@@ -1,4 +1,7 @@
+// src/components/SelectCustomerModal.jsx
 import React, { useState, useEffect } from "react";
+import { api } from "../data/apiClient";
+import { shapeCustomerFromApi } from "../utils/customerUtils";
 
 export default function SelectCustomerModal({ onSelect, onClose }) {
   const [customers, setCustomers] = useState([]);
@@ -7,31 +10,36 @@ export default function SelectCustomerModal({ onSelect, onClose }) {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    fetch("https://telegiganten.dk/wp-json/telegiganten/v1/customers")
-      .then(res => res.json())
-      .then(data => {
+    let isMounted = true;
+
+    (async () => {
+      try {
+        const data = await api.getCustomers();
+        if (!isMounted) return;
         if (Array.isArray(data)) {
-          setCustomers(data);
+          setCustomers(data.map(shapeCustomerFromApi));
         } else {
           throw new Error("Ugyldigt dataformat");
         }
-      })
-      .catch(err => {
+      } catch (err) {
         console.error("Fejl ved hentning af kunder:", err);
-        setError("Kunder kunne ikke hentes.");
-      })
-      .finally(() => setLoading(false));
+        if (isMounted) setError("Kunder kunne ikke hentes.");
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    })();
+
+    return () => { isMounted = false; };
   }, []);
 
-  const filteredCustomers = customers.filter(c =>
-    (c.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (c.phone || "").includes(searchTerm)
+  const filteredCustomers = customers.filter(
+    (c) =>
+      (c.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (c.phone || "").includes(searchTerm)
   );
 
   useEffect(() => {
-    const handleKey = (e) => {
-      if (e.key === "Escape") onClose();
-    };
+    const handleKey = (e) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, [onClose]);
@@ -73,10 +81,7 @@ export default function SelectCustomerModal({ onSelect, onClose }) {
 
         {loading && <p>Indlæser kunder...</p>}
         {error && <p style={{ color: "red" }}>{error}</p>}
-
-        {!loading && !error && filteredCustomers.length === 0 && (
-          <p>Ingen kunder matcher.</p>
-        )}
+        {!loading && !error && filteredCustomers.length === 0 && <p>Ingen kunder matcher.</p>}
 
         {!loading && !error && filteredCustomers.map((c) => (
           <div
@@ -88,10 +93,7 @@ export default function SelectCustomerModal({ onSelect, onClose }) {
               borderRadius: "6px",
               transition: "background 0.2s"
             }}
-            onClick={() => {
-              onSelect(c);
-              onClose();
-            }}
+            onClick={() => { onSelect(c); onClose(); }}
             onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f9f9f9")}
             onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
           >
@@ -101,7 +103,10 @@ export default function SelectCustomerModal({ onSelect, onClose }) {
         ))}
 
         <div style={{ marginTop: "1.5rem", textAlign: "right" }}>
-          <button onClick={onClose} style={{ background: "#ccc", padding: "0.5rem 1rem", border: "none", borderRadius: "6px" }}>
+          <button
+            onClick={onClose}
+            style={{ background: "#ccc", padding: "0.5rem 1rem", border: "none", borderRadius: "6px", cursor: "pointer" }}
+          >
             Luk
           </button>
         </div>
