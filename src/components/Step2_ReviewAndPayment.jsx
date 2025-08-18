@@ -1,143 +1,139 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  FaHome,
-  FaPhone,
-  FaEnvelope,
-  FaLock,
-  FaStickyNote
-} from "react-icons/fa";
+import { FaHome, FaPhone, FaEnvelope, FaLock, FaStickyNote } from "react-icons/fa";
+import { api } from "../data/apiClient";
 
 export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrder }) {
   const navigate = useNavigate();
-  const [paymentType, setPaymentType] = useState("efter");
-  const [depositAmount, setDepositAmount] = useState("");
 
-  const totalPrice = order.repairs.reduce((sum, r) => sum + (r.price || 0), 0);
-  const remaining = Math.max(totalPrice - parseInt(depositAmount || 0, 10), 0);
-  const today = new Date().toLocaleDateString("da-DK");
+  const [paymentType, setPaymentType] = useState(order.paymentType || "efter"); // "efter" | "betalt" | "depositum" | "garanti"
+  const [depositAmount, setDepositAmount] = useState(order.depositAmount || "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
-  const saveRepairsToWordPress = async () => {
+  const total = useMemo(
+    () => (order?.repairs || []).reduce((sum, r) => sum + (Number(r.price) || 0), 0),
+    [order?.repairs]
+  );
+  const totalFormatted = useMemo(() => Number(total).toLocaleString("da-DK"), [total]);
+  const today = useMemo(() => new Date().toLocaleDateString("da-DK"), []);
+  const createdAtISO = useMemo(() => new Date().toISOString(), []);
+
+  const numericDeposit = Number(depositAmount || 0);
+  const remaining = Math.max(total - (isNaN(numericDeposit) ? 0 : numericDeposit), 0);
+
+  const canSubmit =
+    !saving &&
+    (order?.repairs?.length || 0) > 0 &&
+    !!order?.customer?.id &&
+    !!order?.id;
+
+  function paymentText() {
+    if (paymentType === "garanti") return "Garanti (ingen betaling)";
+    if (paymentType === "betalt") return `Betalt: ${totalFormatted} kr`;
+    if (paymentType === "depositum") {
+      return `Depositum: ${numericDeposit} kr — Mangler: ${remaining} kr`;
+    }
+    return `Betaling efter reparation: ${totalFormatted} kr`;
+  }
+
+  async function saveRepairsToWordPress() {
     const updatedRepairs = [];
 
     for (const r of order.repairs) {
-      try {
-        const response = await fetch("https://telegiganten.dk/wp-json/telegiganten/v1/create-repair", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title: r.repair,
-            repair: r.repair,
-            device: r.device,
-            price: r.price,
-            time: r.time,
-            model_id: r.model_id,
-            order_id: order.id,
-            customer_id: order.customer?.id || null,
-            payment: paymentType,
-            status: order.status || "booket"
-          })
-        });
+      // 1) Opret ordrelinjen
+      const title = `${order.id} • ${order.customer?.name || ""} • ${r.device} • ${r.repair}`;
+      const createRes = await api.createRepair({
+        title,
+        repair: r.repair,
+        device: r.device,
+        price: Number(r.price) || 0,
+        time: Number(r.time) || 0,
+        model_id: r.model_id || 0,
+        order_id: order.id,
+        customer_id: order.customer?.id || 0,
 
-        const result = await response.json();
-        if (result.status === "created" && result.repair_id) {
-          updatedRepairs.push({ ...r, id: result.repair_id });
-        } else {
-          console.warn("Uventet svar:", result);
-          updatedRepairs.push(r);
-        }
-      } catch (error) {
-        console.error("Fejl ved gem af reparation:", error);
-        updatedRepairs.push(r);
+        // oprettelses-meta
+        status: "under reparation",
+        payment_type: paymentType,
+        payment_total: Number(total) || 0,
+        deposit_amount: paymentType === "depositum" ? (Number(depositAmount) || 0) : 0,
+        remaining_amount: paymentType === "depositum" ? remaining : 0,
+        payment: paymentText(),
+        password: order.password || "",
+        note: order.note || "",
+        customer: order.customer?.name || "",
+        phone: order.customer?.phone || ""
+      });
+
+      if (!createRes || createRes.status !== "created" || !createRes.repair_id) {
+        throw new Error("Opret reparation fejlede.");
       }
+
+      const repairId = createRes.repair_id;
+
+      // 2) Opdater + historik
+      const fields = {
+        status: "under reparation",
+        payment_type: paymentType,
+        payment_total: Number(total) || 0,
+        deposit_amount: paymentType === "depositum" ? (Number(depositAmount) || 0) : 0,
+        remaining_amount: paymentType === "depositum" ? remaining : 0,
+        payment: paymentText(),
+        created_at: createdAtISO,
+        password: order.password || "",
+        note: order.note || "",
+        customer: order.customer?.name || "",
+        phone: order.customer?.phone || ""
+      };
+
+      await api.updateRepairWithHistory({ repair_id: repairId, fields });
+
+      updatedRepairs.push({ ...r, id: repairId });
     }
 
-    setOrder((prev) => ({ ...prev, repairs: updatedRepairs }));
-  };
+    // skriv tilbage til state (og husk valg til næste gang)
+    setOrder(prev => ({
+      ...prev,
+      paymentType,
+      depositAmount,
+      repairs: updatedRepairs
+    }));
+  }
 
-  const handleSubmitAndPrint = async () => {
-    await saveRepairsToWordPress();
+  async function handleConfirm() {
+    if (!canSubmit) return;
+    setSaving(true);
+    setError("");
 
-    const receiptWindow = window.open("", "_blank", "width=800,height=600");
-    const receiptHtml = `
-      <html>
-        <head>
-          <title>Reparationskvittering</title>
-          <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
-          <style>
-            body {
-              font-family: Arial, sans-serif;
-              padding: 2rem;
-            }
-            h1 { margin: 0; }
-            .line { border-top: 1px dashed #ccc; margin: 1rem 0; }
-            svg { margin-top: 1rem; }
-          </style>
-        </head>
-        <body>
-          <h1>Telegiganten</h1>
-          <p>Taastrup Hovedgade 66, 2630 Taastrup<br />
-          Tlf: 70 70 78 56 · info@telegiganten.dk<br />
-          Åbent: Man–Fre 10–18, Lør 10–14</p>
+    try {
+      await saveRepairsToWordPress();
 
-          <div class="line"></div>
+      const cleanOrder = {
+        id: order.id,
+        today,
+        created_at: createdAtISO,
+        customer: order.customer,
+        repairs: order.repairs,
+        password: order.password || "",
+        note: order.note || "",
+        total,
+        payment: { method: paymentType, upfront: Number(depositAmount) || 0 }
+      };
 
-          <p><strong>Ordre-ID:</strong> #${order.id || "-"}<br />
-          <strong>Dato:</strong> ${new Date().toLocaleDateString("da-DK")}</p>
+      // Fallback til print-siden
+      try { localStorage.setItem("tg_last_order", JSON.stringify(cleanOrder)); } catch {}
 
-          <div class="line"></div>
+      // Navigér til dedikeret printside
+      navigate(`/print-slip/${order.id}`, { state: { order: cleanOrder }, replace: true });
 
-          <p><strong>Kunde:</strong><br />
-          ${order.customer?.name || "-"}<br />
-          ${order.customer?.phone || "-"}<br />
-          ${order.customer?.email || "-"}</p>
-
-          <div class="line"></div>
-
-          <p><strong>Reparation:</strong><br />
-          ${order.repairs.map(r => `
-            <div>
-              <strong>#${r.id || "-"} – ${r.device}</strong><br />
-              ${r.repair} · ${r.price} kr · ${r.time} min
-            </div>
-          `).join("<br />")}
-          </p>
-
-          <div class="line"></div>
-
-          <p><strong>Adgangskode:</strong> ${order.password || "-"}<br />
-          <strong>Note:</strong> ${order.note || "-"}</p>
-
-          <div class="line"></div>
-
-          <p><strong>Total:</strong> ${order.repairs.reduce((sum, r) => sum + (r.price || 0), 0)} kr</p>
-
-          <svg id="barcode"></svg>
-
-          <script>
-            window.onload = function() {
-              JsBarcode("#barcode", "${order.id || "00000"}", {
-                format: "CODE128",
-                lineColor: "#000",
-                width: 2,
-                height: 50,
-                displayValue: true
-              });
-              window.print();
-              window.onafterprint = function() {
-                window.close();
-              };
-            };
-          </script>
-        </body>
-      </html>
-    `;
-
-    receiptWindow.document.write(receiptHtml);
-    receiptWindow.document.close();
-
-    onSubmit();
-  };
+      if (typeof onSubmit === "function") onSubmit();
+    } catch (e) {
+      setError("Der opstod en fejl under gem af reparationerne.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   const cardStyle = (active) => ({
     border: active ? "2px solid #2166AC" : "1px solid #ddd",
@@ -153,24 +149,41 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
 
   return (
     <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
+      {/* Venstre: oversigt */}
       <div style={{ flex: 1, padding: "2rem", backgroundColor: "#f5f5f5", overflowY: "auto" }}>
-        <button
-          onClick={() => navigate("/")}
-          style={{
-            backgroundColor: "#2166AC",
-            color: "white",
-            padding: "0.4rem 1rem",
-            borderRadius: "6px",
-            border: "none",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: "0.5rem",
-            marginBottom: "2rem"
-          }}
-        >
-          <FaHome /> Dashboard
-        </button>
+        <div style={{ display: "flex", gap: "0.75rem", marginBottom: "2rem" }}>
+          <button
+            onClick={() => (onBack ? onBack() : navigate(-1))}
+            style={{
+              backgroundColor: "#f0f0f0",
+              color: "#333",
+              padding: "0.4rem 1rem",
+              borderRadius: "6px",
+              border: "none",
+              cursor: "pointer"
+            }}
+            disabled={saving}
+          >
+            ← Tilbage
+          </button>
+
+          <button
+            onClick={() => navigate("/")}
+            style={{
+              backgroundColor: "#2166AC",
+              color: "white",
+              padding: "0.4rem 1rem",
+              borderRadius: "6px",
+              border: "none",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem"
+            }}
+          >
+            <FaHome /> Dashboard
+          </button>
+        </div>
 
         <div style={{ backgroundColor: "#fff", borderRadius: "12px", padding: "2rem", boxShadow: "0 2px 10px rgba(0,0,0,0.05)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1.5rem" }}>
@@ -190,14 +203,14 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
 
           <div>
             <h4 style={{ fontWeight: "bold" }}>🔧 Reparation</h4>
-            {order.repairs.map((r, i) => (
+            {(order.repairs || []).map((r, i) => (
               <div key={i} style={{ padding: "0.5rem 0", borderBottom: "1px solid #eee" }}>
-                <strong>#{r.id || "-"} – {r.device}</strong><br />
+                <strong>{r.device}</strong><br />
                 <span style={{ color: "#555" }}>{r.repair} • {r.price} kr • {r.time} min</span>
               </div>
             ))}
             <div style={{ marginTop: "1rem", fontWeight: "bold" }}>
-              Samlet: {totalPrice} kr
+              Samlet: {totalFormatted} kr
             </div>
           </div>
 
@@ -209,9 +222,16 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
             <h4 style={{ fontWeight: "bold" }}><FaStickyNote style={{ marginRight: "0.5rem" }} />Note</h4>
             <p>{order.note || "-"}</p>
           </div>
+
+          {error && (
+            <div style={{ marginTop: "1rem", color: "#b00020", fontWeight: 600 }}>
+              {error}
+            </div>
+          )}
         </div>
       </div>
 
+      {/* Højre: betaling + opret/print */}
       <div style={{
         flex: 1,
         padding: "2rem",
@@ -223,9 +243,15 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
         <div>
           <h3 style={{ textTransform: "uppercase", fontWeight: "bold", marginBottom: "1.5rem" }}>Betaling</h3>
 
-          <div onClick={() => setPaymentType("efter")} style={cardStyle(paymentType === "efter")}>Betaling efter reparation<br /><small>{totalPrice} kr</small></div>
-          <div onClick={() => setPaymentType("betalt")} style={cardStyle(paymentType === "betalt")}>Allerede betalt<br /><small>{totalPrice} kr</small></div>
-          <div onClick={() => setPaymentType("depositum")} style={cardStyle(paymentType === "depositum")}>Delvis betalt (depositum)<br /><small>Indtast forudbetalt beløb nedenfor</small></div>
+          <div onClick={() => setPaymentType("efter")} style={cardStyle(paymentType === "efter")}>
+            Betaling efter reparation<br /><small>{totalFormatted} kr</small>
+          </div>
+          <div onClick={() => setPaymentType("betalt")} style={cardStyle(paymentType === "betalt")}>
+            Allerede betalt<br /><small>{totalFormatted} kr</small>
+          </div>
+          <div onClick={() => setPaymentType("depositum")} style={cardStyle(paymentType === "depositum")}>
+            Delvis betalt (depositum)<br /><small>Indtast forudbetalt beløb nedenfor</small>
+          </div>
 
           {paymentType === "depositum" && (
             <div style={{ marginTop: "1rem", marginBottom: "1.5rem" }}>
@@ -248,43 +274,28 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
             </div>
           )}
 
-          <div onClick={() => setPaymentType("garanti")} style={cardStyle(paymentType === "garanti")}>Garanti (ingen betaling)</div>
-
-          <div style={{ marginTop: "2rem", fontWeight: "bold" }}>
-            <p>
-              Total: {paymentType === "garanti" ? "Garanti" : paymentType === "depositum" ? `${remaining} kr tilbage` : `${totalPrice} kr`}
-            </p>
-          </div>
-          <div style={{ marginTop: "1rem" }}>
-            <label style={{ fontWeight: "bold", marginBottom: "0.5rem", display: "block" }}>Status:</label>
-            <select
-              value={order.status || "booket"}
-              onChange={(e) => setOrder(prev => ({ ...prev, status: e.target.value }))}
-              style={{ width: "100%", padding: "0.5rem", borderRadius: "6px", border: "1px solid #ccc" }}
-            >
-              <option value="booket">Booket</option>
-              <option value="under reparation">Under reparation</option>
-              <option value="afventer">Afventer</option>
-              <option value="afsluttet">Afsluttet</option>
-            </select>
+          <div onClick={() => setPaymentType("garanti")} style={cardStyle(paymentType === "garanti")}>
+            Garanti (ingen betaling)
           </div>
         </div>
 
         <div>
           <button
-            onClick={handleSubmitAndPrint}
+            onClick={handleConfirm}
+            disabled={!canSubmit}
             style={{
-              backgroundColor: "#22b783",
+              backgroundColor: canSubmit ? "#22b783" : "#9bdac5",
               color: "white",
               padding: "1rem",
               borderRadius: "8px",
               fontSize: "1rem",
               fontWeight: "bold",
               border: "none",
-              width: "100%"
+              width: "100%",
+              cursor: canSubmit ? "pointer" : "not-allowed"
             }}
           >
-            Opret og print
+            {saving ? "Opretter..." : "Bekræft og print"}
           </button>
         </div>
       </div>

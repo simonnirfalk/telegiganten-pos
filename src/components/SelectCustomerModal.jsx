@@ -1,5 +1,5 @@
 // src/components/SelectCustomerModal.jsx
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../data/apiClient";
 import { shapeCustomerFromApi } from "../utils/customerUtils";
 
@@ -7,11 +7,11 @@ export default function SelectCustomerModal({ onSelect, onClose }) {
   const [customers, setCustomers] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState("");
 
+  // Hent kunder via proxy
   useEffect(() => {
     let isMounted = true;
-
     (async () => {
       try {
         const data = await api.getCustomers();
@@ -28,21 +28,53 @@ export default function SelectCustomerModal({ onSelect, onClose }) {
         if (isMounted) setLoading(false);
       }
     })();
-
     return () => { isMounted = false; };
   }, []);
 
-  const filteredCustomers = customers.filter(
-    (c) =>
-      (c.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (c.phone || "").includes(searchTerm)
-  );
-
+  // Luk på Escape
   useEffect(() => {
-    const handleKey = (e) => { if (e.key === "Escape") onClose(); };
+    const handleKey = (e) => {
+      if (e.key === "Escape") onClose?.();
+      if (e.key === "Enter" && !loading && !error && filteredCustomers.length > 0) {
+        // Vælg første match med Enter for hurtighed
+        onSelect?.(filteredCustomers[0]);
+        onClose?.();
+      }
+    };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [onClose]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onClose, loading, error]);
+
+  // Hjælpere til søgning/sortering
+  const norm = (s) => (s || "").toString().toLowerCase().trim();
+  const normPhone = (s) => (s || "").toString().replace(/\s+/g, "");
+
+  const filteredCustomers = useMemo(() => {
+    const q = norm(searchTerm);
+    const qPhone = normPhone(searchTerm);
+    const list = customers.filter((c) => {
+      const name = norm(c.name);
+      const phone = normPhone(c.phone);
+      const email = norm(c.email);
+      return (
+        (q && (name.includes(q) || email.includes(q))) ||
+        (qPhone && phone.includes(qPhone)) ||
+        (!q && !qPhone) // tom søgning → alle
+      );
+    });
+
+    // Stabil sortering: navn A→Å, derefter telefon
+    return list.sort((a, b) => {
+      const an = norm(a.name), bn = norm(b.name);
+      if (an < bn) return -1;
+      if (an > bn) return 1;
+      const ap = normPhone(a.phone), bp = normPhone(b.phone);
+      if (ap < bp) return -1;
+      if (ap > bp) return 1;
+      return 0;
+    });
+  }, [customers, searchTerm]);
 
   return (
     <div
@@ -64,24 +96,34 @@ export default function SelectCustomerModal({ onSelect, onClose }) {
           padding: "2rem",
           borderRadius: "10px",
           width: "90%",
-          maxWidth: "500px",
+          maxWidth: "520px",
           maxHeight: "80vh",
           overflowY: "auto"
         }}
       >
-        <h2>Vælg kunde</h2>
+        <h2 style={{ marginTop: 0 }}>Vælg kunde</h2>
 
         <input
           type="text"
-          placeholder="Søg navn eller telefonnummer"
+          placeholder="Søg navn, telefon eller e-mail"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          style={{ marginBottom: "1rem", width: "100%", padding: "0.5rem" }}
+          autoFocus
+          style={{
+            marginBottom: "1rem",
+            width: "100%",
+            padding: "0.5rem",
+            borderRadius: "6px",
+            border: "1px solid #ccc"
+          }}
         />
 
-        {loading && <p>Indlæser kunder...</p>}
+        {loading && <p>Indlæser kunder…</p>}
         {error && <p style={{ color: "red" }}>{error}</p>}
-        {!loading && !error && filteredCustomers.length === 0 && <p>Ingen kunder matcher.</p>}
+
+        {!loading && !error && filteredCustomers.length === 0 && (
+          <p>Ingen kunder matcher.</p>
+        )}
 
         {!loading && !error && filteredCustomers.map((c) => (
           <div
@@ -93,19 +135,26 @@ export default function SelectCustomerModal({ onSelect, onClose }) {
               borderRadius: "6px",
               transition: "background 0.2s"
             }}
-            onClick={() => { onSelect(c); onClose(); }}
+            onClick={() => { onSelect?.(c); onClose?.(); }}
             onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f9f9f9")}
             onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+            title="Vælg kunde"
           >
-            <strong>{c.name}</strong><br />
-            {c.phone} • {c.email || "-"}
+            <strong>{c.name || "—"}</strong><br />
+            {c.phone || "—"} • {c.email || "—"}
           </div>
         ))}
 
         <div style={{ marginTop: "1.5rem", textAlign: "right" }}>
           <button
             onClick={onClose}
-            style={{ background: "#ccc", padding: "0.5rem 1rem", border: "none", borderRadius: "6px", cursor: "pointer" }}
+            style={{
+              background: "#ccc",
+              padding: "0.5rem 1rem",
+              border: "none",
+              borderRadius: "6px",
+              cursor: "pointer"
+            }}
           >
             Luk
           </button>

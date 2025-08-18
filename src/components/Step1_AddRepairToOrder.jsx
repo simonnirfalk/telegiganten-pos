@@ -173,33 +173,12 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
     email: "test@telegiganten.dk"
   };
 
-  const handleCreateCustomer = async (newCustomer) => {
-    const payload = {
-      name: newCustomer.name?.trim(),
-      phone: newCustomer.phone?.replace(/\s+/g, ""),
-      email: newCustomer.email?.trim() || "",
-      extraPhone: newCustomer.extraPhone?.replace(/\s+/g, "") || ""
-    };
-
-    if (!payload.name || !payload.phone) {
-      console.error("Navn og telefonnummer mangler. Payload:", payload);
-      return;
-    }
-
-    try {
-      const data = await api.createCustomer(payload);
-      if (data.status === "created" || data.status === "exists") {
-        const savedCustomer = { ...payload, id: data.customer_id };
-        setCustomers(prev => [...prev, savedCustomer]);
-        setOrder(prev => ({ ...prev, customer: savedCustomer }));
-      } else {
-        console.error("Uventet svar fra server:", data);
-      }
-    } catch (err) {
-      console.error("Fejl ved oprettelse af kunde:", err);
-    } finally {
-      setOpenCreateCustomer(false);
-    }
+  // VIGTIGT: Modalen opretter kunden på serveren og sender den færdige customer tilbage.
+  const handleCreateCustomer = (newCustomer) => {
+    // newCustomer indeholder: { id, name, phone, email, extraPhone }
+    setCustomers(prev => [...prev, newCustomer]);
+    setOrder(prev => ({ ...prev, customer: newCustomer }));
+    setOpenCreateCustomer(false);
   };
 
   const handleSelectCustomer = (selectedCustomer) => {
@@ -425,7 +404,7 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
       )}
       {openSelectCustomer && (
         <SelectCustomerModal
-          customers={[...customers, dummyCustomer]}
+          customers={[...customers, dummyCustomer]} // virker når SelectCustomerModal understøtter valgfri customers-prop
           onSelect={handleSelectCustomer}
           onClose={() => setOpenSelectCustomer(false)}
         />

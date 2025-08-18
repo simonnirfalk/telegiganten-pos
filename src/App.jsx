@@ -6,28 +6,27 @@ import RepairsPage from "./pages/RepairsPage";
 import CustomersPage from "./pages/CustomersPage";
 import CustomerDetailPage from "./pages/CustomerDetailPage";
 import { RepairProvider } from "./context/RepairContext";
-import useRepairData from "./hooks/useRepairData";
 import EditRepairsPage from "./pages/EditRepairsPage";
 import SparePartsPage from "./pages/SparePartsPage";
+import RepairSlipPrint from "./pages/RepairSlipPrint";
+import { api } from "./data/apiClient"; // ← brug proxy
 
 export default function App() {
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Hent kunder med reparationer fra WP REST API
+  // Hent kunder med reparationer (via proxy for konsistens)
   useEffect(() => {
-    const fetchCustomers = async () => {
+    (async () => {
       try {
-        const res = await fetch("https://telegiganten.dk/wp-json/telegiganten/v1/customers-with-repairs");
-        const data = await res.json();
-        setCustomers(data);
+        const data = await api.getCustomersWithRepairs();
+        setCustomers(Array.isArray(data) ? data : []);
       } catch (err) {
         console.error("Fejl ved hentning af kunder:", err);
       } finally {
         setLoading(false);
       }
-    };
-    fetchCustomers();
+    })();
   }, []);
 
   if (loading) return <p style={{ padding: "2rem" }}>Indlæser kundedata...</p>;
@@ -57,6 +56,8 @@ export default function App() {
             <Route path="/customers/:id" element={<CustomerDetailPage customers={customers} />} />
             <Route path="/edit-repairs" element={<EditRepairsPage />} />
             <Route path="/spareparts" element={<SparePartsPage />} />
+            {/* 🔧 Fix: brug den rigtige route til print-siden */}
+            <Route path="/print-slip/:orderId" element={<RepairSlipPrint />} />
           </Routes>
         </main>
       </div>

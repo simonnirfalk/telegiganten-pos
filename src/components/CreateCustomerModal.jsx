@@ -1,5 +1,5 @@
 // src/components/CreateCustomerModal.jsx
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../data/apiClient";
 import { normalizePhone, validatePhone, validateEmail } from "../utils/customerUtils";
 
@@ -11,53 +11,76 @@ export default function CreateCustomerModal({ onClose, onCreate, customers = [] 
     email: "",
   });
   const [errors, setErrors] = useState({});
+  const [serverError, setServerError] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Luk på Escape
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && onClose?.();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   const handleChange = (field, value) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
     setErrors((prev) => ({ ...prev, [field]: "" }));
+    setServerError("");
   };
 
-  const handleSubmit = async () => {
-    const newErrors = {};
+  const cleaned = useMemo(() => ({
+    name: formData.name.trim(),
+    phone: normalizePhone(formData.phone),
+    extraPhone: normalizePhone(formData.extraPhone),
+    email: formData.email.trim().toLowerCase(),
+  }), [formData]);
 
-    if (!formData.name.trim()) newErrors.name = "Navn er påkrævet.";
-    if (!validatePhone(formData.phone)) newErrors.phone = "Ugyldigt telefonnummer.";
-    if (formData.extraPhone && !validatePhone(formData.extraPhone))
-      newErrors.extraPhone = "Ugyldigt ekstra telefonnummer.";
-    if (!validateEmail(formData.email)) newErrors.email = "Ugyldig e-mailadresse.";
+  const validate = () => {
+    const e = {};
+    if (!cleaned.name) e.name = "Navn er påkrævet.";
+    if (!validatePhone(cleaned.phone)) e.phone = "Ugyldigt telefonnummer.";
+    if (cleaned.extraPhone && !validatePhone(cleaned.extraPhone)) e.extraPhone = "Ugyldigt ekstra telefonnummer.";
+    if (!validateEmail(cleaned.email)) e.email = "Ugyldig e-mailadresse.";
 
     // Lokal duplikat-tjek
     const exists = customers.find(
-      (c) => normalizePhone(c.phone) === normalizePhone(formData.phone)
+      (c) => normalizePhone(c.phone) === cleaned.phone
     );
-    if (exists) newErrors.phone = `Telefonnummer findes allerede: ${exists.name}`;
+    if (exists) e.phone = `Telefonnummer findes allerede: ${exists.name}`;
 
-    if (Object.keys(newErrors).length > 0) {
-      setErrors(newErrors);
+    return e;
+  };
+
+  const formInvalid = useMemo(() => {
+    const e = validate();
+    return Object.keys(e).length > 0;
+  }, [cleaned, customers]);
+
+  const handleSubmit = async (e) => {
+    e?.preventDefault?.();
+    if (saving) return;
+
+    const eMap = validate();
+    if (Object.keys(eMap).length > 0) {
+      setErrors(eMap);
       return;
     }
 
-    const payload = {
-      name: formData.name.trim(),
-      phone: normalizePhone(formData.phone),
-      extraPhone: normalizePhone(formData.extraPhone),
-      email: formData.email.trim(),
-    };
-
     setSaving(true);
+    setServerError("");
     try {
-      const data = await api.createCustomer(payload);
+      const data = await api.createCustomer(cleaned);
       if (data?.status === "created" || data?.status === "exists") {
-        const newCustomer = { id: data.customer_id, ...payload };
+        const newCustomer = { id: data.customer_id, ...cleaned };
         onCreate?.(newCustomer);
         onClose?.();
       } else {
-        alert("Uventet svar fra serveren: " + JSON.stringify(data));
+        setServerError(data?.message || "Uventet svar fra serveren.");
       }
     } catch (err) {
       console.error("Fejl ved oprettelse af kunde:", err);
-      alert("Der opstod en fejl under oprettelsen.");
+      // Hvis backend returnerer WP_Error med status 409 for telefon-unik, prøv at læse beskeden
+      const msg = err?.message || "Der opstod en fejl under oprettelsen.";
+      setServerError(msg);
     } finally {
       setSaving(false);
     }
@@ -67,7 +90,7 @@ export default function CreateCustomerModal({ onClose, onCreate, customers = [] 
     <div
       style={{
         position: "fixed",
-        top: 0, left: 0, right: 0, bottom: 0,
+        inset: 0,
         backgroundColor: "rgba(0,0,0,0.5)",
         display: "flex",
         justifyContent: "center",
@@ -76,7 +99,8 @@ export default function CreateCustomerModal({ onClose, onCreate, customers = [] 
       }}
       onClick={onClose}
     >
-      <div
+      <form
+        onSubmit={handleSubmit}
         onClick={(e) => e.stopPropagation()}
         style={{
           background: "white",
@@ -88,7 +112,14 @@ export default function CreateCustomerModal({ onClose, onCreate, customers = [] 
       >
         <h2 style={{ marginTop: 0 }}>Opret kunde</h2>
 
+        {serverError && (
+          <p style={{ color: "#a40000", background: "#ffe8e8", border: "1px solid #f5b5b5", padding: "0.5rem 0.75rem", borderRadius: 8 }}>
+            {serverError}
+          </p>
+        )}
+
         <input
+          autoFocus
           placeholder="Navn"
           value={formData.name}
           onChange={(e) => handleChange("name", e.target.value)}
@@ -122,6 +153,7 @@ export default function CreateCustomerModal({ onClose, onCreate, customers = [] 
 
         <div style={{ textAlign: "right", marginTop: "1rem" }}>
           <button
+            type="button"
             onClick={onClose}
             disabled={saving}
             style={{
@@ -136,8 +168,8 @@ export default function CreateCustomerModal({ onClose, onCreate, customers = [] 
             Annullér
           </button>
           <button
-            onClick={handleSubmit}
-            disabled={saving}
+            type="submit"
+            disabled={saving || formInvalid}
             style={{
               backgroundColor: "#2166AC",
               color: "white",
@@ -145,12 +177,13 @@ export default function CreateCustomerModal({ onClose, onCreate, customers = [] 
               borderRadius: "6px",
               border: "none",
               cursor: "pointer",
+              opacity: saving || formInvalid ? 0.7 : 1
             }}
           >
             {saving ? "Gemmer…" : "Gem kunde"}
           </button>
         </div>
-      </div>
+      </form>
     </div>
   );
 }

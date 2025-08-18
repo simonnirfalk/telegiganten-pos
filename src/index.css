@@ -1,3 +1,4 @@
+/* ====== Base (skærm) ====== */
 :root {
   font-family: Inter, sans-serif;
   line-height: 1.5;
@@ -24,15 +25,9 @@ h1, h2, h3, h4 {
   margin: 0 0 0.5rem 0;
 }
 
-h1 {
-  font-size: 2rem;
-}
-h2 {
-  font-size: 1.5rem;
-}
-h3 {
-  font-size: 1.2rem;
-}
+h1 { font-size: 2rem; }
+h2 { font-size: 1.5rem; }
+h3 { font-size: 1.2rem; }
 
 button {
   font-family: inherit;
@@ -46,10 +41,7 @@ button {
   color: white;
   transition: background-color 0.2s ease;
 }
-
-button:hover {
-  background-color: #1c9c6c;
-}
+button:hover { background-color: #1c9c6c; }
 
 input, select, textarea {
   font-family: inherit;
@@ -60,46 +52,42 @@ input, select, textarea {
   width: 100%;
   box-sizing: border-box;
 }
-
 input:focus, select:focus, textarea:focus {
   border-color: #22b783;
   outline: none;
 }
 
-a {
-  color: #2166AC;
-  text-decoration: none;
+a { color: #2166AC; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Evt. gamle helpers – behold kun skærm-styling */
+.print-wrap {
+  font-family: Arial, sans-serif;
+  padding: 16px;
+  color: #000;
+}
+.print-wrap hr {
+  border: 0;
+  border-top: 1px dashed #ccc;
+  margin: 12px 0;
+}
+@media screen {
+  .print-wrap {
+    max-width: 720px;
+    margin: 0 auto;
+    background: #fff;
+  }
+  .noprint { display: block; }
 }
 
-a:hover {
-  text-decoration: underline;
-}
-
+/* ====== Print (minimal og ufarlig) ====== */
 @media print {
-  body * {
-    visibility: hidden !important;
-    height: 0 !important;
-    overflow: hidden !important;
-    position: absolute !important;
-  }
+  /* Skjul kun ting du markerer som no-print i komponenter */
+  .no-print, .noprint { display: none !important; }
 
-  .receipt,
-  .receipt * {
-    visibility: visible !important;
-  }
+  /* Lad siden være hvid og uden ekstra marginer fra temaet */
+  html, body { background: #fff !important; }
 
-  .receipt {
-    visibility: visible !important;
-    position: fixed !important;
-    top: 0;
-    left: 0;
-    width: 100% !important;
-    height: auto !important;
-    overflow: visible !important;
-    background: white !important;
-    z-index: 9999 !important;
-    padding: 2rem !important;
-
-  }
+  /* Du kan finjustere margins for A4 her (bonprintere ignorerer typisk @page) */
+  @page { size: auto; margin: 8mm; }
 }
-

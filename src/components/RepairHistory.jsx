@@ -1,7 +1,7 @@
 // src/components/RepairHistory.jsx
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
 import { FaTimes } from "react-icons/fa";
-import { proxyFetch } from "../data/apiClient"; // vi bruger direkte proxyFetch for at styre payload-format
+import { api } from "../data/apiClient"; // brug fælles api-klient
 
 export default function RepairHistory({ repair, onClose, onSave }) {
   const overlayRef = useRef(null);
@@ -25,45 +25,39 @@ export default function RepairHistory({ repair, onClose, onSave }) {
     setEdited((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleSave = async () => {
-    setSaving(true);
-    setError("");
-
-    // Diff: kun felter der reelt er ændret
-    const changedFields = {};
+  // beregn diff (kun felter der er ændret)
+  const changedFields = useMemo(() => {
+    const out = {};
     for (const key in edited) {
       if (key === "id" || key === "history") continue;
-      if (edited[key] !== repair[key]) {
-        changedFields[key] = edited[key];
-      }
+      if (edited[key] !== repair[key]) out[key] = edited[key];
     }
+    return out;
+  }, [edited, repair]);
 
-    // Intet at gemme → luk pænt
-    if (Object.keys(changedFields).length === 0) {
-      setSaving(false);
+  const handleSave = async () => {
+    if (!Object.keys(changedFields).length) {
       onClose?.();
       return;
     }
 
+    setSaving(true);
+    setError("");
+
     try {
-      // Kald endpointet via proxy, samme payload som i din gamle version
-      const result = await proxyFetch({
-        path: "/wp-json/telegiganten/v1/update-repair-with-history",
-        method: "POST",
-        body: {
-          repair_id: repair.id,
-          fields: changedFields,
-        },
+      const res = await api.updateRepairWithHistory({
+        repair_id: repair.id,
+        fields: changedFields,
       });
 
-      // Forventet svar: { status: "updated", history: [...] }
-      if (result?.status === "updated") {
-        const newHistory = Array.isArray(result.history) ? result.history : [];
+      // forventet svar: { status: 'updated', history: [...] }
+      if (res?.status === "updated") {
+        const newHistory = Array.isArray(res.history) ? res.history : [];
         setHistory(newHistory);
         onSave?.({ ...edited, history: newHistory });
         onClose?.();
       } else {
-        console.warn("Opdatering mislykkedes:", result);
+        console.warn("Opdatering mislykkedes:", res);
         setError("Opdatering mislykkedes. Prøv igen.");
       }
     } catch (err) {
@@ -75,11 +69,7 @@ export default function RepairHistory({ repair, onClose, onSave }) {
   };
 
   return (
-    <div
-      ref={overlayRef}
-      onClick={handleOverlayClick}
-      style={styles.overlay}
-    >
+    <div ref={overlayRef} onClick={handleOverlayClick} style={styles.overlay}>
       <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div style={styles.header}>
@@ -94,14 +84,10 @@ export default function RepairHistory({ repair, onClose, onSave }) {
           </button>
         </div>
 
-        {/* Evt. fejl */}
-        {error && (
-          <div style={styles.errorBox}>
-            {error}
-          </div>
-        )}
+        {/* Fejlbesked */}
+        {error && <div style={styles.errorBox}>{error}</div>}
 
-        {/* Body med inputs (samme felter som i din gamle) */}
+        {/* Inputs */}
         <div style={styles.body}>
           {[
             { label: "Kunde", field: "customer" },
@@ -121,7 +107,7 @@ export default function RepairHistory({ repair, onClose, onSave }) {
               </label>
               <input
                 type="text"
-                value={edited[field] || ""}
+                value={edited[field] ?? ""}
                 onChange={(e) => handleChange(field, e.target.value)}
                 style={styles.input}
               />
@@ -131,29 +117,26 @@ export default function RepairHistory({ repair, onClose, onSave }) {
 
         {/* Footer */}
         <div style={styles.footer}>
-          <button
-            onClick={onClose}
-            disabled={saving}
-            style={styles.cancel}
-          >
+          <button onClick={onClose} disabled={saving} style={styles.cancel}>
             Annullér
           </button>
           <button
             onClick={handleSave}
             style={styles.save}
-            disabled={saving}
+            disabled={saving || !Object.keys(changedFields).length}
+            title={!Object.keys(changedFields).length ? "Ingen ændringer" : "Gem"}
           >
             {saving ? "Gemmer..." : "Gem ændringer"}
           </button>
         </div>
 
         {/* Historik */}
-        {history?.length > 0 && (
+        {!!history?.length && (
           <div style={{ marginTop: "1.2rem" }}>
             <h3 style={{ margin: "0 0 0.6rem" }}>Historik</h3>
             <ul style={{ paddingLeft: "1.2rem", margin: 0 }}>
-              {history.map((entry, index) => (
-                <li key={index} style={{ marginBottom: "0.4rem" }}>
+              {history.map((entry, idx) => (
+                <li key={idx} style={{ marginBottom: "0.4rem" }}>
                   <small>
                     {entry.timestamp} – {entry.field}: "{entry.old}" → "{entry.new}"
                   </small>
@@ -169,8 +152,11 @@ export default function RepairHistory({ repair, onClose, onSave }) {
 
 function formatDateTime(iso) {
   if (!iso) return "—";
-  try { return new Date(iso).toLocaleString(); }
-  catch { return iso; }
+  try {
+    return new Date(iso).toLocaleString("da-DK");
+  } catch {
+    return iso;
+  }
 }
 
 const styles = {
