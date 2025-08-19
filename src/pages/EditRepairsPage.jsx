@@ -1,60 +1,65 @@
-import React, { useEffect, useState } from "react";
+// src/pages/EditRepairsPage.jsx
+import React, { useEffect, useMemo, useState } from "react";
 import Select from "react-select";
 import { FaHome } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import SwitchToggle from "../components/SwitchToggle";
+import { api, proxyFetch } from "../data/apiClient";
 
-// Sorteringsrækkefølge for brands
+/* --------------------- Sorteringshjælpere --------------------- */
 const brandOrder = [
   "iPhone", "Samsung mobil", "iPad", "MacBook", "iMac", "Samsung Galaxy Tab", "Motorola mobil",
   "OnePlus mobil", "Nokia mobil", "Huawei mobil", "Xiaomi mobil", "Sony Xperia", "Oppo mobil",
   "Microsoft mobil", "Honor mobil", "Google Pixel", "Apple Watch", "Samsung Book", "Huawei tablet"
 ];
 
-// Sorteringsfunktion for brands
 const sortBrands = (a, b) => {
-  return brandOrder.indexOf(a.brand) - brandOrder.indexOf(b.brand);
+  const ia = brandOrder.indexOf(a.brand);
+  const ib = brandOrder.indexOf(b.brand);
+  const sa = ia === -1 ? 999 : ia;
+  const sb = ib === -1 ? 999 : ib;
+  if (sa !== sb) return sa - sb;
+  return a.brand.localeCompare(b.brand, "da");
 };
 
-// Rækkefølge for model-varianter
 const variantOrder = ["", " Plus", " Pro", " Pro Max"];
-
-const extractModelRank = modelName => {
-  const match = modelName.match(/\d+/);
-  const number = match ? parseInt(match[0]) : 0;
-  const variant = variantOrder.findIndex(v => modelName.includes(v));
-  return { number, variant };
+const extractModelRank = (modelName) => {
+  const match = String(modelName || "").match(/\d+/);
+  const number = match ? parseInt(match[0], 10) : 0;
+  const variant = variantOrder.findIndex((v) => String(modelName || "").includes(v));
+  return { number, variant: variant === -1 ? 0 : variant };
 };
 
 const sortModels = (a, b) => {
   const aRank = extractModelRank(a.model);
   const bRank = extractModelRank(b.model);
-
-  if (aRank.number !== bRank.number) {
-    return bRank.number - aRank.number; // Nyeste først
-  }
-
+  if (aRank.number !== bRank.number) return bRank.number - aRank.number; // nyeste først
   return aRank.variant - bRank.variant; // Standard → Plus → Pro → Pro Max
 };
 
-// Rækkefølge for reparationstyper
 const repairTitleOrder = [
   "Skærm", "Skærm A+", "Skærm OEM", "Skærm (Officiel - pulled)", "Beskyttelsesglas", "Batteri",
   "Bundstik", "Bagcover (glas)", "Bagcover (inkl. ramme)", "Bagkamera", "Frontkamera", "Højtaler",
   "Ørehøjtaler", "Vandskade", "Tænd/sluk", "Volumeknap", "Software", "Overfør data til ny enhed", "Diagnose"
 ];
-
 const sortRepairs = (a, b) => {
-  return repairTitleOrder.indexOf(a.title) - repairTitleOrder.indexOf(b.title);
+  const ia = repairTitleOrder.indexOf(a.title);
+  const ib = repairTitleOrder.indexOf(b.title);
+  const sa = ia === -1 ? 999 : ia;
+  const sb = ib === -1 ? 999 : ib;
+  if (sa !== sb) return sa - sb;
+  return String(a.title || "").localeCompare(String(b.title || ""), "da");
 };
 
+/* --------------------- Komponent --------------------- */
 export default function EditRepairsPage() {
+  const navigate = useNavigate();
+
   const [data, setData] = useState([]);
   const [editedRepairs, setEditedRepairs] = useState({});
   const [savingStatus, setSavingStatus] = useState({});
   const [savingAll, setSavingAll] = useState(false);
-  const navigate = useNavigate();
-  
+
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedBrand, setSelectedBrand] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
@@ -82,64 +87,58 @@ export default function EditRepairsPage() {
   const [repairTitleOptions, setRepairTitleOptions] = useState([]);
   const [expandedBrands, setExpandedBrands] = useState([]);
 
-    const resetGlobalModal = () => {
-      setGlobalTitle("");
-      setGlobalPrice("");
-      setGlobalDuration("");
-      setGlobalScope("all");
-      setGlobalBrands([]);
-      setGlobalModels([]);
-    };
+  const resetGlobalModal = () => {
+    setGlobalTitle("");
+    setGlobalPrice("");
+    setGlobalDuration("");
+    setGlobalScope("all");
+    setGlobalBrands([]);
+    setGlobalModels([]);
+  };
+  const handleModalClose = () => {
+    setShowGlobalModal(false);
+    resetGlobalModal();
+  };
 
-    const handleModalClose = () => {
-      setShowGlobalModal(false);
-      resetGlobalModal();
-    };
-
+  /* --------------------- Aktiver/deaktiver --------------------- */
   const toggleRepairActive = async (repairId, isActive) => {
     try {
-      const res = await fetch("https://telegiganten.dk/wp-json/telegiganten/v1/update-repair", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          repair_id: repairId,
-          fields: {
-            repair_option_active: isActive ? 1 : 0
-          }
-        })
+      await api.updateRepair({
+        repair_id: repairId,
+        fields: { repair_option_active: isActive ? 1 : 0 },
       });
 
-      const result = await res.json();
-      if (result.status === "updated") {
-        setData(prev =>
-          prev.map(brand => ({
-            ...brand,
-            models: brand.models.map(model => ({
-              ...model,
-              options: model.options.map(opt =>
-                opt.id === repairId ? { ...opt, repair_option_active: isActive ? 1 : 0 } : opt
-              )
-            }))
-          }))
-        );
-      } else {
-        alert("Kunne ikke opdatere status.");
-      }
+      // Optimistisk UI-opdatering
+      setData((prev) =>
+        prev.map((brand) => ({
+          ...brand,
+          models: brand.models.map((model) => ({
+            ...model,
+            options: model.options.map((opt) =>
+              opt.id === repairId
+                ? { ...opt, repair_option_active: isActive ? 1 : 0 }
+                : opt
+            ),
+          })),
+        }))
+      );
     } catch (err) {
-      console.error("Mandarash:", err);
-      alert("Der opstod en fejl.");
+      console.error("Fejl ved toggle:", err);
+      alert("Kunne ikke opdatere aktiv-status.");
     }
   };
 
+  /* --------------------- Opret ny repair-option --------------------- */
   const handleCreateRepair = async () => {
-    const brand = data.find(b => b.brand === newRepair.brand);
-    const model = brand?.models.find(m => m.model === newRepair.model);
+    const brand = data.find((b) => b.brand === newRepair.brand);
+    const model = brand?.models.find((m) => m.model === newRepair.model);
 
     if (!model) {
       alert("Ugyldig model.");
       return;
     }
 
+    // Vi tager model_id fra en af modelens options (struktur fra /all-repairs)
     const model_id = model.options?.[0]?.model_id;
     if (!model_id) {
       alert("Kunne ikke finde model_id.");
@@ -147,42 +146,39 @@ export default function EditRepairsPage() {
     }
 
     try {
-      const res = await fetch("https://telegiganten.dk/wp-json/telegiganten/v1/create-repair", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: newRepair.title,
-          model_id: model_id,
-          price: parseInt(newRepair.price),
-          time: parseInt(newRepair.duration)
-        })
-      });
-
-      const result = await res.json();
+      const payload = {
+        title: newRepair.title,
+        model_id,
+        price: parseInt(newRepair.price || "0", 10),
+        time: parseInt(newRepair.duration || "0", 10),
+      };
+      const result = await api.createRepair(payload);
 
       if (result?.status === "created") {
         const newOption = {
           id: result.repair_id,
           title: newRepair.title,
-          price: parseInt(newRepair.price),
-          duration: parseInt(newRepair.duration)
+          price: payload.price,
+          duration: payload.time,
+          model_id,
+          // nyoprettet er aktiv medmindre andet siges
+          repair_option_active: 1,
         };
 
-        setData(prev => {
-          return prev.map(b => {
-            if (b.brand !== newRepair.brand) return b;
-            return {
-              ...b,
-              models: b.models.map(m => {
-                if (m.model !== newRepair.model) return m;
-                return {
-                  ...m,
-                  options: [...m.options, newOption]
-                };
-              })
-            };
-          });
-        });
+        setData((prev) =>
+          prev.map((b) =>
+            b.brand !== newRepair.brand
+              ? b
+              : {
+                  ...b,
+                  models: b.models.map((m) =>
+                    m.model !== newRepair.model
+                      ? m
+                      : { ...m, options: [...m.options, newOption].sort(sortRepairs) }
+                  ),
+                }
+          )
+        );
 
         setNewRepair({ brand: "", model: "", title: "", price: "", duration: "" });
       } else {
@@ -194,505 +190,410 @@ export default function EditRepairsPage() {
     }
   };
 
+  /* --------------------- Load data via proxy --------------------- */
   useEffect(() => {
-    fetch("https://telegiganten.dk/wp-json/telegiganten/v1/all-repairs")
-      .then(res => res.json())
-      .then(data => {
-        // ✅ Normaliser aktiv-flaget som tal (1 eller 0)
-        const normalized = data.map(brand => ({
+    let mounted = true;
+    (async () => {
+      try {
+        // Hent all-in-one struktur
+        const raw = await proxyFetch({ path: "/wp-json/telegiganten/v1/all-repairs" });
+
+        // Normalisér:
+        // - Sørg for at repair_option_active = 1 hvis feltet mangler (løser “alt er inaktivt”)
+        // - Sortér i ønskede ordner
+        const normalized = (Array.isArray(raw) ? raw : []).map((brand) => ({
           ...brand,
-          models: brand.models
-            .map(model => ({
+          models: (brand.models || [])
+            .map((model) => ({
               ...model,
-              options: model.options
-                .map(opt => ({
+              options: (model.options || [])
+                .map((opt) => ({
                   ...opt,
-                  repair_option_active: Number(opt.repair_option_active) === 1 ? 1 : 0
+                  // hvis serveren ikke sender feltet → antag aktiv
+                  repair_option_active:
+                    String(opt.repair_option_active ?? "1") === "1" ? 1 : 0,
                 }))
-                .sort(sortRepairs) // ← Her!
+                .sort(sortRepairs),
             }))
-            .sort(sortModels)
+            .sort(sortModels),
         }));
 
-        (normalized);setData(normalized.sort(sortBrands));
+        const sorted = normalized.sort(sortBrands);
+        if (mounted) setData(sorted);
 
-        // 💡 Opsæt titler til Select
-        const titles = [];
-        normalized.forEach(b =>
-          b.models.forEach(m =>
-            m.options.forEach(o => {
-              if (!titles.includes(o.title)) titles.push(o.title);
+        // Udfyld titel-options til Global opdatering
+        const titlesSet = new Set();
+        sorted.forEach((b) =>
+          b.models.forEach((m) =>
+            m.options.forEach((o) => {
+              if (o?.title) titlesSet.add(o.title);
             })
           )
         );
-        setRepairTitleOptions(titles.sort());
-      })
-      .catch(err => console.error("Fejl ved hentning:", err));
+        if (mounted) setRepairTitleOptions(Array.from(titlesSet).sort((a, b) => a.localeCompare(b, "da")));
+      } catch (err) {
+        console.error("Fejl ved hentning:", err);
+        // bevidst ingen alert – siden kan stadig bruges uden data
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-
+  /* --------------------- Redigér og gem --------------------- */
   const handleEdit = (repairId, field, value) => {
-    setEditedRepairs(prev => ({
+    setEditedRepairs((prev) => ({
       ...prev,
-      [repairId]: {
-        ...prev[repairId],
-        [field]: value
-      }
+      [repairId]: { ...prev[repairId], [field]: value },
     }));
   };
 
-const handleSave = async (repairId) => {
-  if (!editedRepairs[repairId]) return;
-  setSavingStatus(prev => ({ ...prev, [repairId]: "saving" }));
+  const handleSave = async (repairId) => {
+    if (!editedRepairs[repairId]) return;
+    setSavingStatus((p) => ({ ...p, [repairId]: "saving" }));
+    try {
+      const patch = {
+        ...(editedRepairs[repairId].title !== undefined && {
+          title: editedRepairs[repairId].title,
+        }),
+        ...(editedRepairs[repairId].price !== undefined && {
+          _telegiganten_repair_repair_price: editedRepairs[repairId].price,
+        }),
+        ...(editedRepairs[repairId].duration !== undefined && {
+          _telegiganten_repair_repair_time: editedRepairs[repairId].duration,
+        }),
+      };
 
-  try {
-    const res = await fetch("https://telegiganten.dk/wp-json/telegiganten/v1/update-repair", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        repair_id: repairId,
-        fields: {
-          ...(editedRepairs[repairId].title !== undefined && { title: editedRepairs[repairId].title }),
-          ...(editedRepairs[repairId].price !== undefined && {
-            _telegiganten_repair_repair_price: editedRepairs[repairId].price
-          }),
-          ...(editedRepairs[repairId].duration !== undefined && {
-            _telegiganten_repair_repair_time: editedRepairs[repairId].duration
-          })
-        }
-      })
-    });
+      await api.updateRepair({ repair_id: repairId, fields: patch });
 
-    const result = await res.json();
-    if (result?.status === "updated") {
-      setSavingStatus(prev => ({ ...prev, [repairId]: "success" }));
-
-      // 🔁 Opdater lokalt i state (uden re-fetch)
-      setData(prevData => {
-        const newData = JSON.parse(JSON.stringify(prevData)); // Deep copy
-        for (const brand of newData) {
-          for (const model of brand.models) {
-            for (const option of model.options) {
-              if (option.id === repairId) {
-                if (editedRepairs[repairId].title !== undefined) {
-                  option.title = editedRepairs[repairId].title;
-                }
-                if (editedRepairs[repairId].price !== undefined) {
-                  option.price = editedRepairs[repairId].price;
-                }
-                if (editedRepairs[repairId].duration !== undefined) {
-                  option.duration = editedRepairs[repairId].duration;
-                }
-              }
-            }
-          }
-        }
-        return newData;
+      // Opdatér lokalt
+      setData((prev) => {
+        const next = prev.map((brand) => ({
+          ...brand,
+          models: brand.models.map((model) => ({
+            ...model,
+            options: model.options.map((opt) =>
+              opt.id === repairId
+                ? {
+                    ...opt,
+                    ...(editedRepairs[repairId].title !== undefined && {
+                      title: editedRepairs[repairId].title,
+                    }),
+                    ...(editedRepairs[repairId].price !== undefined && {
+                      price: editedRepairs[repairId].price,
+                    }),
+                    ...(editedRepairs[repairId].duration !== undefined && {
+                      duration: editedRepairs[repairId].duration,
+                    }),
+                  }
+                : opt
+            ),
+          })),
+        }));
+        return next;
       });
 
-      // Fjern ændringen fra editedRepairs
-      setEditedRepairs(prev => {
-        const updated = { ...prev };
-        delete updated[repairId];
-        return updated;
+      setSavingStatus((p) => ({ ...p, [repairId]: "success" }));
+      setEditedRepairs((prev) => {
+        const n = { ...prev };
+        delete n[repairId];
+        return n;
       });
-    } else {
-      setSavingStatus(prev => ({ ...prev, [repairId]: "error" }));
+    } catch (e) {
+      console.error("Fejl ved gem:", e);
+      setSavingStatus((p) => ({ ...p, [repairId]: "error" }));
     }
-  } catch {
-    setSavingStatus(prev => ({ ...prev, [repairId]: "error" }));
-  }
-};
-
+  };
 
   const handleSaveAll = async () => {
     const allIds = Object.keys(editedRepairs);
     if (allIds.length === 0) return;
-
     setSavingAll(true);
-
     for (const id of allIds) {
+      // sekventielt for at holde det simpelt
+      // (kunne optimeres til Promise.all)
+      // eslint-disable-next-line no-await-in-loop
       await handleSave(id);
     }
-
     setSavingAll(false);
   };
 
-  const handleDelete = async (repairId) => {
-    const confirmDelete = window.confirm("Er du sikker på at du vil slette? Denne handling kan ikke fortrydes.");
-    if (!confirmDelete) return;
+  /* --------------------- Filtrering + Pagination --------------------- */
+  const filteredData = useMemo(() => {
+    const words = searchTerm.toLowerCase().split(" ").filter(Boolean);
 
-    try {
-      const res = await fetch(`https://telegiganten.dk/wp-json/telegiganten/v1/delete-repair`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repair_id: repairId })
-      });
+    return (data || [])
+      .filter((brand) => !selectedBrand || brand.brand === selectedBrand)
+      .map((brand) => ({
+        ...brand,
+        models: (brand.models || [])
+          .filter((model) => {
+            if (selectedModel && model.model !== selectedModel) return false;
+            if (words.length === 0) return true;
+            // match hvis modelnavn eller nogen option-titel indeholder ALLE søgeord
+            return model.options.some((opt) =>
+              words.every(
+                (w) =>
+                  model.model.toLowerCase().includes(w) ||
+                  String(opt.title || "").toLowerCase().includes(w)
+              )
+            );
+          })
+          .map((model) => ({
+            ...model,
+            options: (model.options || []).filter((opt) =>
+              words.every(
+                (w) =>
+                  model.model.toLowerCase().includes(w) ||
+                  String(opt.title || "").toLowerCase().includes(w)
+              )
+            ),
+          })),
+      }))
+      .filter((brand) => brand.models.length > 0);
+  }, [data, selectedBrand, selectedModel, searchTerm]);
 
-      const result = await res.json();
-      if (result?.status === "deleted") {
-        // Fjern reparationen lokalt
-        setData(prevData => {
-          return prevData.map(brand => ({
-            ...brand,
-            models: brand.models.map(model => ({
-              ...model,
-              options: model.options.filter(opt => opt.id !== repairId)
-            }))
-          }));
+  const allFilteredRepairs = useMemo(() => {
+    const arr = [];
+    filteredData.forEach((brand) => {
+      brand.models.forEach((model) => {
+        model.options.forEach((opt) => {
+          arr.push({ brand: brand.brand, model: model.model, ...opt });
         });
-      } else {
-        alert("Noget gik galt ved sletning.");
-      }
-    } catch (err) {
-      console.error("Fejl ved sletning:", err);
-      alert("Kunne ikke slette reparationen.");
-    }
-  };
-
-  const handleApplyGlobalChange = async () => {
-    if (!globalTitle || (!globalPrice && !globalDuration)) {
-      alert("Udfyld titel og mindst ét felt (pris eller tid).");
-      return;
-    }
-
-    const confirm = window.confirm("Er du sikker på, at du vil opdatere reparationer globalt?");
-    if (!confirm) return;
-
-    // Find model- og brand-id'er
-    const brandIds = globalBrands.map(brandName =>
-      data.find(b => b.brand === brandName)?.models.map(m => m.options?.[0]?.model_id)
-    ).flat().filter(Boolean);
-
-    const modelIds = globalModels.map(modelName =>
-      data.flatMap(b => b.models).find(m => m.model === modelName)?.options?.[0]?.model_id
-    ).filter(Boolean);
-
-    const body = {
-      title: globalTitle.trim(),
-      fields: {
-        ...(globalPrice && { _telegiganten_repair_repair_price: globalPrice }),
-        ...(globalDuration && { _telegiganten_repair_repair_time: globalDuration })
-      },
-      scope: globalScope,
-      brands: globalScope === "brands" ? brandIds : [],
-      models: globalScope === "models" ? modelIds : []
-    };
-
-    try {
-      const res = await fetch("https://telegiganten.dk/wp-json/telegiganten/v1/apply-repair-changes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
-      });
-
-      const result = await res.json();
-      if (result.status === "success") {
-        alert(result.message);
-        setShowGlobalModal(false);
-        setGlobalTitle("");
-        setGlobalPrice("");
-        setGlobalDuration("");
-        setGlobalBrands([]);
-        setGlobalModels([]);
-        setGlobalScope("all");
-      } else {
-        alert("Der opstod en fejl: " + (result.message || "Ukendt fejl"));
-      }
-    } catch (err) {
-      console.error("Fejl ved global opdatering:", err);
-      alert("Fejl ved opdatering. Prøv igen.");
-    }
-  };
-
-
-  // ➤ Kombineret filtrering
-  const filteredData = data
-  .filter(brand => !selectedBrand || brand.brand === selectedBrand)
-  .map(brand => ({
-    ...brand,
-    models: brand.models
-      .filter(model => {
-        if (selectedModel && model.model !== selectedModel) return false;
-
-        const searchWords = searchTerm.toLowerCase().split(" ").filter(Boolean);
-
-        // Check if ANY of the model's options match ALL words
-        return model.options.some(opt => {
-          return searchWords.every(word =>
-            model.model.toLowerCase().includes(word) ||
-            opt.title.toLowerCase().includes(word)
-          );
-        });
-      })
-      .map(model => {
-        const searchWords = searchTerm.toLowerCase().split(" ").filter(Boolean);
-
-        return {
-          ...model,
-          options: model.options.filter(opt =>
-            searchWords.every(word =>
-              model.model.toLowerCase().includes(word) ||
-              opt.title.toLowerCase().includes(word)
-            )
-          )
-        };
-      })
-  }))
-  .filter(brand => brand.models.length > 0);
-
-const allFilteredRepairs = [];
-filteredData.forEach(brand => {
-  brand.models.forEach(model => {
-    model.options.forEach(option => {
-      allFilteredRepairs.push({
-        brand: brand.brand,
-        model: model.model,
-        ...option
       });
     });
-  });
-});
+    return arr;
+  }, [filteredData]);
 
-const totalRepairs = allFilteredRepairs.length;
-const totalPages = Math.ceil(totalRepairs / repairsPerPage);
+  const totalRepairs = allFilteredRepairs.length;
+  const totalPages = Math.max(1, Math.ceil(totalRepairs / repairsPerPage));
+  const paginatedRepairs = allFilteredRepairs.slice(
+    (currentPage - 1) * repairsPerPage,
+    currentPage * repairsPerPage
+  );
 
-const paginatedRepairs = allFilteredRepairs.slice(
-  (currentPage - 1) * repairsPerPage,
-  currentPage * repairsPerPage
-);
+  useEffect(() => {
+    const escHandler = (e) => e.key === "Escape" && handleModalClose();
+    document.addEventListener("keydown", escHandler);
+    return () => document.removeEventListener("keydown", escHandler);
+  }, []);
 
-useEffect(() => {
-  const escHandler = (e) => {
-    if (e.key === "Escape") handleModalClose();
-  };
-  document.addEventListener("keydown", escHandler);
-  return () => document.removeEventListener("keydown", escHandler);
-}, []);
-
+  /* --------------------- Render --------------------- */
   return (
-  <div style={{ padding: "2rem" }}>
-    {/* Top-knap */}
-    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1.5rem" }}>
-      <button
-        onClick={() => navigate("/")}
-        style={{
-          backgroundColor: "#2166AC",
-          color: "white",
-          padding: "0.6rem 1rem",
-          borderRadius: "6px",
-          border: "none",
-          cursor: "pointer"
-        }}
-      >
-        <FaHome /> Dashboard
-      </button>
-    </div>
-
-    <h2 style={{ textTransform: "uppercase", fontWeight: "bold", marginBottom: "1rem" }}>
-      Redigér reparationer
-    </h2>
-
-    {/* Handling-knapper (ikke sticky) */}
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "1rem", marginBottom: "2rem" }}>
-      <button
-        onClick={() => setShowGlobalModal(true)}
-        style={{
-          backgroundColor: "#2166AC",
-          color: "white",
-          padding: "10px 16px",
-          border: "none",
-          borderRadius: "6px",
-          cursor: "pointer"
-        }}
-      >
-        Global opdatering
-      </button>
-
-      <button
-        onClick={() => setShowCreateForm(prev => !prev)}
-        style={{
-          backgroundColor: "#2166AC",
-          color: "white",
-          padding: "10px 16px",
-          border: "none",
-          borderRadius: "6px",
-          cursor: "pointer"
-        }}
-      >
-        {showCreateForm ? "Skjul opretformular" : "Opret reparation"}
-      </button>
-      {/* <button
-        onClick={async () => {
-          const allIds = data
-            .flatMap(b => b.models)
-            .flatMap(m => m.options)
-            .filter(o => o.repair_option_active !== 1) // kun deaktiverede
-            .map(o => o.id);
-
-          const confirm = window.confirm(`Er du sikker på, at du vil aktivere ${allIds.length} reparationer?`);
-          if (!confirm) return;
-
-          for (const id of allIds) {
-            await toggleRepairActive(id, true);
-          }
-
-          alert("Alle reparationer er nu aktiveret!");
-        }}
-        style={{
-          backgroundColor: "#22b783",
-          color: "white",
-          padding: "10px 16px",
-          border: "none",
-          borderRadius: "6px",
-          cursor: "pointer"
-        }}
-      >
-        Aktivér alle
-      </button> */}
-
-    </div>
-
-    {showCreateForm && (
-      <div style={{ marginBottom: "2rem", border: "1px solid #ddd", padding: "1rem", borderRadius: "6px" }}>
-        <h4 style={{ marginBottom: "1rem", fontSize: "1.1rem", fontWeight: "bold" }}>Opret ny reparation</h4>
-
-        <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
-          <select
-            value={newRepair.brand}
-            onChange={e => setNewRepair(prev => ({ ...prev, brand: e.target.value }))}
-            style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "200px" }}
-          >
-            <option value="">Vælg enhed</option>
-            {data.map(b => (
-              <option key={b.brand} value={b.brand}>{b.brand}</option>
-            ))}
-          </select>
-
-          <select
-            value={newRepair.model}
-            onChange={e => setNewRepair(prev => ({ ...prev, model: e.target.value }))}
-            style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "200px" }}
-          >
-            <option value="">Vælg model</option>
-            {data.find(b => b.brand === newRepair.brand)?.models.map(m => (
-              <option key={m.model} value={m.model}>{m.model}</option>
-            )) ?? []}
-          </select>
-
-          <input
-            type="text"
-            placeholder="Titel"
-            value={newRepair.title}
-            onChange={e => setNewRepair(prev => ({ ...prev, title: e.target.value }))}
-            style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "180px" }}
-          />
-
-          <input
-            type="number"
-            placeholder="Pris"
-            value={newRepair.price}
-            onChange={e => setNewRepair(prev => ({ ...prev, price: e.target.value }))}
-            style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "120px" }}
-          />
-
-          <input
-            type="number"
-            placeholder="Tid (min)"
-            value={newRepair.duration}
-            onChange={e => setNewRepair(prev => ({ ...prev, duration: e.target.value }))}
-            style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "120px" }}
-          />
-
-          <button
-            onClick={handleCreateRepair}
-            style={{
-              backgroundColor: "#22b783",
-              color: "white",
-              padding: "10px 16px",
-              border: "none",
-              borderRadius: "6px",
-              cursor: "pointer"
-            }}
-          >
-            Opret
-          </button>
-        </div>
-      </div>
-    )}
-
-    {/* Sticky header: søg + filtrér + gem */}
-    <div
-      style={{
-        position: "sticky",
-        top: 0,
-        zIndex: 10,
-        background: "#f9f9f9",
-        padding: "1rem 0",
-        display: "flex",
-        flexWrap: "wrap",
-        gap: "1rem",
-        alignItems: "center",
-        marginBottom: "1.5rem",
-        borderBottom: "1px solid #ddd"
-      }}
-    >
-      <input
-        type="text"
-        placeholder="Søg model eller reparation..."
-        value={searchTerm}
-        onChange={e => setSearchTerm(e.target.value)}
-        style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "250px" }}
-      />
-
-      <select
-        value={selectedBrand}
-        onChange={e => {
-          setSelectedBrand(e.target.value);
-          setSelectedModel("");
-        }}
-        style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "180px" }}
-      >
-        <option value="">Alle enheder</option>
-        {data.map(b => (
-          <option key={b.brand} value={b.brand}>{b.brand}</option>
-        ))}
-      </select>
-
-      <select
-        value={selectedModel}
-        onChange={e => setSelectedModel(e.target.value)}
-        style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "180px" }}
-      >
-        <option value="">Alle modeller</option>
-        {data.find(b => b.brand === selectedBrand)?.models.map(m => (
-          <option key={m.model} value={m.model}>{m.model}</option>
-        )) ?? []}
-      </select>
-
-      <div style={{ display: "flex", flexDirection: "column" }}>
+    <div style={{ padding: "2rem" }}>
+      {/* Top-knap */}
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1.5rem" }}>
         <button
-          onClick={handleSaveAll}
+          onClick={() => navigate("/")}
           style={{
-            backgroundColor: Object.keys(editedRepairs).length === 0 ? "#ccc" : "#2166AC",
+            backgroundColor: "#2166AC",
+            color: "white",
+            padding: "0.6rem 1rem",
+            borderRadius: "6px",
+            border: "none",
+            cursor: "pointer",
+          }}
+        >
+          <FaHome /> Dashboard
+        </button>
+      </div>
+
+      <h2 style={{ textTransform: "uppercase", fontWeight: "bold", marginBottom: "1rem" }}>
+        Redigér reparationer
+      </h2>
+
+      {/* Handling-knapper */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "1rem", marginBottom: "2rem" }}>
+        <button
+          onClick={() => setShowGlobalModal(true)}
+          style={{
+            backgroundColor: "#2166AC",
             color: "white",
             padding: "10px 16px",
             border: "none",
             borderRadius: "6px",
-            cursor: Object.keys(editedRepairs).length === 0 ? "not-allowed" : "pointer"
+            cursor: "pointer",
           }}
-          disabled={Object.keys(editedRepairs).length === 0 || savingAll}
         >
-          {savingAll ? "Gemmer..." : "Gem alle ændringer"}
+          Global opdatering
         </button>
 
-        {Object.keys(editedRepairs).length > 0 && !savingAll && (
-          <span style={{ color: "#cc0000", fontSize: "0.85rem", marginTop: "0.25rem" }}>
-            Husk at gemme ændringer!
-          </span>
-        )}
+        <button
+          onClick={() => setShowCreateForm((prev) => !prev)}
+          style={{
+            backgroundColor: "#2166AC",
+            color: "white",
+            padding: "10px 16px",
+            border: "none",
+            borderRadius: "6px",
+            cursor: "pointer",
+          }}
+        >
+          {showCreateForm ? "Skjul opretformular" : "Opret reparation"}
+        </button>
+
+        {/* Slet alle/aktiver alle – deaktiveret, da endpoints ikke findes i API'et */}
       </div>
-    </div>
+
+      {/* Opret formular */}
+      {showCreateForm && (
+        <div
+          style={{
+            marginBottom: "2rem",
+            border: "1px solid #ddd",
+            padding: "1rem",
+            borderRadius: "6px",
+          }}
+        >
+          <h4 style={{ marginBottom: "1rem", fontSize: "1.1rem", fontWeight: "bold" }}>
+            Opret ny reparation
+          </h4>
+
+          <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
+            <select
+              value={newRepair.brand}
+              onChange={(e) => setNewRepair((prev) => ({ ...prev, brand: e.target.value }))}
+              style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "200px" }}
+            >
+              <option value="">Vælg enhed</option>
+              {data.map((b) => (
+                <option key={b.brand} value={b.brand}>
+                  {b.brand}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={newRepair.model}
+              onChange={(e) => setNewRepair((prev) => ({ ...prev, model: e.target.value }))}
+              style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "200px" }}
+            >
+              <option value="">Vælg model</option>
+              {(data.find((b) => b.brand === newRepair.brand)?.models || []).map((m) => (
+                <option key={m.model} value={m.model}>
+                  {m.model}
+                </option>
+              ))}
+            </select>
+
+            <input
+              type="text"
+              placeholder="Titel"
+              value={newRepair.title}
+              onChange={(e) => setNewRepair((prev) => ({ ...prev, title: e.target.value }))}
+              style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "180px" }}
+            />
+
+            <input
+              type="number"
+              placeholder="Pris"
+              value={newRepair.price}
+              onChange={(e) => setNewRepair((prev) => ({ ...prev, price: e.target.value }))}
+              style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "120px" }}
+            />
+
+            <input
+              type="number"
+              placeholder="Tid (min)"
+              value={newRepair.duration}
+              onChange={(e) => setNewRepair((prev) => ({ ...prev, duration: e.target.value }))}
+              style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "120px" }}
+            />
+
+            <button
+              onClick={handleCreateRepair}
+              style={{
+                backgroundColor: "#22b783",
+                color: "white",
+                padding: "10px 16px",
+                border: "none",
+                borderRadius: "6px",
+                cursor: "pointer",
+              }}
+            >
+              Opret
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Sticky filter/gem-bar */}
+      <div
+        style={{
+          position: "sticky",
+          top: 0,
+          zIndex: 10,
+          background: "#f9f9f9",
+          padding: "1rem 0",
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "1rem",
+          alignItems: "center",
+          marginBottom: "1.5rem",
+          borderBottom: "1px solid #ddd",
+        }}
+      >
+        <input
+          type="text"
+          placeholder="Søg model eller reparation..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "250px" }}
+        />
+
+        <select
+          value={selectedBrand}
+          onChange={(e) => {
+            setSelectedBrand(e.target.value);
+            setSelectedModel("");
+          }}
+          style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "180px" }}
+        >
+          <option value="">Alle enheder</option>
+          {data.map((b) => (
+            <option key={b.brand} value={b.brand}>
+              {b.brand}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={selectedModel}
+          onChange={(e) => setSelectedModel(e.target.value)}
+          style={{ padding: "8px", borderRadius: "6px", border: "1px solid #ccc", width: "180px" }}
+        >
+          <option value="">Alle modeller</option>
+          {(data.find((b) => b.brand === selectedBrand)?.models || []).map((m) => (
+            <option key={m.model} value={m.model}>
+              {m.model}
+            </option>
+          ))}
+        </select>
+
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <button
+            onClick={handleSaveAll}
+            style={{
+              backgroundColor: Object.keys(editedRepairs).length === 0 ? "#ccc" : "#2166AC",
+              color: "white",
+              padding: "10px 16px",
+              border: "none",
+              borderRadius: "6px",
+              cursor: Object.keys(editedRepairs).length === 0 ? "not-allowed" : "pointer",
+            }}
+            disabled={Object.keys(editedRepairs).length === 0 || savingAll}
+          >
+            {savingAll ? "Gemmer..." : "Gem alle ændringer"}
+          </button>
+
+          {Object.keys(editedRepairs).length > 0 && !savingAll && (
+            <span style={{ color: "#cc0000", fontSize: "0.85rem", marginTop: "0.25rem" }}>
+              Husk at gemme ændringer!
+            </span>
+          )}
+        </div>
+      </div>
 
       {/* LISTE */}
       <table className="w-full text-sm border mt-4">
@@ -709,7 +610,10 @@ useEffect(() => {
           {paginatedRepairs.map((repair, index) => {
             const edited = editedRepairs[repair.id] || {};
             const status = savingStatus[repair.id];
-            const isFirstOfModel = index === 0 || repair.model !== paginatedRepairs[index - 1].model;
+            const isFirstOfModel =
+              index === 0 || repair.model !== paginatedRepairs[index - 1].model;
+
+            // Brug alternating baggrund pr. model-gruppe
             const isOddModelGroup = (() => {
               let groupIndex = 0;
               for (let i = 0; i <= index; i++) {
@@ -720,7 +624,7 @@ useEffect(() => {
               return groupIndex % 2 === 1;
             })();
 
-            const isActive = String(repair.repair_option_active) === "1";
+            const isActive = String(repair.repair_option_active ?? "1") === "1";
 
             const rowStyle = {
               backgroundColor: isOddModelGroup ? "#f8f8f8" : "#ffffff",
@@ -730,42 +634,45 @@ useEffect(() => {
 
             return (
               <tr key={repair.id} className="border-t" style={rowStyle}>
-                <td className="p-2 pr-6">
+                <td className="p-2 pr-6" style={{ verticalAlign: "top" }}>
                   <div>
-                    <div style={{ fontWeight: "bold", fontSize: "1rem", lineHeight: "1.3" }}>{repair.model}</div>
+                    <div style={{ fontWeight: "bold", fontSize: "1rem", lineHeight: "1.3" }}>
+                      {repair.model}
+                    </div>
                     <div style={{ fontSize: "0.85rem", color: "#666" }}>{repair.brand}</div>
                   </div>
                 </td>
-                <td className="p-2 p1-5">
+                <td className="p-2 p1-5" style={{ verticalAlign: "top" }}>
                   <input
                     className="border p-1 w-full"
-                    value={edited.title ?? repair.title}
+                    value={edited.title ?? repair.title ?? ""}
                     onChange={(e) => handleEdit(repair.id, "title", e.target.value)}
                   />
                 </td>
-                <td className="p-2">
+                <td className="p-2" style={{ verticalAlign: "top" }}>
                   <input
                     className="border p-1 w-full"
-                    value={edited.price ?? repair.price}
+                    value={edited.price ?? repair.price ?? ""}
                     onChange={(e) => handleEdit(repair.id, "price", e.target.value)}
                   />
                 </td>
-                <td className="p-2">
+                <td className="p-2" style={{ verticalAlign: "top" }}>
                   <input
                     className="border p-1 w-full"
-                    value={edited.duration ?? repair.duration}
+                    value={edited.duration ?? repair.duration ?? ""}
                     onChange={(e) => handleEdit(repair.id, "duration", e.target.value)}
                   />
                 </td>
-                <td className="p-2 flex gap-2 items-center">
-                  {/* Aktiver/deaktiver-switch */}
+                <td className="p-2 flex gap-2 items-center" style={{ verticalAlign: "top" }}>
+                  {/* Aktiv/deaktiv */}
                   <label style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem" }}>
                     <span style={{ fontSize: "0.8rem", color: "#666" }}>Aktiv</span>
                     <SwitchToggle
-                      checked={repair.repair_option_active === 1}
+                      checked={isActive}
                       onChange={(checked) => toggleRepairActive(repair.id, checked)}
                     />
                   </label>
+
                   <button
                     onClick={() => handleSave(repair.id)}
                     disabled={status === "saving"}
@@ -775,31 +682,21 @@ useEffect(() => {
                       padding: "4px 12px",
                       borderRadius: "6px",
                       border: "none",
-                      cursor: status === "saving" ? "not-allowed" : "pointer"
+                      cursor: status === "saving" ? "not-allowed" : "pointer",
                     }}
                   >
                     {status === "saving" ? "Gemmer..." : "GEM"}
                   </button>
-                  <button
-                    onClick={() => handleDelete(repair.id)}
-                    title="Slet reparation"
-                    style={{
-                      backgroundColor: "#dc2626",
-                      color: "white",
-                      padding: "4px 8px",
-                      borderRadius: "6px",
-                      border: "none",
-                      cursor: "pointer"
-                    }}
-                  >
-                    SLET
-                  </button>
+
+                  {/* SLET er skjult – endpoint findes ikke i plugin'et
+                  <button ...>SLET</button>
+                  */}
 
                   {status === "success" && (
                     <span className="text-green-600 text-sm">✔ Gemt</span>
                   )}
                   {status === "error" && (
-                    <span className="text-red-600 text-sm">Mandarash!</span>
+                    <span className="text-red-600 text-sm">Fejl!</span>
                   )}
                 </td>
               </tr>
@@ -808,323 +705,326 @@ useEffect(() => {
         </tbody>
       </table>
 
-  {/* PAGINATION */}
-  <div
-    style={{
-      display: "flex",
-      alignItems: "center",
-      gap: "1rem",
-      marginTop: "2rem",
-      flexWrap: "wrap"
-    }}
-  >
-    {/* Forrige-knap */}
-    <button
-      disabled={currentPage === 1}
-      onClick={() => setCurrentPage(currentPage - 1)}
-      style={{
-        backgroundColor: currentPage === 1 ? "#ccc" : "#2166AC",
-        color: "white",
-        padding: "6px 14px",
-        borderRadius: "6px",
-        border: "none",
-        cursor: currentPage === 1 ? "not-allowed" : "pointer"
-      }}
-    >
-      Forrige
-    </button>
-
-    <span style={{ fontSize: "0.95rem" }}>
-      Side {currentPage} af {totalPages} ({totalRepairs} resultater)
-    </span>
-
-    {/* Næste-knap */}
-    <button
-      disabled={currentPage === totalPages}
-      onClick={() => setCurrentPage(currentPage + 1)}
-      style={{
-        backgroundColor: currentPage === totalPages ? "#ccc" : "#2166AC",
-        color: "white",
-        padding: "6px 14px",
-        borderRadius: "6px",
-        border: "none",
-        cursor: currentPage === totalPages ? "not-allowed" : "pointer"
-      }}
-    >
-      Næste
-    </button>
-
-    {/* Gå til side */}
-    <label htmlFor="pageJump" style={{ fontSize: "0.9rem" }}>Gå til side:</label>
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        const pageNum = parseInt(pageInput);
-        if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= totalPages) {
-          setCurrentPage(pageNum);
-          setPageInput("");
-        }
-      }}
-      style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
-    >
-      <input
-        id="pageJump"
-        type="number"
-        value={pageInput}
-        onChange={e => setPageInput(e.target.value)}
-        min={1}
-        max={totalPages}
-        style={{
-          border: "1px solid #ccc",
-          padding: "6px 8px",
-          borderRadius: "6px",
-          width: "60px"
-        }}
-      />
-      <button
-        type="submit"
-        style={{
-          backgroundColor: "#2166AC",
-          color: "white",
-          padding: "6px 14px",
-          borderRadius: "6px",
-          border: "none",
-          cursor: "pointer"
-        }}
-      >
-        Gå
-      </button>
-    </form>
-
-    {/* Vælg antal pr. side */}
-    <label htmlFor="perPage" style={{ fontSize: "0.9rem" }}>Vis pr. side:</label>
-    <select
-      id="perPage"
-      value={repairsPerPage}
-      onChange={e => {
-        setRepairsPerPage(parseInt(e.target.value));
-        setCurrentPage(1);
-      }}
-      style={{
-        border: "1px solid #ccc",
-        padding: "6px 8px",
-        borderRadius: "6px",
-        maxWidth: "100px"
-      }}
-    >
-      <option value={50}>50</option>
-      <option value={100}>100</option>
-      <option value={200}>200</option>
-    </select>
-  </div>
-
-
-  {/* Global opdatering */}
-  {showGlobalModal && (
-    <div
-      style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        width: "100vw",
-        height: "100vh",
-        backgroundColor: "rgba(0,0,0,0.5)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1000
-      }}
-      onClick={() => setShowGlobalModal(false)}
-    >
+      {/* Pagination */}
       <div
-        onClick={(e) => e.stopPropagation()}
         style={{
-          background: "white",
-          padding: "2rem",
-          borderRadius: "8px",
-          width: "600px",
-          maxWidth: "90%",
-          maxHeight: "80vh",
-          overflowY: "auto"
+          display: "flex",
+          alignItems: "center",
+          gap: "1rem",
+          marginTop: "2rem",
+          flexWrap: "wrap",
         }}
       >
-        <h3 style={{ marginBottom: "1rem" }}>Global opdatering</h3>
-
-        <Select
-          options={repairTitleOptions.map(title => ({ value: title, label: title }))}
-          value={globalTitle ? { value: globalTitle, label: globalTitle } : null}
-          onChange={(selectedOption) => setGlobalTitle(selectedOption?.value || "")}
-          placeholder="Vælg reparationstitel..."
-          isClearable
-          styles={{
-            container: base => ({ ...base, marginBottom: "1rem" }),
-            control: base => ({ ...base, padding: "2px" }),
+        <button
+          disabled={currentPage === 1}
+          onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+          style={{
+            backgroundColor: currentPage === 1 ? "#ccc" : "#2166AC",
+            color: "white",
+            padding: "6px 14px",
+            borderRadius: "6px",
+            border: "none",
+            cursor: currentPage === 1 ? "not-allowed" : "pointer",
           }}
-        />
+        >
+          Forrige
+        </button>
 
-        <input
-          type="number"
-          placeholder="Ny pris"
-          value={globalPrice}
-          onChange={(e) => setGlobalPrice(e.target.value)}
-          style={{ width: "100%", marginBottom: "1rem", padding: "0.5rem" }}
-        />
-        <input
-          type="number"
-          placeholder="Ny tid (min)"
-          value={globalDuration}
-          onChange={(e) => setGlobalDuration(e.target.value)}
-          style={{ width: "100%", marginBottom: "1rem", padding: "0.5rem" }}
-        />
+        <span style={{ fontSize: "0.95rem" }}>
+          Side {currentPage} af {totalPages} ({totalRepairs} resultater)
+        </span>
 
-        <div style={{ marginBottom: "1rem" }}>
-          <strong>Vælg forekomster:</strong>
-          <div
+        <button
+          disabled={currentPage === totalPages}
+          onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+          style={{
+            backgroundColor: currentPage === totalPages ? "#ccc" : "#2166AC",
+            color: "white",
+            padding: "6px 14px",
+            borderRadius: "6px",
+            border: "none",
+            cursor: currentPage === totalPages ? "not-allowed" : "pointer",
+          }}
+        >
+          Næste
+        </button>
+
+        {/* Gå til side */}
+        <label htmlFor="pageJump" style={{ fontSize: "0.9rem" }}>
+          Gå til side:
+        </label>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const pageNum = parseInt(pageInput || "0", 10);
+            if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= totalPages) {
+              setCurrentPage(pageNum);
+              setPageInput("");
+            }
+          }}
+          style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+        >
+          <input
+            id="pageJump"
+            type="number"
+            value={pageInput}
+            onChange={(e) => setPageInput(e.target.value)}
+            min={1}
+            max={totalPages}
             style={{
-              marginTop: "0.5rem",
-              border: "1px solid #ddd",
+              border: "1px solid #ccc",
+              padding: "6px 8px",
               borderRadius: "6px",
-              padding: "0.75rem",
-              maxHeight: "300px",
-              overflowY: "auto"
+              width: "60px",
+            }}
+          />
+          <button
+            type="submit"
+            style={{
+              backgroundColor: "#2166AC",
+              color: "white",
+              padding: "6px 14px",
+              borderRadius: "6px",
+              border: "none",
+              cursor: "pointer",
             }}
           >
-            {/* Alle forekomster */}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "30px 120px 1fr",
-                alignItems: "center",
-                gap: "0.5rem",
-                marginBottom: "0.75rem"
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={globalScope === "all"}
-                onChange={() => {
-                  setGlobalScope("all");
-                  setGlobalBrands([]);
-                  setGlobalModels([]);
-                }}
-              />
-              <span style={{ fontSize: "0.75rem", color: "#666" }}></span>
-              <span style={{ fontWeight: "500" }}>Alle forekomster</span>
-            </div>
+            Gå
+          </button>
+        </form>
 
-            {/* Enheder og modeller */}
-            {data.map(b => (
-              <div key={b.brand} style={{ marginBottom: "0.75rem" }}>
+        {/* Pr. side */}
+        <label htmlFor="perPage" style={{ fontSize: "0.9rem" }}>
+          Vis pr. side:
+        </label>
+        <select
+          id="perPage"
+          value={repairsPerPage}
+          onChange={(e) => {
+            setRepairsPerPage(parseInt(e.target.value, 10));
+            setCurrentPage(1);
+          }}
+          style={{
+            border: "1px solid #ccc",
+            padding: "6px 8px",
+            borderRadius: "6px",
+            maxWidth: "100px",
+          }}
+        >
+          <option value={50}>50</option>
+          <option value={100}>100</option>
+          <option value={200}>200</option>
+        </select>
+      </div>
+
+      {/* Global opdatering */}
+      {showGlobalModal && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100vw",
+            height: "100vh",
+            backgroundColor: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+          onClick={() => setShowGlobalModal(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "white",
+              padding: "2rem",
+              borderRadius: "8px",
+              width: "600px",
+              maxWidth: "90%",
+              maxHeight: "80vh",
+              overflowY: "auto",
+            }}
+          >
+            <h3 style={{ marginBottom: "1rem" }}>Global opdatering</h3>
+
+            <Select
+              options={repairTitleOptions.map((title) => ({ value: title, label: title }))}
+              value={globalTitle ? { value: globalTitle, label: globalTitle } : null}
+              onChange={(opt) => setGlobalTitle(opt?.value || "")}
+              placeholder="Vælg reparationstitel..."
+              isClearable
+              styles={{
+                container: (base) => ({ ...base, marginBottom: "1rem" }),
+                control: (base) => ({ ...base, padding: "2px" }),
+              }}
+            />
+
+            <input
+              type="number"
+              placeholder="Ny pris"
+              value={globalPrice}
+              onChange={(e) => setGlobalPrice(e.target.value)}
+              style={{ width: "100%", marginBottom: "1rem", padding: "0.5rem" }}
+            />
+            <input
+              type="number"
+              placeholder="Ny tid (min)"
+              value={globalDuration}
+              onChange={(e) => setGlobalDuration(e.target.value)}
+              style={{ width: "100%", marginBottom: "1rem", padding: "0.5rem" }}
+            />
+
+            <div style={{ marginBottom: "1rem" }}>
+              <strong>Vælg forekomster:</strong>
+              <div
+                style={{
+                  marginTop: "0.5rem",
+                  border: "1px solid #ddd",
+                  borderRadius: "6px",
+                  padding: "0.75rem",
+                  maxHeight: "300px",
+                  overflowY: "auto",
+                }}
+              >
+                {/* Alle */}
                 <div
                   style={{
                     display: "grid",
                     gridTemplateColumns: "30px 120px 1fr",
                     alignItems: "center",
-                    gap: "0.5rem"
+                    gap: "0.5rem",
+                    marginBottom: "0.75rem",
                   }}
                 >
                   <input
                     type="checkbox"
-                    checked={globalScope === "brands" && globalBrands.includes(b.brand)}
+                    checked={globalScope === "all"}
                     onChange={() => {
-                      const checked = globalBrands.includes(b.brand);
-                      setGlobalScope("brands");
-                      setGlobalBrands(prev =>
-                        checked ? prev.filter(x => x !== b.brand) : [...prev, b.brand]
-                      );
+                      setGlobalScope("all");
+                      setGlobalBrands([]);
                       setGlobalModels([]);
                     }}
                   />
-                  <button
-                    onClick={() =>
-                      setExpandedBrands(prev =>
-                        prev.includes(b.brand)
-                          ? prev.filter(x => x !== b.brand)
-                          : [...prev, b.brand]
-                      )
-                    }
-                    style={{
-                      fontSize: "0.75rem",
-                      background: "none",
-                      border: "1px solid #ccc",
-                      padding: "2px 6px",
-                      borderRadius: "4px",
-                      color: "#2166AC",
-                      cursor: "pointer",
-                      whiteSpace: "nowrap"
-                    }}
-                  >
-                    {expandedBrands.includes(b.brand) ? "Skjul modeller" : "Vis modeller"}
-                  </button>
-                  <span>{b.brand}</span>
+                  <span style={{ fontSize: "0.75rem", color: "#666" }}></span>
+                  <span style={{ fontWeight: "500" }}>Alle forekomster</span>
                 </div>
 
-                {expandedBrands.includes(b.brand) && (
-                  <div style={{ paddingLeft: "2.5rem", marginTop: "0.5rem" }}>
-                    {b.models.map(m => (
-                      <div
-                        key={m.model}
+                {/* Enheder + modeller */}
+                {data.map((b) => (
+                  <div key={b.brand} style={{ marginBottom: "0.75rem" }}>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "30px 120px 1fr",
+                        alignItems: "center",
+                        gap: "0.5rem",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={globalScope === "brands" && globalBrands.includes(b.brand)}
+                        onChange={() => {
+                          const checked = globalBrands.includes(b.brand);
+                          setGlobalScope("brands");
+                          setGlobalBrands((prev) =>
+                            checked ? prev.filter((x) => x !== b.brand) : [...prev, b.brand]
+                          );
+                          setGlobalModels([]);
+                        }}
+                      />
+                      <button
+                        onClick={() =>
+                          setExpandedBrands((prev) =>
+                            prev.includes(b.brand) ? prev.filter((x) => x !== b.brand) : [...prev, b.brand]
+                          )
+                        }
                         style={{
-                          display: "grid",
-                          gridTemplateColumns: "30px 120px 1fr",
-                          alignItems: "center",
-                          gap: "0.5rem",
-                          marginBottom: "0.25rem"
+                          fontSize: "0.75rem",
+                          background: "none",
+                          border: "1px solid #ccc",
+                          padding: "2px 6px",
+                          borderRadius: "4px",
+                          color: "#2166AC",
+                          cursor: "pointer",
+                          whiteSpace: "nowrap",
                         }}
                       >
-                        <input
-                          type="checkbox"
-                          checked={globalScope === "models" && globalModels.includes(m.model)}
-                          onChange={() => {
-                            const checked = globalModels.includes(m.model);
-                            setGlobalScope("models");
-                            setGlobalModels(prev =>
-                              checked ? prev.filter(x => x !== m.model) : [...prev, m.model]
-                            );
-                            setGlobalBrands([]);
-                          }}
-                        />
-                        <span></span>
-                        <span style={{ fontSize: "0.9rem" }}>{m.model}</span>
+                        {expandedBrands.includes(b.brand) ? "Skjul modeller" : "Vis modeller"}
+                      </button>
+                      <span>{b.brand}</span>
+                    </div>
+
+                    {expandedBrands.includes(b.brand) && (
+                      <div style={{ paddingLeft: "2.5rem", marginTop: "0.5rem" }}>
+                        {b.models.map((m) => (
+                          <div
+                            key={m.model}
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "30px 120px 1fr",
+                              alignItems: "center",
+                              gap: "0.5rem",
+                              marginBottom: "0.25rem",
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={globalScope === "models" && globalModels.includes(m.model)}
+                              onChange={() => {
+                                const checked = globalModels.includes(m.model);
+                                setGlobalScope("models");
+                                setGlobalModels((prev) =>
+                                  checked ? prev.filter((x) => x !== m.model) : [...prev, m.model]
+                                );
+                                setGlobalBrands([]);
+                              }}
+                            />
+                            <span></span>
+                            <span style={{ fontSize: "0.9rem" }}>{m.model}</span>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    )}
                   </div>
-                )}
+                ))}
               </div>
-            ))}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "1rem" }}>
+              <button
+                onClick={() => setShowGlobalModal(false)}
+                style={{
+                  backgroundColor: "#ccc",
+                  color: "#000",
+                  padding: "0.5rem 1rem",
+                  borderRadius: "6px",
+                  border: "none",
+                }}
+              >
+                Annuller
+              </button>
+              <button
+                onClick={() => {
+                  // Endpoints for global apply findes ikke på serveren pt.
+                  alert("Global opdatering kræver et API-endpoint. Vi har deaktiveret handlingen for at undgå fejl.");
+                }}
+                style={{
+                  backgroundColor: "#bbb",
+                  color: "white",
+                  padding: "0.5rem 1rem",
+                  borderRadius: "6px",
+                  border: "none",
+                  cursor: "not-allowed",
+                }}
+                disabled
+              >
+                Opdater globalt
+              </button>
+            </div>
           </div>
         </div>
-
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: "1rem" }}>
-          <button
-            onClick={() => setShowGlobalModal(false)}
-            style={{
-              backgroundColor: "#ccc",
-              color: "#000",
-              padding: "0.5rem 1rem",
-              borderRadius: "6px",
-              border: "none"
-            }}
-          >
-            Annuller
-          </button>
-          <button
-            onClick={handleApplyGlobalChange}
-            style={{
-              backgroundColor: "#22b783",
-              color: "white",
-              padding: "0.5rem 1rem",
-              borderRadius: "6px",
-              border: "none"
-            }}
-          >
-            Opdater globalt
-          </button>
-        </div>
-      </div>
-    </div>
-  )}
-
+      )}
     </div>
   );
 }

@@ -5,6 +5,33 @@ import { FaHome } from "react-icons/fa";
 import RepairHistory from "../components/RepairHistory";
 import { api } from "../data/apiClient";
 
+/** Utils */
+const dkMonths = [
+  "januar","februar","marts","april","maj","juni",
+  "juli","august","september","oktober","november","december"
+];
+
+function formatDkDateTime(value) {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return "—";
+  const day = d.getDate();
+  const month = dkMonths[d.getMonth()];
+  const year = d.getFullYear();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${day}. ${month} ${year}, kl. ${hh}.${mm}`;
+}
+function formatPrice(v) {
+  if (v === null || v === undefined || v === "") return "—";
+  const n = Number(v);
+  if (Number.isNaN(n)) return String(v);
+  return n.toLocaleString("da-DK") + " kr.";
+}
+
+/** Statusliste (kan tilpasses dine faktiske værdier) */
+const STATUS_OPTIONS = ["Alle", "booket", "under reparation", "afventer", "afsluttet"];
+
 export default function RepairsPage() {
   const navigate = useNavigate();
 
@@ -19,35 +46,34 @@ export default function RepairsPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
+  /** Hent reparationer (tg_repair) */
   useEffect(() => {
     let isMounted = true;
-    setLoading(true);
-    setLoadError("");
-
-    api.getRepairOrders()
-      .then((data) => {
+    (async () => {
+      try {
+        setLoading(true);
+        setLoadError("");
+        const data = await api.getRepairOrders();
+        const items = Array.isArray(data) ? data : (data?.items ?? []);
         if (!isMounted) return;
-        setRepairs(Array.isArray(data) ? data : []);
-      })
-      .catch((err) => {
+        setRepairs(items);
+      } catch (err) {
         console.error("Fejl ved hentning af reparationer:", err);
         if (isMounted) setLoadError("Kunne ikke hente reparationer.");
-      })
-      .finally(() => isMounted && setLoading(false));
-
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    })();
     return () => { isMounted = false; };
   }, []);
 
+  /** Gem ændringer m. historik (optimistisk UI) */
   const handleSaveRepair = async (updatedRepair) => {
     try {
-      // Gem i WP med historik (endpointet forventer typisk et objekt med id + felter)
       await api.updateRepairWithHistory(updatedRepair);
-
-      // Optimistisk UI-opdatering
       setRepairs((prev) =>
         prev.map((r) => (r.id === updatedRepair.id ? { ...r, ...updatedRepair } : r))
       );
-
       setSelectedRepair(null);
     } catch (err) {
       console.error("Fejl ved opdatering af reparation:", err);
@@ -55,19 +81,20 @@ export default function RepairsPage() {
     }
   };
 
-  const statusOptions = ["booket", "under reparation", "afventer", "afsluttet"];
-
   const inputStyle = { padding: "0.5rem", margin: "0.5rem 0", width: "100%" };
-  const statusButtonStyle = (status) => ({
-    padding: "0.4rem 0.8rem",
-    margin: "0 0.5rem 0.5rem 0",
-    borderRadius: "6px",
-    border: "none",
-    cursor: "pointer",
-    backgroundColor: selectedStatus === status ? "#2166AC" : "#ccc",
-    color: "white",
-    fontWeight: "bold",
-  });
+  const statusButtonStyle = (status) => {
+    const active = selectedStatus.toLowerCase() === status.toLowerCase();
+    return {
+      padding: "0.4rem 0.8rem",
+      margin: "0 0.5rem 0.5rem 0",
+      borderRadius: "6px",
+      border: "none",
+      cursor: "pointer",
+      backgroundColor: active ? "#2166AC" : "#ccc",
+      color: "white",
+      fontWeight: "bold",
+    };
+  };
   const buttonStyle = {
     backgroundColor: "#2166AC",
     color: "white",
@@ -81,61 +108,98 @@ export default function RepairsPage() {
     gap: "0.5rem",
   };
 
+  /** Normaliser felter, så filtrering/visning bliver robust */
+  const normalizedRepairs = useMemo(() => {
+    return (Array.isArray(repairs) ? repairs : []).map((r) => ({
+      id: r.id ?? r.ID ?? r.post_id ?? r.order_id ?? Math.random().toString(36).slice(2),
+      order_id: r.order_id ?? r.id ?? r.ID ?? "",
+      created_at: r.created_at ?? r.date ?? r.createdAt ?? r.timestamp ?? null,
+      customer: r.customer_name ?? r.customer ?? r.name ?? "",
+      phone: r.phone ?? r.customer_phone ?? "",
+      model: r.model_name ?? r.model ?? "",
+      repair: r.repair_title ?? r.repair ?? r.title ?? "",
+      price: r.price ?? r.amount ?? "",
+      time: r.time ?? r.duration ?? "",
+      payment: r.payment ?? r.payment_method ?? "",
+      status: r.status ?? "",
+      // Gem original reference til modal:
+      _raw: r,
+    }));
+  }, [repairs]);
+
+  /** Filtrering + sortering */
   const filtered = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
-    return repairs
+
+    const from = fromDate ? new Date(fromDate) : null;
+    const to = toDate ? new Date(toDate) : null;
+
+    return normalizedRepairs
       .filter((r) => {
         if (!term) return true;
-        const c = (r.customer || "").toLowerCase();
-        const p = (r.phone || "").toLowerCase();
-        const m = (r.model || "").toLowerCase();
-        const rid = String(r.order_id || "").toLowerCase();
-        return c.includes(term) || p.includes(term) || m.includes(term) || rid.includes(term);
+        const hay = [
+          r.customer, r.phone, r.model, r.repair,
+          String(r.order_id), String(r.id),
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return hay.includes(term);
       })
       .filter((r) => {
+        if (!r.created_at) return true;
         const created = new Date(r.created_at);
-        const from = fromDate ? new Date(fromDate) : null;
-        const to = toDate ? new Date(toDate) : null;
         if (from && created < from) return false;
-        if (to && created > to) return false;
+        if (to) {
+          // gør "til og med" inklusiv (sæt to til kl. 23:59)
+          const toEnd = new Date(to);
+          toEnd.setHours(23, 59, 59, 999);
+          if (created > toEnd) return false;
+        }
         return true;
       })
-      .filter((r) => selectedStatus === "Alle" || r.status === selectedStatus)
-      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-  }, [repairs, searchTerm, fromDate, toDate, selectedStatus]);
+      .filter((r) => {
+        if (selectedStatus === "Alle") return true;
+        return String(r.status || "").toLowerCase() === selectedStatus.toLowerCase();
+      })
+      .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+  }, [normalizedRepairs, searchTerm, fromDate, toDate, selectedStatus]);
 
   return (
     <div style={{ padding: "2rem" }}>
+      {/* Global regel: Dashboard-knap */}
       <button onClick={() => navigate("/")} style={buttonStyle}>
         <FaHome /> Dashboard
       </button>
 
       <h2 style={{ textTransform: "uppercase", fontWeight: "bold" }}>Reparationer</h2>
 
-      <div style={{ display: "flex", gap: "1rem", marginBottom: "1rem" }}>
+      {/* Filterlinje */}
+      <div style={{ display: "flex", gap: "1rem", marginBottom: "1rem", flexWrap: "wrap" }}>
         <input
           type="text"
           placeholder="Søg navn, telefon, model eller ordre-id..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          style={{ ...inputStyle, flex: 1 }}
+          style={{ ...inputStyle, flex: 1, minWidth: 240 }}
         />
         <input
           type="date"
           value={fromDate}
           onChange={(e) => setFromDate(e.target.value)}
-          style={{ ...inputStyle, width: "180px" }}
+          style={{ ...inputStyle, width: 180 }}
         />
         <input
           type="date"
           value={toDate}
           onChange={(e) => setToDate(e.target.value)}
-          style={{ ...inputStyle, width: "180px" }}
+          style={{ ...inputStyle, width: 180 }}
         />
       </div>
 
+      {/* Statusfilter */}
       <div style={{ marginBottom: "1rem" }}>
-        {["Alle", ...statusOptions].map((status) => (
+        {STATUS_OPTIONS.map((status) => (
           <button
             key={status}
             onClick={() => setSelectedStatus(status)}
@@ -146,9 +210,11 @@ export default function RepairsPage() {
         ))}
       </div>
 
+      {/* Loading / Error */}
       {loading && <p>Indlæser reparationer…</p>}
       {loadError && <p style={{ color: "crimson" }}>{loadError}</p>}
 
+      {/* Tabel */}
       {!loading && !loadError && (
         <>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -168,32 +234,32 @@ export default function RepairsPage() {
               {filtered.map((r) => (
                 <tr
                   key={r.id}
-                  onClick={() => setSelectedRepair(r)}
+                  onClick={() => setSelectedRepair(r._raw || r)}
                   style={{ cursor: "pointer" }}
                 >
                   <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>
-                    {r.order_id}
+                    {r.order_id || r.id}
                   </td>
                   <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>
-                    {new Date(r.created_at).toLocaleString()}
+                    {formatDkDateTime(r.created_at)}
                   </td>
                   <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>
-                    {r.customer}
+                    {r.customer || "—"}
                   </td>
                   <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>
-                    {r.model}
+                    {r.model || "—"}
                   </td>
                   <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>
-                    {r.repair}
+                    {r.repair || "—"}
                   </td>
                   <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>
-                    {r.price} kr • {r.time} min
+                    {formatPrice(r.price)} • {r.time ? `${r.time} min` : "—"}
                   </td>
                   <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>
-                    {r.payment}
+                    {r.payment || "—"}
                   </td>
                   <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>
-                    {r.status}
+                    {r.status || "—"}
                   </td>
                 </tr>
               ))}
@@ -206,6 +272,7 @@ export default function RepairsPage() {
         </>
       )}
 
+      {/* Modal med historik / redigering */}
       {selectedRepair && (
         <RepairHistory
           repair={selectedRepair}

@@ -19,7 +19,6 @@ function withQuery(path, query) {
 
 /**
  * Sender en request gennem WP-proxyen.
- * Du kan give:
  *  - path: mål-endpoint på telegiganten.dk (fx "/wp-json/telegiganten/v1/customers")
  *  - method: GET/POST/PATCH/DELETE
  *  - query: object med query params (fx { model_id: 123 })
@@ -39,14 +38,13 @@ export async function proxyFetch({
 
   const finalPath = withQuery(path, query);
 
-  // Payload som WP-proxyforventning
+  // Payload som WP-proxy forventer
   const payload = {
     destination: "telegiganten-wp",
     data: {
       method,
       path: finalPath,
       as_json: true,
-      // Videresend body (som JSON). WP-proxyen bør sende denne videre som raw JSON.
       body: body ?? null,
       headers,
     },
@@ -75,7 +73,7 @@ export async function proxyFetch({
 }
 
 export const api = {
-  /* ---------------------- Brands / modeller / repairs (skabeloner) ---------------------- */
+  /* ---------------------- Brands / modeller / skabeloner ---------------------- */
   getBrands: () =>
     proxyFetch({ path: "/wp-json/telegiganten/v1/brands" }),
 
@@ -94,9 +92,56 @@ export const api = {
   getTopModels: () =>
     proxyFetch({ path: "/wp-json/telegiganten/v1/top-models" }),
 
+  // All-in-one struktur til EditRepairsPage
+  getAllRepairs: () =>
+    proxyFetch({ path: "/wp-json/telegiganten/v1/all-repairs" }),
+
+  // Opret SKABELON (telegiganten_repair)
+  createRepairTemplate: (data) =>
+    proxyFetch({
+      path: "/wp-json/telegiganten/v1/create-repair-template",
+      method: "POST",
+      body: data,
+    }),
+
+  // Opdater (virker til både tg_repair og telegiganten_repair)
+  updateRepair: (data) =>
+    proxyFetch({
+      path: "/wp-json/telegiganten/v1/update-repair",
+      method: "POST",
+      body: data,
+    }),
+
+  // Global apply (skabeloner)
+  applyRepairChanges: (data) =>
+    proxyFetch({
+      path: "/wp-json/telegiganten/v1/apply-repair-changes",
+      method: "POST",
+      body: data,
+    }),
+
+  // Slet SKABELON (telegiganten_repair)
+  deleteRepairTemplate: (repair_id) =>
+    proxyFetch({
+      path: "/wp-json/telegiganten/v1/delete-repair",
+      method: "POST",
+      body: { repair_id },
+    }),
+
+  // Bump popularitet på model
+  incrementModelUsage: (modelId) =>
+    proxyFetch({
+      path: "/wp-json/telegiganten/v1/increment-model-usage",
+      method: "POST",
+      body: { model_id: modelId },
+    }),
+
   /* ---------------------- Kunder ---------------------- */
   getCustomers: () =>
     proxyFetch({ path: "/wp-json/telegiganten/v1/customers" }),
+
+  getCustomersWithRepairs: () =>
+    proxyFetch({ path: "/wp-json/telegiganten/v1/customers-with-repairs" }),
 
   createCustomer: (data) =>
     proxyFetch({
@@ -105,7 +150,6 @@ export const api = {
       body: data,
     }),
 
-  // 🔹 NY: brugt af EditCustomerModal
   updateCustomer: (data) =>
     proxyFetch({
       path: "/wp-json/telegiganten/v1/update-customer",
@@ -113,23 +157,27 @@ export const api = {
       body: data,
     }),
 
-  getCustomersWithRepairs: () =>
-    proxyFetch({ path: "/wp-json/telegiganten/v1/customers-with-repairs" }),
+  getCustomerById: (id) =>
+    proxyFetch({
+      path: `/wp-json/telegiganten/v1/customer/${id}`,
+      method: "GET",
+    }),
+
+  getCustomerByPhone: (phone) =>
+    proxyFetch({
+      path: "/wp-json/telegiganten/v1/customer-by-phone",
+      method: "GET",
+      query: { phone },
+    }),
 
   /* ---------------------- Ordrer (tg_repair) ---------------------- */
   getRepairOrders: () =>
     proxyFetch({ path: "/wp-json/telegiganten/v1/repair-orders" }),
 
-  createRepair: (data) =>
+  // Opret ORDRE (ikke skabelon)
+  createRepairOrder: (data) =>
     proxyFetch({
       path: "/wp-json/telegiganten/v1/create-repair",
-      method: "POST",
-      body: data,
-    }),
-
-  updateRepair: (data) =>
-    proxyFetch({
-      path: "/wp-json/telegiganten/v1/update-repair",
       method: "POST",
       body: data,
     }),
@@ -139,27 +187,5 @@ export const api = {
       path: "/wp-json/telegiganten/v1/update-repair-with-history",
       method: "POST",
       body: data,
-    }),
-
-  /* ---------------------- Øvrigt ---------------------- */
-  // Bemærk: Disse to routes eksisterer ikke i det WP-plugin vi har gennemgået.
-  // De står her fordi andre dele af projektet muligvis refererer til dem (fx SparePartsPage).
-  // Hvis de ikke bruges, kan de slettes senere – ellers skal der laves tilsvarende WP-endpoints.
-  getAllRepairOptions: () =>
-    proxyFetch({ path: "/wp-json/telegiganten/v1/repair-options" }),
-
-  updateRepairOption: (id, patch) =>
-    proxyFetch({
-      path: `/wp-json/telegiganten/v1/repair-options/${id}`,
-      method: "PATCH",
-      body: patch,
-    }),
-
-  // 🔹 Bump usage når en model vælges i Step1
-  incrementModelUsage: (modelId) =>
-    proxyFetch({
-      path: "/wp-json/telegiganten/v1/increment-model-usage",
-      method: "POST",
-      body: { model_id: modelId },
     }),
 };
