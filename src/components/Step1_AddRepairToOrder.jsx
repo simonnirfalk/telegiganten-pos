@@ -1,11 +1,12 @@
 // src/pages/Step1_AddRepairToOrder.jsx
 import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { FaPlus, FaEdit, FaTrashAlt, FaPhone, FaEnvelope, FaUserPlus, FaUser, FaHome, FaLock } from "react-icons/fa";
+import { FaPlus, FaUserPlus, FaUser, FaHome, FaLock, FaPhone, FaEnvelope, FaEdit } from "react-icons/fa";
 import RepairModal from "../components/RepairModal";
 import CreateCustomerModal from "../components/CreateCustomerModal";
 import SelectCustomerModal from "../components/SelectCustomerModal";
 import EditCustomerModal from "../components/EditCustomerModal";
+import OrderSidebarCompact from "../components/OrderSidebarCompact";
 import { useRepairContext } from "../context/RepairContext";
 import { api } from "../data/apiClient";
 
@@ -15,17 +16,25 @@ function generateOrderId() {
   return `40${String(last).padStart(3, "0")}`;
 }
 
-export default function Step1_AddRepairToOrder({ order, setOrder, onNext, customers, setCustomers }) {
+export default function Step1_AddRepairToOrder({
+  order,
+  setOrder,
+  onNext,
+  customers,
+  setCustomers,
+}) {
   const navigate = useNavigate();
 
   const [searchTerm, setSearchTerm] = useState("");
   const [modalDevice, setModalDevice] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState("Alle");
+
   const [openCreateCustomer, setOpenCreateCustomer] = useState(false);
   const [openSelectCustomer, setOpenSelectCustomer] = useState(false);
   const [openEditCustomer, setOpenEditCustomer] = useState(false);
+
+  // når !== null er vi i “rediger”-tilstand for denne index
   const [editingRepairIndex, setEditingRepairIndex] = useState(null);
-  const [editingRepair, setEditingRepair] = useState({});
 
   const { data: repairStructure = [], loading } = useRepairContext();
 
@@ -38,21 +47,23 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
   // Hent kunder via proxy
   useEffect(() => {
     let isMounted = true;
-    api.getCustomers()
+    api
+      .getCustomers()
       .then((data) => {
         if (!isMounted) return;
-        // Backend returnerer: { id, name, phone, email, extraPhone }
-        const mapped = (Array.isArray(data) ? data : []).map(c => ({
+        const mapped = (Array.isArray(data) ? data : []).map((c) => ({
           id: c.id,
           name: c.name || "",
           phone: c.phone || "",
           email: c.email || "",
-          extraPhone: c.extraPhone || ""
+          extraPhone: c.extraPhone || "",
         }));
         setCustomers(mapped);
       })
-      .catch(err => console.error("Fejl ved hentning af kunder:", err));
-    return () => { isMounted = false; };
+      .catch((err) => console.error("Fejl ved hentning af kunder:", err));
+    return () => {
+      isMounted = false;
+    };
   }, [setCustomers]);
 
   /* ---------- UI styles ---------- */
@@ -68,18 +79,16 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
     gap: "0.5rem",
     width: "100%",
     justifyContent: "center",
-    marginBottom: "0.5rem"
+    marginBottom: "0.5rem",
   };
 
-  const smallButtonStyle = {
-    backgroundColor: "#ccc",
-    color: "#333",
-    padding: "0.3rem 0.6rem",
+  const inputStyle = {
+    width: "100%",
+    marginBottom: "0.5rem",
+    padding: "0.5rem",
+    border: "1px solid #ccc",
     borderRadius: "6px",
-    border: "none",
-    cursor: "pointer",
-    fontSize: "0.8rem",
-    marginRight: "0.5rem"
+    fontSize: "0.9rem",
   };
 
   const deviceStyle = {
@@ -94,90 +103,129 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
     alignItems: "center",
     justifyContent: "center",
     height: "100px",
-    transition: "box-shadow 0.2s ease"
-  };
-
-  const inputStyle = {
-    width: "100%",
-    marginBottom: "0.5rem",
-    padding: "0.5rem",
-    border: "1px solid #ccc",
-    borderRadius: "6px",
-    fontSize: "0.9rem"
+    transition: "box-shadow 0.2s ease",
   };
 
   /* ---------- Model/brand filtrering ---------- */
   const popularModelNames = [
-    "iPhone 11", "iPhone 12", "iPhone 13", "iPhone 14", "iPhone 15",
-    "iPhone 11 Pro", "iPhone 12 Mini", "iPhone 13 Pro Max", "iPhone 14 Plus", "iPhone 15 Pro",
-    "Samsung Galaxy S20 FE", "Samsung Galaxy S21+", "Samsung Galaxy S22", "Samsung Galaxy S23 Ultra", "Samsung Galaxy S24",
-    "Samsung Galaxy A55", "Samsung Galaxy A34", "Samsung Galaxy A14", "Samsung Galaxy A54", "Samsung Galaxy A72",
-    "iPad 10.2 (2021)", "iPad Pro 11 (2018)",
-    "MacBook Pro 13 inch A1708", "MacBook Air 13 inch, A2179",
-    "Motorola Moto G54"
+    "iPhone 11","iPhone 12","iPhone 13","iPhone 14","iPhone 15",
+    "iPhone 11 Pro","iPhone 12 Mini","iPhone 13 Pro Max","iPhone 14 Plus","iPhone 15 Pro",
+    "Samsung Galaxy S20 FE","Samsung Galaxy S21+","Samsung Galaxy S22","Samsung Galaxy S23 Ultra","Samsung Galaxy S24",
+    "Samsung Galaxy A55","Samsung Galaxy A34","Samsung Galaxy A14","Samsung Galaxy A54","Samsung Galaxy A72",
+    "iPad 10.2 (2021)","iPad Pro 11 (2018)","MacBook Pro 13 inch A1708","MacBook Air 13 inch, A2179","Motorola Moto G54",
   ];
 
   const customCategoryOrder = [
-    "Alle", "iPhone", "Samsung mobil", "iPad", "MacBook", "iMac", "Samsung Galaxy Tab", "Motorola mobil",
-    "OnePlus mobil", "Nokia mobil", "Huawei mobil", "Xiaomi mobil", "Sony Xperia", "Oppo mobil", "Microsoft mobil", "Honor mobil",
-    "Google Pixel", "Apple Watch", "Samsung Book", "Huawei tablet"
+    "Alle","iPhone","Samsung mobil","iPad","MacBook","iMac","Samsung Galaxy Tab","Motorola mobil","OnePlus mobil",
+    "Nokia mobil","Huawei mobil","Xiaomi mobil","Sony Xperia","Oppo mobil","Microsoft mobil","Honor mobil",
+    "Google Pixel","Apple Watch","Samsung Book","Huawei tablet",
   ];
 
   const allCategories = useMemo(
-    () => customCategoryOrder.filter(cat => cat === "Alle" || repairStructure.some(b => b.title === cat)),
+    () => customCategoryOrder.filter(
+      (cat) => cat === "Alle" || repairStructure.some((b) => b.title === cat)
+    ),
     [repairStructure]
   );
 
-  const brandsFiltered = selectedCategory === "Alle"
-    ? repairStructure.filter(b => (b.models || []).some(m => popularModelNames.includes(m.title)))
-    : repairStructure.filter(b => b.title === selectedCategory);
+  const brandsFiltered =
+    selectedCategory === "Alle"
+      ? repairStructure.filter((b) =>
+          (b.models || []).some((m) => popularModelNames.includes(m.title))
+        )
+      : repairStructure.filter((b) => b.title === selectedCategory);
 
   const filteredModels = useMemo(() => {
-    return brandsFiltered.flatMap(b => b.models || [])
-      .filter(m => selectedCategory !== "Alle" || popularModelNames.includes(m.title))
-      .filter(m => m.title.toLowerCase().includes(searchTerm.toLowerCase()))
+    return brandsFiltered
+      .flatMap((b) => b.models || [])
+      .filter(
+        (m) => selectedCategory !== "Alle" || popularModelNames.includes(m.title)
+      )
+      .filter((m) => m.title.toLowerCase().includes(searchTerm.toLowerCase()))
       .sort((a, b) => {
         if (selectedCategory === "Alle") {
-          return popularModelNames.indexOf(a.title) - popularModelNames.indexOf(b.title);
+          return (
+            popularModelNames.indexOf(a.title) -
+            popularModelNames.indexOf(b.title)
+          );
         }
         return 0;
       });
   }, [brandsFiltered, searchTerm, selectedCategory]);
 
+  /* ---------- Hjælpere ---------- */
+  function findModelByTitle(title) {
+    const allModels = repairStructure.flatMap((b) => b.models || []);
+    return allModels.find((m) => (m.title || "").trim() === (title || "").trim()) || null;
+    // (fallback kunne være case-insensitive, men det her er mest stabilt ift. dine data)
+  }
+
   /* ---------- Handlers ---------- */
 
+  // FÅR reparation + evt. r.part fra RepairModal
   const handleAddRepair = (deviceName, repair) => {
     if (repair.model_id) {
-      // bump usage via proxy (fire-and-forget)
-      api.incrementModelUsage(repair.model_id).catch(err =>
-        console.error("Fejl ved opdatering af model-usage:", err)
-      );
+      api.incrementModelUsage(repair.model_id).catch(() => {});
     }
 
-    setOrder({
-      ...order,
-      repairs: [...order.repairs, {
-        device: deviceName,
-        repair: repair.title,
-        price: repair.price,
-        time: repair.time,
-        model_id: repair.model_id
-      }]
-    });
+    const next = {
+      device: deviceName,
+      repair: repair.title,
+      price: repair.price,
+      time: repair.time,
+      model_id: repair.model_id,
+      part: repair.part
+        ? {
+            id: repair.part.id ?? repair.part.ID ?? null,
+            model: repair.part.model ?? "",
+            stock: repair.part.stock ?? "",
+            location: repair.part.location ?? "",
+            category: repair.part.category ?? "",
+            repair: repair.part.repair ?? "",
+          }
+        : null,
+    };
+
+    // hvis vi er i rediger-tilstand, erstat elementet i stedet for at pushe
+    if (editingRepairIndex !== null && editingRepairIndex >= 0) {
+      setOrder((prev) => {
+        const updated = [...prev.repairs];
+        updated[editingRepairIndex] = next;
+        return { ...prev, repairs: updated };
+      });
+      setEditingRepairIndex(null);
+    } else {
+      setOrder((prev) => ({ ...prev, repairs: [...prev.repairs, next] }));
+    }
+
+    setModalDevice(null);
+  };
+
+  const onEditRepair = (idx) => {
+    const r = order.repairs[idx];
+    // find modellen ud fra device-navnet og åbn modalen
+    const model = findModelByTitle(r.device);
+    setEditingRepairIndex(idx);
+    setModalDevice(model || null);
+  };
+
+  const onRemoveRepair = (idx) => {
+    setOrder((prev) => ({
+      ...prev,
+      repairs: prev.repairs.filter((_, i) => i !== idx),
+    }));
   };
 
   const dummyCustomer = {
     id: "test-kunde",
     name: "Test Kunde",
     phone: "12345678",
-    email: "test@telegiganten.dk"
+    email: "test@telegiganten.dk",
   };
 
-  // VIGTIGT: Modalen opretter kunden på serveren og sender den færdige customer tilbage.
   const handleCreateCustomer = (newCustomer) => {
-    // newCustomer indeholder: { id, name, phone, email, extraPhone }
-    setCustomers(prev => [...prev, newCustomer]);
-    setOrder(prev => ({ ...prev, customer: newCustomer }));
+    setCustomers((prev) => [...prev, newCustomer]);
+    setOrder((prev) => ({ ...prev, customer: newCustomer }));
     setOpenCreateCustomer(false);
   };
 
@@ -187,7 +235,7 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
   };
 
   const handleSaveCustomer = (editedCustomer) => {
-    const updatedCustomers = customers.map(c =>
+    const updatedCustomers = customers.map((c) =>
       c.id === editedCustomer.id ? editedCustomer : c
     );
     setCustomers(updatedCustomers);
@@ -197,24 +245,6 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
 
   const handleRemoveCustomer = () => {
     setOrder({ ...order, customer: null });
-  };
-
-  const startEditingRepair = (index) => {
-    setEditingRepairIndex(index);
-    setEditingRepair({ ...order.repairs[index] });
-  };
-
-  const saveEditedRepair = (index) => {
-    const updated = [...order.repairs];
-    updated[index] = { ...editingRepair };
-    setOrder({ ...order, repairs: updated });
-    setEditingRepairIndex(null);
-  };
-
-  const removeRepair = (index) => {
-    const updated = [...order.repairs];
-    updated.splice(index, 1);
-    setOrder({ ...order, repairs: updated });
   };
 
   /* ---------- Render ---------- */
@@ -239,7 +269,7 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
                   backgroundColor: selectedCategory === cat ? "#2166AC" : "#f0f0f0",
                   color: selectedCategory === cat ? "white" : "#111",
                   cursor: "pointer",
-                  fontWeight: "500"
+                  fontWeight: "500",
                 }}
               >
                 {cat}
@@ -248,7 +278,9 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
           </div>
 
           <div style={{ flexGrow: 1 }}>
-            <h2 style={{ textTransform: "uppercase", fontWeight: "bold" }}>Vælg enhed og reparation</h2>
+            <h2 style={{ textTransform: "uppercase", fontWeight: "bold" }}>
+              Vælg enhed og reparation
+            </h2>
             <input
               type="text"
               placeholder="Søg efter model..."
@@ -256,20 +288,26 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
               onChange={(e) => setSearchTerm(e.target.value)}
               style={inputStyle}
             />
-            {loading ? <p>Indlæser modeller...</p> : (
-              <div style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                gap: "1rem",
-                marginTop: "1rem"
-              }}>
+            {loading ? (
+              <p>Indlæser modeller...</p>
+            ) : (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                  gap: "1rem",
+                  marginTop: "1rem",
+                }}
+              >
                 {filteredModels.map((model) => (
                   <div
                     key={model.id}
                     style={deviceStyle}
                     onClick={() => setModalDevice(model)}
-                    onMouseEnter={(e) => e.currentTarget.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.1)"}
-                    onMouseLeave={(e) => e.currentTarget.style.boxShadow = "none"}
+                    onMouseEnter={(e) =>
+                      (e.currentTarget.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.1)")
+                    }
+                    onMouseLeave={(e) => (e.currentTarget.style.boxShadow = "none")}
                   >
                     {model.title}
                   </div>
@@ -281,89 +319,103 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
       </div>
 
       {/* Sidebar */}
-      <div style={{
-        width: "400px",
-        backgroundColor: "#fff",
-        borderLeft: "1px solid #ddd",
-        padding: "2rem 1rem",
-        display: "flex",
-        flexDirection: "column",
-        height: "100vh",
-        position: "sticky",
-        top: 0,
-        overflow: "hidden"
-      }}>
+      <div
+        style={{
+          width: "400px",
+          backgroundColor: "#fff",
+          borderLeft: "1px solid #ddd",
+          padding: "2rem 1rem",
+          display: "flex",
+          flexDirection: "column",
+          height: "100vh",
+          position: "sticky",
+          top: 0,
+          overflow: "hidden",
+        }}
+      >
         <div style={{ flexGrow: 1, overflowY: "auto" }}>
-          {/* Reparationer */}
-          <h4 style={{ textTransform: "uppercase", borderBottom: "1px solid #ddd", marginBottom: "1rem" }}>Reparationer</h4>
-          {order.repairs.length === 0 ? (
-            <p>Ingen reparationer valgt endnu.</p>
-          ) : (
-            <table style={{ width: "100%", fontSize: "0.85rem", marginBottom: "1rem" }}>
-              <thead>
-                <tr style={{ borderBottom: "1px solid #eee" }}>
-                  <th style={{ textAlign: "left" }}>Model</th>
-                  <th>Reparation</th>
-                  <th>Pris</th>
-                  <th>Min</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {order.repairs.map((r, i) => (
-                  <tr key={i}>
-                    <td>{editingRepairIndex === i
-                      ? <input value={editingRepair.device} onChange={(e) => setEditingRepair({ ...editingRepair, device: e.target.value })} />
-                      : r.device}
-                    </td>
-                    <td>{editingRepairIndex === i
-                      ? <input value={editingRepair.repair} onChange={(e) => setEditingRepair({ ...editingRepair, repair: e.target.value })} />
-                      : r.repair}
-                    </td>
-                    <td>{editingRepairIndex === i
-                      ? <input value={editingRepair.price} onChange={(e) => setEditingRepair({ ...editingRepair, price: e.target.value })} />
-                      : `${r.price} kr`}</td>
-                    <td>{editingRepairIndex === i
-                      ? <input value={editingRepair.time} onChange={(e) => setEditingRepair({ ...editingRepair, time: e.target.value })} />
-                      : `${r.time}`}</td>
-                    <td>
-                      {editingRepairIndex === i ? (
-                        <button onClick={() => saveEditedRepair(i)}>✔️</button>
-                      ) : (
-                        <>
-                          <button onClick={() => startEditingRepair(i)}><FaEdit /></button>
-                          <button onClick={() => removeRepair(i)}><FaTrashAlt /></button>
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+          {/* Reparationer – kompakt visning */}
+          <OrderSidebarCompact
+            order={order}
+            onEditRepair={onEditRepair}
+            onRemoveRepair={onRemoveRepair}
+          />
 
           {/* Kunde */}
-          <h4 style={{ textTransform: "uppercase", borderBottom: "1px solid #ddd", marginTop: "2rem", marginBottom: "1rem" }}>Kunde</h4>
+          <h4
+            style={{
+              textTransform: "uppercase",
+              borderBottom: "1px solid #ddd",
+              marginTop: "2rem",
+              marginBottom: "1rem",
+            }}
+          >
+            Kunde
+          </h4>
           {order.customer ? (
             <div style={{ marginBottom: "1rem" }}>
-              <strong>{order.customer.name}</strong><br />
-              <FaPhone /> {order.customer.phone}<br />
+              <strong>{order.customer.name}</strong>
+              <br />
+              <FaPhone /> {order.customer.phone}
+              <br />
               <FaEnvelope /> {order.customer.email || "-"}
-              <div style={{ marginTop: "0.5rem" }}>
-                <button style={smallButtonStyle} onClick={() => setOpenEditCustomer(true)}><FaEdit /> Rediger</button>
-                <button style={smallButtonStyle} onClick={handleRemoveCustomer}><FaTrashAlt /> Fjern</button>
+              <div style={{ marginTop: "0.5rem", display: "flex", gap: 8 }}>
+                <button
+                  style={{
+                    background: "transparent",
+                    border: "1px solid #d1d5db",
+                    borderRadius: 6,
+                    padding: "6px 10px",
+                    fontSize: 12,
+                    cursor: "pointer",
+                    color: "#1a1a1aff",
+                  }}
+                  onClick={() => setOpenEditCustomer(true)}
+                >
+                  <FaEdit style={{ marginRight: 6 }} />
+                  Rediger
+                </button>
+                <button
+                  style={{
+                    background: "transparent",
+                    border: "1px solid #d1d5db",
+                    borderRadius: 6,
+                    padding: "6px 10px",
+                    fontSize: 12,
+                    cursor: "pointer",
+                    color: "#b91c1c",
+                  }}
+                  onClick={() => setOrder({ ...order, customer: null })}
+                >
+                  Fjern
+                </button>
               </div>
             </div>
           ) : (
             <>
-              <button style={buttonStyle} onClick={() => setOpenCreateCustomer(true)}><FaUserPlus /> Opret kunde</button>
-              <button style={buttonStyle} onClick={() => setOpenSelectCustomer(true)}><FaUser /> Vælg kunde</button>
+              <button style={buttonStyle} onClick={() => setOpenCreateCustomer(true)}>
+                <FaUserPlus /> Opret kunde
+              </button>
+              <button style={buttonStyle} onClick={() => setOpenSelectCustomer(true)}>
+                <FaUser /> Vælg kunde
+              </button>
             </>
           )}
 
           {/* Note & adgangskode */}
-          <h4 style={{ textTransform: "uppercase", borderBottom: "1px solid #ddd", marginTop: "2rem", marginBottom: "1rem" }}>Adgangskode & Note</h4>
-          <label style={{ fontWeight: "bold", fontSize: "0.9rem" }}><FaLock /> Adgangskode</label>
+          <h4
+            style={{
+              textTransform: "uppercase",
+              borderBottom: "1px solid #ddd",
+              marginTop: "2rem",
+              marginBottom: "1rem",
+            }}
+          >
+            Adgangskode & Note
+          </h4>
+          <label style={{ fontWeight: "bold", fontSize: "0.9rem" }}>
+            <FaLock /> Adgangskode
+          </label>
           <input
             type="text"
             placeholder="Adgangskode"
@@ -371,7 +423,9 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
             value={order.password || ""}
             onChange={(e) => setOrder({ ...order, password: e.target.value })}
           />
-          <label style={{ fontWeight: "bold", fontSize: "0.9rem", marginTop: "0.5rem" }}><FaEdit /> Note</label>
+          <label style={{ fontWeight: "bold", fontSize: "0.9rem", marginTop: "0.5rem" }}>
+            <FaEdit /> Note
+          </label>
           <textarea
             placeholder="Skriv en note her..."
             style={{ ...inputStyle, height: "80px", resize: "vertical" }}
@@ -391,9 +445,18 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
       {/* Modals */}
       <RepairModal
         device={modalDevice}
-        repairs={(repairStructure.flatMap(brand => brand.models || []).find(m => m.id === modalDevice?.id)?.repairs) || []}
+        repairs={
+          (
+            repairStructure.flatMap((brand) => brand.models || []).find(
+              (m) => m.id === modalDevice?.id
+            ) || {}
+          ).repairs || []
+        }
         onAdd={handleAddRepair}
-        onClose={() => setModalDevice(null)}
+        onClose={() => {
+          setModalDevice(null);
+          setEditingRepairIndex(null);
+        }}
       />
 
       {openCreateCustomer && (
@@ -404,8 +467,11 @@ export default function Step1_AddRepairToOrder({ order, setOrder, onNext, custom
       )}
       {openSelectCustomer && (
         <SelectCustomerModal
-          customers={[...customers, dummyCustomer]} // virker når SelectCustomerModal understøtter valgfri customers-prop
-          onSelect={handleSelectCustomer}
+          customers={[...customers, { id: "test-kunde", name: "Test Kunde", phone: "12345678", email: "test@telegiganten.dk" }]}
+          onSelect={(selectedCustomer) => {
+            setOrder({ ...order, customer: selectedCustomer });
+            setOpenSelectCustomer(false);
+          }}
           onClose={() => setOpenSelectCustomer(false)}
         />
       )}

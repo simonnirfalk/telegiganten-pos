@@ -51,6 +51,28 @@ const sortRepairs = (a, b) => {
   return String(a.title || "").localeCompare(String(b.title || ""), "da");
 };
 
+// finder alle model_id'er under et brand-navn
+const getModelIdsForBrand = (brandName) => {
+  const b = data.find((x) => x.brand === brandName);
+  if (!b) return [];
+  // vi tager model_id fra options (de er ens for samme model)
+  const ids = [];
+  b.models.forEach((m) => {
+    const mid = m.options?.[0]?.model_id;
+    if (mid) ids.push(mid);
+  });
+  return ids;
+};
+
+// finder model_id for et givent model-navn (unik inden for et brand)
+const getModelIdByModelName = (modelName) => {
+  for (const b of data) {
+    const m = b.models.find((mm) => mm.model === modelName);
+    if (m?.options?.[0]?.model_id) return m.options[0].model_id;
+  }
+  return null;
+};
+
 /* --------------------- Komponent --------------------- */
 export default function EditRepairsPage() {
   const navigate = useNavigate();
@@ -128,6 +150,26 @@ export default function EditRepairsPage() {
     }
   };
 
+  const handleDeleteTemplate = async (repairId) => {
+    if (!window.confirm("Er du sikker på, at du vil slette denne skabelon?")) return;
+    try {
+      await api.deleteRepairTemplate(repairId);
+      // Fjern fra lokal state
+      setData((prev) =>
+        prev.map((brand) => ({
+          ...brand,
+          models: brand.models.map((model) => ({
+            ...model,
+            options: model.options.filter((opt) => opt.id !== repairId),
+          })),
+        }))
+      );
+    } catch (err) {
+      console.error("Fejl ved sletning:", err);
+      alert("Kunne ikke slette skabelonen.");
+    }
+  };
+
   /* --------------------- Opret ny repair-option --------------------- */
   const handleCreateRepair = async () => {
     const brand = data.find((b) => b.brand === newRepair.brand);
@@ -152,7 +194,7 @@ export default function EditRepairsPage() {
         price: parseInt(newRepair.price || "0", 10),
         time: parseInt(newRepair.duration || "0", 10),
       };
-      const result = await api.createRepair(payload);
+      const result = await api.createRepairTemplate(payload);
 
       if (result?.status === "created") {
         const newOption = {
@@ -688,9 +730,19 @@ export default function EditRepairsPage() {
                     {status === "saving" ? "Gemmer..." : "GEM"}
                   </button>
 
-                  {/* SLET er skjult – endpoint findes ikke i plugin'et
-                  <button ...>SLET</button>
-                  */}
+                  <button
+                    onClick={() => handleDeleteTemplate(repair.id)}
+                    style={{
+                      backgroundColor: "#cc0000",
+                      color: "white",
+                      padding: "4px 12px",
+                      borderRadius: "6px",
+                      border: "none",
+                      cursor: "pointer",
+                    }}
+                  >
+                    SLET
+                  </button>
 
                   {status === "success" && (
                     <span className="text-green-600 text-sm">✔ Gemt</span>
@@ -1004,23 +1056,106 @@ export default function EditRepairsPage() {
               >
                 Annuller
               </button>
+              
               <button
-                onClick={() => {
-                  // Endpoints for global apply findes ikke på serveren pt.
-                  alert("Global opdatering kræver et API-endpoint. Vi har deaktiveret handlingen for at undgå fejl.");
+                onClick={async () => {
+                  if (!globalTitle) {
+                    alert("Vælg en reparationstitel først.");
+                    return;
+                  }
+
+                  const fields = {};
+                  if (globalPrice !== "")
+                    fields["_telegiganten_repair_repair_price"] = parseInt(globalPrice || "0", 10);
+                  if (globalDuration !== "")
+                    fields["_telegiganten_repair_repair_time"] = parseInt(globalDuration || "0", 10);
+
+                  if (Object.keys(fields).length === 0) {
+                    alert("Udfyld mindst ét felt (pris eller tid).");
+                    return;
+                  }
+
+                  // find model_ids ud fra scope
+                  let modelIds = [];
+                  if (globalScope === "all") {
+                    data.forEach((b) => {
+                      b.models.forEach((m) => {
+                        const mid = m.options?.[0]?.model_id;
+                        if (mid) modelIds.push(mid);
+                      });
+                    });
+                  } else if (globalScope === "brands") {
+                    globalBrands.forEach((bn) => {
+                      modelIds = modelIds.concat(getModelIdsForBrand(bn));
+                    });
+                  } else if (globalScope === "models") {
+                    globalModels.forEach((mn) => {
+                      const mid = getModelIdByModelName(mn);
+                      if (mid) modelIds.push(mid);
+                    });
+                  }
+
+                  // dedup
+                  modelIds = Array.from(new Set(modelIds));
+                  if (modelIds.length === 0) {
+                    alert("Ingen modeller valgt.");
+                    return;
+                  }
+
+                  try {
+                    await api.applyRepairChanges({
+                      title: globalTitle,
+                      fields,
+                      // vi sender kun models; serveren understøtter også brands, men det er ikke nødvendigt
+                      models: modelIds,
+                    });
+
+                    // Optimistisk opdatering i UI
+                    setData((prev) =>
+                      prev.map((b) => ({
+                        ...b,
+                        models: b.models.map((m) => {
+                          const mid = m.options?.[0]?.model_id;
+                          if (!modelIds.includes(mid)) return m;
+                          return {
+                            ...m,
+                            options: m.options.map((o) =>
+                              (o.title || "") === globalTitle
+                                ? {
+                                    ...o,
+                                    ...(fields["_telegiganten_repair_repair_price"] !== undefined && {
+                                      price: fields["_telegiganten_repair_repair_price"],
+                                    }),
+                                    ...(fields["_telegiganten_repair_repair_time"] !== undefined && {
+                                      duration: fields["_telegiganten_repair_repair_time"],
+                                    }),
+                                  }
+                                : o
+                            ),
+                          };
+                        }),
+                      }))
+                    );
+
+                    handleModalClose();
+                  } catch (err) {
+                    console.error("Fejl ved global opdatering:", err);
+                    alert("Global opdatering fejlede.");
+                  }
                 }}
                 style={{
-                  backgroundColor: "#bbb",
+                  backgroundColor: "#2166AC",
                   color: "white",
                   padding: "0.5rem 1rem",
                   borderRadius: "6px",
                   border: "none",
-                  cursor: "not-allowed",
+                  cursor: "pointer",
                 }}
-                disabled
               >
                 Opdater globalt
               </button>
+      
+              
             </div>
           </div>
         </div>

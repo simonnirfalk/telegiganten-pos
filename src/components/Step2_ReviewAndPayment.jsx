@@ -1,3 +1,4 @@
+// src/pages/Step2_ReviewAndPayment.jsx
 import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaHome, FaPhone, FaEnvelope, FaLock, FaStickyNote } from "react-icons/fa";
@@ -41,8 +42,25 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
     const updatedRepairs = [];
 
     for (const r of order.repairs) {
-      // 1) Opret ordrelinjen
       const title = `${order.id} • ${order.customer?.name || ""} • ${r.device} • ${r.repair}`;
+
+      // reservedels-info (hvis valgt)
+      const part = r.part || null;
+      const partFields = part
+        ? {
+            spare_part_id: part.id || null,
+            spare_part_model: part.model || "",
+            spare_part_stock: Number(part.stock ?? 0),
+            spare_part_location: part.location || "",
+          }
+        : {
+            spare_part_id: null,
+            spare_part_model: "",
+            spare_part_stock: null,
+            spare_part_location: "",
+          };
+
+      // 1) Opret ordrelinjen i WP
       const createRes = await api.createRepair({
         title,
         repair: r.repair,
@@ -53,7 +71,7 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
         order_id: order.id,
         customer_id: order.customer?.id || 0,
 
-        // oprettelses-meta
+        // oprettelses-meta (alm. felter)
         status: "under reparation",
         payment_type: paymentType,
         payment_total: Number(total) || 0,
@@ -63,7 +81,10 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
         password: order.password || "",
         note: order.note || "",
         customer: order.customer?.name || "",
-        phone: order.customer?.phone || ""
+        phone: order.customer?.phone || "",
+
+        // reservedel ind i meta (vigtigt for create-repair)
+        meta: part ? partFields : {},
       });
 
       if (!createRes || createRes.status !== "created" || !createRes.repair_id) {
@@ -72,7 +93,7 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
 
       const repairId = createRes.repair_id;
 
-      // 2) Opdater + historik
+      // 2) Opdater + historik (ingen reservedelsfelter i fields – de går i meta)
       const fields = {
         status: "under reparation",
         payment_type: paymentType,
@@ -84,10 +105,14 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
         password: order.password || "",
         note: order.note || "",
         customer: order.customer?.name || "",
-        phone: order.customer?.phone || ""
+        phone: order.customer?.phone || "",
       };
 
-      await api.updateRepairWithHistory({ repair_id: repairId, fields });
+      await api.updateRepairWithHistory({
+        repair_id: repairId,
+        fields,                    // status/payment/password/note...
+        meta: part ? partFields : {} // reservedelsfelter her
+      });
 
       updatedRepairs.push({ ...r, id: repairId });
     }
@@ -99,6 +124,9 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
       depositAmount,
       repairs: updatedRepairs
     }));
+
+    // RETURNÉR så handleConfirm kan bruge de nye repairs straks
+    return updatedRepairs;
   }
 
   async function handleConfirm() {
@@ -107,24 +135,22 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
     setError("");
 
     try {
-      await saveRepairsToWordPress();
+      const updatedRepairs = await saveRepairsToWordPress();
 
       const cleanOrder = {
         id: order.id,
         today,
         created_at: createdAtISO,
         customer: order.customer,
-        repairs: order.repairs,
+        repairs: updatedRepairs, // brug de netop gemte med id'er
         password: order.password || "",
         note: order.note || "",
         total,
         payment: { method: paymentType, upfront: Number(depositAmount) || 0 }
       };
 
-      // Fallback til print-siden
       try { localStorage.setItem("tg_last_order", JSON.stringify(cleanOrder)); } catch {}
 
-      // Navigér til dedikeret printside
       navigate(`/print-slip/${order.id}`, { state: { order: cleanOrder }, replace: true });
 
       if (typeof onSubmit === "function") onSubmit();
@@ -203,12 +229,40 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
 
           <div>
             <h4 style={{ fontWeight: "bold" }}>🔧 Reparation</h4>
-            {(order.repairs || []).map((r, i) => (
-              <div key={i} style={{ padding: "0.5rem 0", borderBottom: "1px solid #eee" }}>
-                <strong>{r.device}</strong><br />
-                <span style={{ color: "#555" }}>{r.repair} • {r.price} kr • {r.time} min</span>
-              </div>
-            ))}
+
+            {(order.repairs || []).map((r, i) => {
+              const part = r.part || null;
+              return (
+                <div key={i} style={{ padding: "0.75rem 0", borderBottom: "1px solid #eee" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", alignItems: "flex-start" }}>
+                    <div>
+                      <strong>{r.device}</strong><br />
+                      <span style={{ color: "#555" }}>{r.repair} • {r.price} kr • {r.time} min</span>
+
+                      {/* INFO om valgt reservedel (ingen justering) */}
+                      <div style={{ marginTop: 6, fontSize: 13, color: "#223" }}>
+                        {part ? (
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                            <span style={{ fontWeight: 600 }}>{part.model}</span>
+                            <span style={{ padding: "2px 6px", background: "#eef6ff", color: "#1d4ed8", borderRadius: 4 }}>
+                              Lager: {part.stock ?? "—"}
+                            </span>
+                            {part.location && (
+                              <span style={{ padding: "2px 6px", background: "#f1f5f9", color: "#334155", borderRadius: 4 }}>
+                                {part.location}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span style={{ color: "#6b7280" }}>(ingen reservedel valgt)</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+
             <div style={{ marginTop: "1rem", fontWeight: "bold" }}>
               Samlet: {totalFormatted} kr
             </div>

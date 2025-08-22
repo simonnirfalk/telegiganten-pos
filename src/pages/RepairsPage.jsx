@@ -7,8 +7,8 @@ import { api } from "../data/apiClient";
 
 /** Utils */
 const dkMonths = [
-  "januar","februar","marts","april","maj","juni",
-  "juli","august","september","oktober","november","december"
+  "januar", "februar", "marts", "april", "maj", "juni",
+  "juli", "august", "september", "oktober", "november", "december"
 ];
 
 function formatDkDateTime(value) {
@@ -67,13 +67,44 @@ export default function RepairsPage() {
     return () => { isMounted = false; };
   }, []);
 
-  /** Gem ændringer m. historik (optimistisk UI) */
-  const handleSaveRepair = async (updatedRepair) => {
+  /** Gem ændringer m. historik (accepter både {repair_id, fields} og fladt objekt) */
+  const handleSaveRepair = async (payloadFromModal) => {
+    // Normalisér input fra modalen:
+    // 1) Hvis vi får { repair_id, fields }, brug det direkte.
+    // 2) Hvis vi får et fladt objekt { id, price, time, ... }, konverter til { repair_id, fields }.
+    let payload = { repair_id: 0, fields: {} };
+
+    if (payloadFromModal && typeof payloadFromModal === "object") {
+      if (payloadFromModal.repair_id && payloadFromModal.fields) {
+        payload = {
+          repair_id: Number(payloadFromModal.repair_id),
+          fields: payloadFromModal.fields || {},
+        };
+      } else {
+        const { id, ...rest } = payloadFromModal;
+        payload = {
+          repair_id: Number(id || 0),
+          fields: rest,
+        };
+      }
+    }
+
+    if (!payload.repair_id) {
+      console.error("Manglende repair_id i payload:", payloadFromModal);
+      alert("Kunne ikke gemme ændringer. Ugyldigt ordre-ID.");
+      return;
+    }
+
     try {
-      await api.updateRepairWithHistory(updatedRepair);
+      await api.updateRepairWithHistory(payload);
+
+      // Optimistisk UI-opdatering af tabellen:
       setRepairs((prev) =>
-        prev.map((r) => (r.id === updatedRepair.id ? { ...r, ...updatedRepair } : r))
+        prev.map((r) =>
+          r.id === payload.repair_id ? { ...r, ...payload.fields } : r
+        )
       );
+
       setSelectedRepair(null);
     } catch (err) {
       console.error("Fejl ved opdatering af reparation:", err);

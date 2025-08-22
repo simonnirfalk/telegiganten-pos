@@ -1,22 +1,43 @@
 // src/components/RepairHistory.jsx
 import React, { useEffect, useRef, useState, useMemo } from "react";
 import { FaTimes } from "react-icons/fa";
-import { api } from "../data/apiClient"; // brug fælles api-klient
+
+// NYT:
+import PartAttachControls from "./PartAttachControls";
+import StockAdjustButtons from "./StockAdjustButtons";
+
+/** Hjælper til robust datoformat */
+function formatDateTime(iso) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString("da-DK");
+  } catch {
+    return iso;
+  }
+}
 
 export default function RepairHistory({ repair, onClose, onSave }) {
   const overlayRef = useRef(null);
 
+  // Start med en kopi af repair-objektet (så vi kan redigere frit)
   const [edited, setEdited] = useState({ ...repair });
-  const [history, setHistory] = useState(repair.history || []);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  // Historik beholdes til visning (parent kan sende ny history ind)
+  const [history, setHistory] = useState(repair.history || []);
+  useEffect(() => {
+    setHistory(repair.history || []);
+  }, [repair.history]);
+
+  // Luk på Escape
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && onClose?.();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // Luk ved klik på overlay (udenfor boksen)
   const handleOverlayClick = (e) => {
     if (e.target === overlayRef.current) onClose?.();
   };
@@ -25,16 +46,44 @@ export default function RepairHistory({ repair, onClose, onSave }) {
     setEdited((prev) => ({ ...prev, [field]: value }));
   };
 
-  // beregn diff (kun felter der er ændret)
+  /** Udregn kun de felter, der faktisk er ændret, og sørg for rigtige typer */
   const changedFields = useMemo(() => {
     const out = {};
-    for (const key in edited) {
-      if (key === "id" || key === "history") continue;
-      if (edited[key] !== repair[key]) out[key] = edited[key];
+    const orig = repair || {};
+
+    // Liste over simple felter der kan redigeres
+    const FIELDS = [
+      "customer", "phone", "model", "repair", "price", "time",
+      "payment", "status", "password", "note",
+    ];
+
+    for (const key of FIELDS) {
+      if (edited[key] !== orig[key]) {
+        out[key] = edited[key];
+      }
     }
+
+    // Numeriske felter som tal
+    if (out.price !== undefined && out.price !== "") {
+      const n = Number(out.price);
+      if (!Number.isNaN(n)) out.price = n;
+    }
+    if (out.time !== undefined && out.time !== "") {
+      const n = Number(out.time);
+      if (!Number.isNaN(n)) out.time = n;
+    }
+
+    // Reservedel (kun send part_id hvis den er ændret)
+    const oldPartId = orig?.part?.id || orig?.part_id || null;
+    const newPartId = edited?.part?.id || edited?.part_id || null;
+    if (newPartId !== oldPartId) {
+      out.part_id = newPartId || null; // tillad også at fjerne (null)
+    }
+
     return out;
   }, [edited, repair]);
 
+  /** Gem-knap */
   const handleSave = async () => {
     if (!Object.keys(changedFields).length) {
       onClose?.();
@@ -45,24 +94,17 @@ export default function RepairHistory({ repair, onClose, onSave }) {
     setError("");
 
     try {
-      const res = await api.updateRepairWithHistory({
-        repair_id: repair.id,
-        fields: changedFields,
-      });
-
-      // forventet svar: { status: 'updated', history: [...] }
-      if (res?.status === "updated") {
-        const newHistory = Array.isArray(res.history) ? res.history : [];
-        setHistory(newHistory);
-        onSave?.({ ...edited, history: newHistory });
-        onClose?.();
-      } else {
-        console.warn("Opdatering mislykkedes:", res);
-        setError("Opdatering mislykkedes. Prøv igen.");
-      }
+      // Parent håndterer API-kald + optimistisk UI + lukning
+      await Promise.resolve(
+        onSave?.({
+          repair_id: Number(repair.id),
+          fields: changedFields,
+        })
+      );
+      // Ved succes lukker parent typisk selv modalen (setSelectedRepair(null)).
     } catch (err) {
-      console.error("Fejl ved opdatering af reparation:", err);
-      setError("Kunne ikke gemme ændringer. Tjek forbindelse og prøv igen.");
+      console.error("Fejl fra onSave:", err);
+      setError("Kunne ikke gemme ændringer. Prøv igen.");
     } finally {
       setSaving(false);
     }
@@ -90,29 +132,59 @@ export default function RepairHistory({ repair, onClose, onSave }) {
         {/* Inputs */}
         <div style={styles.body}>
           {[
-            { label: "Kunde", field: "customer" },
-            { label: "Telefon", field: "phone" },
-            { label: "Model", field: "model" },
-            { label: "Reparation", field: "repair" },
-            { label: "Pris", field: "price" },
-            { label: "Tid", field: "time" },
-            { label: "Betaling", field: "payment" },
-            { label: "Status", field: "status" },
-            { label: "Adgangskode", field: "password" },
-            { label: "Note", field: "note" },
-          ].map(({ label, field }) => (
+            { label: "Kunde", field: "customer", type: "text" },
+            { label: "Telefon", field: "phone", type: "text" },
+            { label: "Model", field: "model", type: "text" },
+            { label: "Reparation", field: "repair", type: "text" },
+            { label: "Pris", field: "price", type: "number" },
+            { label: "Tid", field: "time", type: "number" },
+            { label: "Betaling", field: "payment", type: "text" },
+            { label: "Status", field: "status", type: "text" },
+            { label: "Adgangskode", field: "password", type: "text" },
+            { label: "Note", field: "note", type: "text" },
+          ].map(({ label, field, type }) => (
             <div key={field} style={styles.inputGroup}>
               <label style={{ marginBottom: 6 }}>
                 <strong>{label}:</strong>
               </label>
               <input
-                type="text"
+                type={type}
                 value={edited[field] ?? ""}
                 onChange={(e) => handleChange(field, e.target.value)}
                 style={styles.input}
               />
             </div>
           ))}
+
+          {/* Reservedel: badge + vælg/skift/fjern */}
+          <div style={{ gridColumn: "1 / -1", marginTop: "0.25rem" }}>
+            <label style={{ display: "block", marginBottom: 6 }}>
+              <strong>Reservedel</strong>
+            </label>
+
+            <PartAttachControls
+              deviceName={edited.model}
+              repairTitle={edited.repair}
+              defaultRepairType={edited.repair}
+              value={edited.part || null}
+              onChange={(part) => setEdited((prev) => ({ ...prev, part }))}
+            />
+
+            {/* Lagerjustering når der er valgt part */}
+            {edited.part?.id && (
+              <div style={{ marginTop: "0.6rem" }}>
+                <StockAdjustButtons
+                  part={edited.part}
+                  onChanged={(updatedItem) =>
+                    setEdited((prev) => ({
+                      ...prev,
+                      part: { ...prev.part, stock: Number(updatedItem.stock) },
+                    }))
+                  }
+                />
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Footer */}
@@ -150,15 +222,7 @@ export default function RepairHistory({ repair, onClose, onSave }) {
   );
 }
 
-function formatDateTime(iso) {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleString("da-DK");
-  } catch {
-    return iso;
-  }
-}
-
+/** Styles */
 const styles = {
   overlay: {
     position: "fixed",
@@ -174,7 +238,7 @@ const styles = {
     backgroundColor: "#fff",
     padding: "1.25rem 1.25rem 1rem",
     borderRadius: "12px",
-    width: "min(680px, 96vw)",
+    width: "min(760px, 96vw)",
     maxHeight: "90vh",
     overflowY: "auto",
     boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
