@@ -1,4 +1,4 @@
-// src/pages/Step2_ReviewAndPayment.jsx
+// src/components/Step2_ReviewAndPayment.jsx
 import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaHome, FaPhone, FaEnvelope, FaLock, FaStickyNote } from "react-icons/fa";
@@ -44,7 +44,6 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
     for (const r of order.repairs) {
       const title = `${order.id} • ${order.customer?.name || ""} • ${r.device} • ${r.repair}`;
 
-      // reservedels-info (hvis valgt)
       const part = r.part || null;
       const partFields = part
         ? {
@@ -60,7 +59,7 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
             spare_part_location: "",
           };
 
-      // 1) Opret ordrelinjen i WP
+      // 1) Opret ordrelinjen i WP (inkl. kontakt)
       const createRes = await api.createRepair({
         title,
         repair: r.repair,
@@ -71,7 +70,6 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
         order_id: order.id,
         customer_id: order.customer?.id || 0,
 
-        // oprettelses-meta (alm. felter)
         status: "under reparation",
         payment_type: paymentType,
         payment_total: Number(total) || 0,
@@ -80,10 +78,10 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
         payment: paymentText(),
         password: order.password || "",
         note: order.note || "",
+        contact: order.contact || "",            // <-- Kontakt
         customer: order.customer?.name || "",
         phone: order.customer?.phone || "",
 
-        // reservedel ind i meta (vigtigt for create-repair)
         meta: part ? partFields : {},
       });
 
@@ -93,7 +91,7 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
 
       const repairId = createRes.repair_id;
 
-      // 2) Opdater + historik (ingen reservedelsfelter i fields – de går i meta)
+      // 2) Opdater + historik (inkl. kontakt)
       const fields = {
         status: "under reparation",
         payment_type: paymentType,
@@ -104,20 +102,20 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
         created_at: createdAtISO,
         password: order.password || "",
         note: order.note || "",
+        contact: order.contact || "",            // <-- Kontakt
         customer: order.customer?.name || "",
         phone: order.customer?.phone || "",
       };
 
       await api.updateRepairWithHistory({
         repair_id: repairId,
-        fields,                    // status/payment/password/note...
-        meta: part ? partFields : {} // reservedelsfelter her
+        fields,
+        meta: part ? partFields : {}
       });
 
       updatedRepairs.push({ ...r, id: repairId });
     }
 
-    // skriv tilbage til state (og husk valg til næste gang)
     setOrder(prev => ({
       ...prev,
       paymentType,
@@ -125,7 +123,6 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
       repairs: updatedRepairs
     }));
 
-    // RETURNÉR så handleConfirm kan bruge de nye repairs straks
     return updatedRepairs;
   }
 
@@ -142,9 +139,10 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
         today,
         created_at: createdAtISO,
         customer: order.customer,
-        repairs: updatedRepairs, // brug de netop gemte med id'er
+        repairs: updatedRepairs,
         password: order.password || "",
         note: order.note || "",
+        contact: order.contact || "",        // følger med til print
         total,
         payment: { method: paymentType, upfront: Number(depositAmount) || 0 }
       };
@@ -239,16 +237,15 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
                       <strong>{r.device}</strong><br />
                       <span style={{ color: "#555" }}>{r.repair} • {r.price} kr • {r.time} min</span>
 
-                      {/* INFO om valgt reservedel (ingen justering) */}
                       <div style={{ marginTop: 6, fontSize: 13, color: "#223" }}>
                         {part ? (
                           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
                             <span style={{ fontWeight: 600 }}>{part.model}</span>
-                            <span style={{ padding: "2px 6px", background: "#eef6ff", color: "#1d4ed8", borderRadius: 4 }}>
+                            <span style={{ padding: "2px 6px", background: "#eef6ff" }}>
                               Lager: {part.stock ?? "—"}
                             </span>
                             {part.location && (
-                              <span style={{ padding: "2px 6px", background: "#f1f5f9", color: "#334155", borderRadius: 4 }}>
+                              <span style={{ padding: "2px 6px", background: "#f1f5f9" }}>
                                 {part.location}
                               </span>
                             )}
@@ -270,11 +267,12 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
 
           <hr style={{ margin: "1.5rem 0" }} />
 
+          {/* Kontakt sammen med Adgangskode & Note */}
           <div>
-            <h4 style={{ fontWeight: "bold" }}><FaLock style={{ marginRight: "0.5rem" }} />Adgangskode</h4>
-            <p>{order.password || "-"}</p>
-            <h4 style={{ fontWeight: "bold" }}><FaStickyNote style={{ marginRight: "0.5rem" }} />Note</h4>
-            <p>{order.note || "-"}</p>
+            <h4 style={{ fontWeight: "bold" }}><FaLock style={{ marginRight: "0.5rem" }} />Adgangskode & Note</h4>
+            <p><strong>Adgangskode:</strong> {order.password || "-"}</p>
+            <p><strong>Kontakt:</strong> {order.contact || "-"}</p>
+            <p><strong>Note:</strong> {order.note || "-"}</p>
           </div>
 
           {error && (
@@ -286,14 +284,16 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
       </div>
 
       {/* Højre: betaling + opret/print */}
-      <div style={{
-        flex: 1,
-        padding: "2rem",
-        backgroundColor: "#f9f9f9",
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "space-between"
-      }}>
+      <div
+        style={{
+          flex: 1,
+          padding: "2rem",
+          backgroundColor: "#f9f9f9",
+          display: "flex",
+          flexDirection: "column",
+          gap: "1.5rem" // <— i stedet for justifyContent: "space-between"
+        }}
+      >
         <div>
           <h3 style={{ textTransform: "uppercase", fontWeight: "bold", marginBottom: "1.5rem" }}>Betaling</h3>
 
@@ -331,13 +331,13 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
           <div onClick={() => setPaymentType("garanti")} style={cardStyle(paymentType === "garanti")}>
             Garanti (ingen betaling)
           </div>
-        </div>
 
-        <div>
+          {/* Knappen står nu lige under betalingsvalg */}
           <button
             onClick={handleConfirm}
             disabled={!canSubmit}
             style={{
+              marginTop: "1rem",
               backgroundColor: canSubmit ? "#22b783" : "#9bdac5",
               color: "white",
               padding: "1rem",

@@ -1,4 +1,4 @@
-// src/pages/Step1_AddRepairToOrder.jsx
+// src/components/Step1_AddRepairToOrder.jsx
 import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaPlus, FaUserPlus, FaUser, FaHome, FaLock, FaPhone, FaEnvelope, FaEdit } from "react-icons/fa";
@@ -14,6 +14,50 @@ function generateOrderId() {
   const last = Number(localStorage.getItem("lastOrderId") || 0) + 1;
   localStorage.setItem("lastOrderId", last);
   return `40${String(last).padStart(3, "0")}`;
+}
+
+/* ----------------- Søgehelpers (fleksibel match) ----------------- */
+function norm(str = "") {
+  return (str + "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\+/g, " plus ")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function deriveShortCodes(titleNorm) {
+  const codes = new Set();
+  const compact = titleNorm.replace(/\s+/g, "");
+  const letterNumMatches = [
+    ...titleNorm.matchAll(/\b([a-z])\s?(\d{2,4})\b/g),
+    ...compact.matchAll(/\b([a-z])(\d{2,4})\b/g),
+    ...titleNorm.matchAll(/\b([a-z]{2})\s?(\d{1,4})\b/g),
+  ];
+  for (const m of letterNumMatches) {
+    const code = (m[1] + m[2]).toLowerCase();
+    if (code.length >= 3) codes.add(code);
+  }
+  return Array.from(codes);
+}
+
+function buildHaystack(model, brandTitle) {
+  const raw = `${brandTitle || ""} ${model?.title || ""} ${
+    Array.isArray(model?.aliases) ? model.aliases.join(" ") : ""
+  }`;
+  const base = norm(raw);
+  const withoutGalaxy = base.replace(/\bgalaxy\b/g, " ").replace(/\s+/g, " ").trim();
+  const shortCodes = deriveShortCodes(base);
+  const hay = [base, withoutGalaxy, shortCodes.join(" ")].join(" ");
+  return hay.replace(/\s+/g, " ").trim();
+}
+
+function tokenize(q = "") {
+  const n = norm(q);
+  if (!n) return [];
+  return n.split("").every((c) => c === " ") ? [] : n.split(" ").filter(Boolean);
 }
 
 export default function Step1_AddRepairToOrder({
@@ -56,6 +100,7 @@ export default function Step1_AddRepairToOrder({
           name: c.name || "",
           phone: c.phone || "",
           email: c.email || "",
+          // ekstraPhone fjernes senere i modaler/sider – vi lader den være her indtil vi refaktorerer de andre filer
           extraPhone: c.extraPhone || "",
         }));
         setCustomers(mapped);
@@ -97,7 +142,7 @@ export default function Step1_AddRepairToOrder({
     padding: "1rem",
     borderRadius: "10px",
     cursor: "pointer",
-    fontWeight: "bold",
+    fontWeight: "regular",
     textAlign: "center",
     display: "flex",
     alignItems: "center",
@@ -117,52 +162,69 @@ export default function Step1_AddRepairToOrder({
 
   const customCategoryOrder = [
     "Alle","iPhone","Samsung mobil","iPad","MacBook","iMac","Samsung Galaxy Tab","Motorola mobil","OnePlus mobil",
-    "Nokia mobil","Huawei mobil","Xiaomi mobil","Sony Xperia","Oppo mobil","Microsoft mobil","Honor mobil",
+    "Nokia mobil","Xiaomi mobil","Sony Xperia","Oppo mobil","Microsoft mobil","Honor mobil",
     "Google Pixel","Apple Watch","Samsung Book","Huawei tablet",
   ];
 
   const allCategories = useMemo(
-    () => customCategoryOrder.filter(
-      (cat) => cat === "Alle" || repairStructure.some((b) => b.title === cat)
-    ),
+    () =>
+      customCategoryOrder.filter(
+        (cat) => cat === "Alle" || repairStructure.some((b) => b.title === cat)
+      ),
     [repairStructure]
   );
 
-  const brandsFiltered =
-    selectedCategory === "Alle"
-      ? repairStructure.filter((b) =>
-          (b.models || []).some((m) => popularModelNames.includes(m.title))
-        )
-      : repairStructure.filter((b) => b.title === selectedCategory);
+  const normalizedSearch = useMemo(() => searchTerm.trim(), [searchTerm]);
+  const searchTokens = useMemo(() => tokenize(normalizedSearch), [normalizedSearch]);
+
+  const brandsFiltered = useMemo(() => {
+    if (selectedCategory !== "Alle") {
+      return repairStructure.filter((b) => b.title === selectedCategory);
+    }
+    if (searchTokens.length > 0) {
+      return repairStructure; // global søgning
+    }
+    return repairStructure.filter((b) =>
+      (b.models || []).some((m) => popularModelNames.includes(m.title))
+    );
+  }, [repairStructure, selectedCategory, searchTokens, popularModelNames]);
 
   const filteredModels = useMemo(() => {
-    return brandsFiltered
-      .flatMap((b) => b.models || [])
-      .filter(
-        (m) => selectedCategory !== "Alle" || popularModelNames.includes(m.title)
-      )
-      .filter((m) => m.title.toLowerCase().includes(searchTerm.toLowerCase()))
-      .sort((a, b) => {
-        if (selectedCategory === "Alle") {
-          return (
-            popularModelNames.indexOf(a.title) -
-            popularModelNames.indexOf(b.title)
+    const modelsWithBrand = brandsFiltered.flatMap((b) =>
+      (b.models || []).map((m) => ({ ...m, __brand: b.title }))
+    );
+
+    if (searchTokens.length === 0) {
+      if (selectedCategory === "Alle") {
+        return modelsWithBrand
+          .filter((m) => popularModelNames.includes(m.title))
+          .sort(
+            (a, b) =>
+              popularModelNames.indexOf(a.title) -
+              popularModelNames.indexOf(b.title)
           );
-        }
-        return 0;
-      });
-  }, [brandsFiltered, searchTerm, selectedCategory]);
+      }
+      return modelsWithBrand;
+    }
+
+    // Fleksibel søgning (AND over tokens)
+    return modelsWithBrand.filter((m) => {
+      const hay = buildHaystack(m, m.__brand);
+      return searchTokens.every((t) => hay.includes(norm(t)));
+    });
+  }, [brandsFiltered, selectedCategory, searchTokens, popularModelNames]);
 
   /* ---------- Hjælpere ---------- */
   function findModelByTitle(title) {
     const allModels = repairStructure.flatMap((b) => b.models || []);
-    return allModels.find((m) => (m.title || "").trim() === (title || "").trim()) || null;
-    // (fallback kunne være case-insensitive, men det her er mest stabilt ift. dine data)
+    return (
+      allModels.find(
+        (m) => (m.title || "").trim() === (title || "").trim()
+      ) || null
+    );
   }
 
   /* ---------- Handlers ---------- */
-
-  // FÅR reparation + evt. r.part fra RepairModal
   const handleAddRepair = (deviceName, repair) => {
     if (repair.model_id) {
       api.incrementModelUsage(repair.model_id).catch(() => {});
@@ -186,7 +248,6 @@ export default function Step1_AddRepairToOrder({
         : null,
     };
 
-    // hvis vi er i rediger-tilstand, erstat elementet i stedet for at pushe
     if (editingRepairIndex !== null && editingRepairIndex >= 0) {
       setOrder((prev) => {
         const updated = [...prev.repairs];
@@ -203,7 +264,6 @@ export default function Step1_AddRepairToOrder({
 
   const onEditRepair = (idx) => {
     const r = order.repairs[idx];
-    // find modellen ud fra device-navnet og åbn modalen
     const model = findModelByTitle(r.device);
     setEditingRepairIndex(idx);
     setModalDevice(model || null);
@@ -214,13 +274,6 @@ export default function Step1_AddRepairToOrder({
       ...prev,
       repairs: prev.repairs.filter((_, i) => i !== idx),
     }));
-  };
-
-  const dummyCustomer = {
-    id: "test-kunde",
-    name: "Test Kunde",
-    phone: "12345678",
-    email: "test@telegiganten.dk",
   };
 
   const handleCreateCustomer = (newCustomer) => {
@@ -245,6 +298,16 @@ export default function Step1_AddRepairToOrder({
 
   const handleRemoveCustomer = () => {
     setOrder({ ...order, customer: null });
+  };
+
+  // NYT: bekræft hvis adgangskode er tom
+  const handleNext = () => {
+    const pwd = (order.password || "").trim();
+    if (!pwd) {
+      const ok = window.confirm("Er du sikker på at du ikke skal bruge adgangskoden?");
+      if (!ok) return;
+    }
+    onNext();
   };
 
   /* ---------- Render ---------- */
@@ -278,7 +341,7 @@ export default function Step1_AddRepairToOrder({
           </div>
 
           <div style={{ flexGrow: 1 }}>
-            <h2 style={{ textTransform: "uppercase", fontWeight: "bold" }}>
+            <h2 style={{ textTransform: "uppercase", fontWeight: "regular" }}>
               Vælg enhed og reparation
             </h2>
             <input
@@ -402,7 +465,7 @@ export default function Step1_AddRepairToOrder({
             </>
           )}
 
-          {/* Note & adgangskode */}
+          {/* Adgangskode, Kontakt & Note */}
           <h4
             style={{
               textTransform: "uppercase",
@@ -413,7 +476,8 @@ export default function Step1_AddRepairToOrder({
           >
             Adgangskode & Note
           </h4>
-          <label style={{ fontWeight: "bold", fontSize: "0.9rem" }}>
+
+          <label style={{ fontWeight: "regular", fontSize: "0.9rem" }}>
             <FaLock /> Adgangskode
           </label>
           <input
@@ -423,7 +487,19 @@ export default function Step1_AddRepairToOrder({
             value={order.password || ""}
             onChange={(e) => setOrder({ ...order, password: e.target.value })}
           />
-          <label style={{ fontWeight: "bold", fontSize: "0.9rem", marginTop: "0.5rem" }}>
+
+          <label style={{ fontWeight: "regular", fontSize: "0.9rem", marginTop: "0.5rem" }}>
+            <FaPhone /> Kontakt (alternativt tlf.nr.)
+          </label>
+          <input
+            type="text"
+            placeholder="Kontakt telefonnummer"
+            style={inputStyle}
+            value={order.contact || ""}
+            onChange={(e) => setOrder({ ...order, contact: e.target.value })}
+          />
+
+          <label style={{ fontWeight: "regular", fontSize: "0.9rem", marginTop: "0.5rem" }}>
             <FaEdit /> Note
           </label>
           <textarea
@@ -435,7 +511,7 @@ export default function Step1_AddRepairToOrder({
 
           {/* Fortsæt */}
           <div style={{ paddingTop: "1rem" }}>
-            <button style={buttonStyle} onClick={onNext} disabled={order.repairs.length === 0}>
+            <button style={buttonStyle} onClick={handleNext} disabled={order.repairs.length === 0}>
               <FaPlus /> Fortsæt
             </button>
           </div>

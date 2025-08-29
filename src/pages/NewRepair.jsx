@@ -1,3 +1,4 @@
+// src/pages/NewRepair.jsx
 import React, { useState } from "react";
 import Step1_AddRepairToOrder from "../components/Step1_AddRepairToOrder";
 import Step2_ReviewAndPayment from "../components/Step2_ReviewAndPayment";

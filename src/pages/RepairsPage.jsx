@@ -1,6 +1,6 @@
 // src/pages/RepairsPage.jsx
 import React, { useState, useEffect, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { FaHome } from "react-icons/fa";
 import RepairHistory from "../components/RepairHistory";
 import { api } from "../data/apiClient";
@@ -29,11 +29,12 @@ function formatPrice(v) {
   return n.toLocaleString("da-DK") + " kr.";
 }
 
-/** Statusliste (kan tilpasses dine faktiske værdier) */
-const STATUS_OPTIONS = ["Alle", "booket", "under reparation", "afventer", "afsluttet"];
+/** Statusliste (kun de tre ønskede + Alle) */
+const STATUS_OPTIONS = ["Alle", "under reparation", "klar til afhentning", "afsluttet"];
 
 export default function RepairsPage() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [searchTerm, setSearchTerm] = useState("");
   const [fromDate, setFromDate] = useState("");
@@ -67,11 +68,18 @@ export default function RepairsPage() {
     return () => { isMounted = false; };
   }, []);
 
+  // Åbn en specifik reparation hvis vi blev navigeret hertil med state
+  useEffect(() => {
+    const r = location.state?.openRepair;
+    if (r) {
+      setSelectedRepair(r);
+      // ryd state så back/refresh ikke åbner igen
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, [location, navigate]);
+
   /** Gem ændringer m. historik (accepter både {repair_id, fields} og fladt objekt) */
   const handleSaveRepair = async (payloadFromModal) => {
-    // Normalisér input fra modalen:
-    // 1) Hvis vi får { repair_id, fields }, brug det direkte.
-    // 2) Hvis vi får et fladt objekt { id, price, time, ... }, konverter til { repair_id, fields }.
     let payload = { repair_id: 0, fields: {} };
 
     if (payloadFromModal && typeof payloadFromModal === "object") {
@@ -123,7 +131,7 @@ export default function RepairsPage() {
       cursor: "pointer",
       backgroundColor: active ? "#2166AC" : "#ccc",
       color: "white",
-      fontWeight: "bold",
+      fontWeight: "regular",
     };
   };
   const buttonStyle = {
@@ -153,7 +161,6 @@ export default function RepairsPage() {
       time: r.time ?? r.duration ?? "",
       payment: r.payment ?? r.payment_method ?? "",
       status: r.status ?? "",
-      // Gem original reference til modal:
       _raw: r,
     }));
   }, [repairs]);
@@ -182,7 +189,6 @@ export default function RepairsPage() {
         const created = new Date(r.created_at);
         if (from && created < from) return false;
         if (to) {
-          // gør "til og med" inklusiv (sæt to til kl. 23:59)
           const toEnd = new Date(to);
           toEnd.setHours(23, 59, 59, 999);
           if (created > toEnd) return false;

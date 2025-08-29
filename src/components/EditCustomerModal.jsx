@@ -4,7 +4,12 @@ import { api } from "../data/apiClient";
 import { validatePhone, validateEmail, normalizePhone } from "../utils/customerUtils";
 
 export default function EditCustomerModal({ customer, onSave, onClose }) {
-  const [formData, setFormData] = useState({ ...customer });
+  const [formData, setFormData] = useState({
+    id: customer?.id,
+    name: customer?.name || "",
+    phone: customer?.phone || "",
+    email: customer?.email || "",
+  });
   const [errors, setErrors] = useState({});
   const [serverError, setServerError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -27,7 +32,6 @@ export default function EditCustomerModal({ customer, onSave, onClose }) {
       id: customer?.id,
       name: (formData.name || "").trim(),
       phone: normalizePhone(formData.phone || ""),
-      extraPhone: normalizePhone(formData.extraPhone || ""),
       email: (formData.email || "").trim().toLowerCase(),
     }),
     [formData, customer?.id]
@@ -38,7 +42,6 @@ export default function EditCustomerModal({ customer, onSave, onClose }) {
     if (!cleaned.name) e.name = "Navn er påkrævet.";
     if (!validatePhone(cleaned.phone)) e.phone = "Ugyldigt telefonnummer.";
     if (cleaned.email && !validateEmail(cleaned.email)) e.email = "Ugyldig e-mailadresse.";
-    if (cleaned.extraPhone && !validatePhone(cleaned.extraPhone)) e.extraPhone = "Ugyldigt ekstra telefonnummer.";
     return e;
   };
 
@@ -58,13 +61,13 @@ export default function EditCustomerModal({ customer, onSave, onClose }) {
     setServerError("");
     try {
       // Kalder WP via proxy: /update-customer
+      // Payload indeholder ikke længere extraPhone
       const res = await api.updateCustomer(cleaned);
       // Forventet form fra plugin: { status: 'updated', customer: {...} }
       if (res?.status === "updated" && res?.customer) {
         onSave?.(res.customer);
         onClose?.();
       } else {
-        // Håndter kendte WP_Errors (409 m.m.) eller uventede svar
         const msg =
           res?.message ||
           res?.error ||
@@ -72,7 +75,6 @@ export default function EditCustomerModal({ customer, onSave, onClose }) {
         setServerError(msg);
       }
     } catch (err) {
-      // Hvis backend svarer med WP_Error (fx phone_exists 409), vis besked
       const msg = err?.message || "Der opstod en fejl under opdatering.";
       setServerError(msg);
       console.error("Fejl ved opdatering af kunde:", err);
@@ -125,7 +127,7 @@ export default function EditCustomerModal({ customer, onSave, onClose }) {
         <input
           autoFocus
           placeholder="Navn"
-          value={formData.name || ""}
+          value={formData.name}
           onChange={(e) => handleChange("name", e.target.value)}
           style={{ marginBottom: "0.5rem", width: "100%", padding: "0.5rem" }}
         />
@@ -135,7 +137,7 @@ export default function EditCustomerModal({ customer, onSave, onClose }) {
 
         <input
           placeholder="Telefonnummer"
-          value={formData.phone || ""}
+          value={formData.phone}
           onChange={(e) => handleChange("phone", e.target.value)}
           style={{ marginBottom: "0.5rem", width: "100%", padding: "0.5rem" }}
         />
@@ -144,20 +146,8 @@ export default function EditCustomerModal({ customer, onSave, onClose }) {
         )}
 
         <input
-          placeholder="Ekstra telefonnummer"
-          value={formData.extraPhone || ""}
-          onChange={(e) => handleChange("extraPhone", e.target.value)}
-          style={{ marginBottom: "0.5rem", width: "100%", padding: "0.5rem" }}
-        />
-        {errors.extraPhone && (
-          <p style={{ color: "red", marginTop: "-0.3rem" }}>
-            {errors.extraPhone}
-          </p>
-        )}
-
-        <input
           placeholder="E-mail"
-          value={formData.email || ""}
+          value={formData.email}
           onChange={(e) => handleChange("email", e.target.value)}
           style={{ marginBottom: "0.5rem", width: "100%", padding: "0.5rem" }}
         />

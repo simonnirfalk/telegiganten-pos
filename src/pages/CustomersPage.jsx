@@ -40,7 +40,6 @@ export default function CustomersPage() {
           id: c.id ?? c.ID ?? c.customer_id ?? Math.random().toString(36).slice(2),
           name: c.name ?? c.customer_name ?? "",
           phone: c.phone ?? c.customer_phone ?? "",
-          extraPhone: c.extraPhone ?? c.extra_phone ?? "",
           email: c.email ?? "",
           repairs: Array.isArray(c.repairs) ? c.repairs : [],
         }));
@@ -65,7 +64,6 @@ export default function CustomersPage() {
       const hay = [
         c.name || "",
         c.phone || "",
-        c.extraPhone || "",
         c.email || "",
       ]
         .join(" ")
@@ -111,7 +109,7 @@ export default function CustomersPage() {
 
       <input
         type="text"
-        placeholder="Søg navn, telefon, ekstra tlf. eller e‑mail…"
+        placeholder="Søg navn, telefon eller e-mail…"
         value={searchTerm}
         onChange={(e) => setSearchTerm(e.target.value)}
         style={inputStyle}
@@ -128,7 +126,6 @@ export default function CustomersPage() {
               <tr style={{ background: "#f0f0f0" }}>
                 <th style={{ padding: "0.5rem", border: "1px solid #ddd" }}>Navn</th>
                 <th style={{ padding: "0.5rem", border: "1px solid #ddd" }}>Telefon</th>
-                <th style={{ padding: "0.5rem", border: "1px solid #ddd" }}>Ekstra tlf.</th>
                 <th style={{ padding: "0.5rem", border: "1px solid #ddd" }}>E-mail</th>
                 <th style={{ padding: "0.5rem", border: "1px solid #ddd" }}>Antal reparationer</th>
                 <th style={{ padding: "0.5rem", border: "1px solid #ddd" }}>Seneste reparation</th>
@@ -148,7 +145,6 @@ export default function CustomersPage() {
                   >
                     <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>{c.name || "—"}</td>
                     <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>{c.phone || "—"}</td>
-                    <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>{c.extraPhone || "—"}</td>
                     <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>{c.email || "—"}</td>
                     <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>{count}</td>
                     <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>

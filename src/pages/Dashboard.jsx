@@ -1,17 +1,18 @@
 // src/pages/Dashboard.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import DashboardStats from "../components/DashboardStats";
+import DashboardRecentBookings from "../components/DashboardRecentBookings"; // ✅ NY
 import { useNavigate } from "react-router-dom";
 import { api } from "../data/apiClient";
 
-// ---------------- Styles (beholder din stil) ----------------
+// ---------------- Styles ----------------
 const navBoxStyle = {
   backgroundColor: "white",
   borderRadius: "16px",
   padding: "2rem",
   textAlign: "center",
   fontSize: "1.1rem",
-  fontWeight: "bold",
+  fontWeight: "regular",
   flex: "1 1 180px",
   cursor: "pointer",
   boxShadow: "0 2px 6px rgba(0,0,0,0.05)",
@@ -35,6 +36,18 @@ const cardStyle = {
   boxShadow: "0 1px 4px rgba(0,0,0,0.05)",
   display: "grid",
   gap: "6px",
+  cursor: "pointer",
+  transition: "transform .12s ease, box-shadow .12s ease",
+};
+
+const cardHover = (e, hover) => {
+  if (hover) {
+    e.currentTarget.style.boxShadow = "0 8px 18px rgba(0,0,0,0.12)";
+    e.currentTarget.style.transform = "translateY(-2px)";
+  } else {
+    e.currentTarget.style.boxShadow = "0 1px 4px rgba(0,0,0,0.05)";
+    e.currentTarget.style.transform = "translateY(0)";
+  }
 };
 
 const badgeBase = {
@@ -47,25 +60,26 @@ const badgeBase = {
   fontWeight: 700,
 };
 
+// Kun de tre statuser
 function statusColor(status) {
   const s = String(status || "").toLowerCase();
-  if (["modtaget", "received", "new"].includes(s)) return "#22b783";
-  if (["i gang", "in progress", "working"].includes(s)) return "#2166AC";
-  if (["afsluttet", "done", "completed"].includes(s)) return "#1f9d55";
-  if (["afventer", "pending", "awaiting"].includes(s)) return "#f59e0b";
-  if (["afvist", "canceled", "cancelled"].includes(s)) return "#ef4444";
+  if (s === "under reparation") return "#2166AC";        // blå
+  if (s === "klar til afhentning") return "#f59e0b";     // orange
+  if (s === "afsluttet") return "#1f9d55";               // grøn
   return "#6b7280"; // fallback grå
 }
 
-function formatDkDate(input) {
+function formatDkDateTime(input) {
   if (!input) return "—";
   const d = new Date(input);
   if (isNaN(d.getTime())) return "—";
-  const months = [
-    "jan.", "feb.", "mar.", "apr.", "maj", "jun.",
-    "jul.", "aug.", "sep.", "okt.", "nov.", "dec.",
-  ];
-  return `${d.getDate()}. ${months[d.getMonth()]} ${d.getFullYear()}`;
+  const months = ["jan.", "feb.", "mar.", "apr.", "maj", "jun.", "jul.", "aug.", "sep.", "okt.", "nov.", "dec."];
+  const dd = d.getDate();
+  const mm = months[d.getMonth()];
+  const yyyy = d.getFullYear();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${dd}. ${mm} ${yyyy} kl. ${hh}.${mi}`;
 }
 
 function formatPrice(v) {
@@ -89,9 +103,7 @@ export default function Dashboard() {
       try {
         setLoading(true);
         setErrorMsg("");
-        // Hent ALLE ordrer (tg_repair). Vi viser kun de seneste 5 nedenfor.
-        const res = await api.getRepairOrders();
-        // res kan være et array eller et objekt med items; vær defensiv:
+        const res = await api.getRepairOrders(); // tg_repair
         const items = Array.isArray(res) ? res : (res?.items ?? []);
         if (!cancelled) setRepairs(items);
       } catch (err) {
@@ -103,7 +115,7 @@ export default function Dashboard() {
     return () => { cancelled = true; };
   }, []);
 
-  // Sorter efter created_at (nyeste først) og begræns til 5
+  // Nyeste først, top 5
   const latestRepairs = useMemo(() => {
     const list = Array.isArray(repairs) ? repairs.slice() : [];
     list.sort((a, b) => {
@@ -116,6 +128,11 @@ export default function Dashboard() {
 
   const placeholderCount = 5;
   const hasData = latestRepairs.length > 0;
+
+  const openRepair = (repair) => {
+    // Navigér til RepairsPage og send posten med, så den kan åbne direkte
+    navigate("/repairs", { state: { openRepair: repair } });
+  };
 
   return (
     <div>
@@ -136,6 +153,14 @@ export default function Dashboard() {
           onMouseLeave={(e) => navHover(e, false)}
         >
           Reparationer
+        </div>
+        <div
+          onClick={() => navigate("/bookings")}
+          style={navBoxStyle}
+          onMouseEnter={(e) => navHover(e, true)}
+          onMouseLeave={(e) => navHover(e, false)}
+        >
+          Bookinger
         </div>
         <div
           onClick={() => navigate("/customers")}
@@ -179,7 +204,7 @@ export default function Dashboard() {
           }}
         >
           {Array.from({ length: placeholderCount }).map((_, i) => (
-            <div key={i} style={{ ...cardStyle }}>
+            <div key={i} style={{ ...cardStyle, cursor: "default" }}>
               <div style={{ height: 14, width: "60%", background: "#eee", borderRadius: 8 }} />
               <div style={{ height: 12, width: "40%", background: "#f0f0f0", borderRadius: 8 }} />
               <div style={{ height: 24, width: 90, background: "#e6e6e6", borderRadius: 999, marginTop: 8 }} />
@@ -207,20 +232,35 @@ export default function Dashboard() {
           {hasData ? (
             latestRepairs.map((r, i) => {
               const model = r?.model_name || r?.model || "Ukendt model";
+              const repairTitle = r?.repair_title || r?.repair || r?.title || "";
               const customer = r?.customer_name || r?.customer || "—";
               const status = r?.status || "—";
-              const date = r?.created_at || r?.date || r?.createdAt;
+              const createdAt = r?.created_at || r?.date || r?.createdAt;
               const price = r?.price ?? r?.amount;
 
               return (
-                <div key={r?.id || i} style={cardStyle}>
-                  <p style={{ margin: 0, fontWeight: "bold" }}>{model}</p>
+                <div
+                  key={r?.id || i}
+                  style={cardStyle}
+                  onClick={() => openRepair(r)}
+                  onMouseEnter={(e) => cardHover(e, true)}
+                  onMouseLeave={(e) => cardHover(e, false)}
+                >
+                  {/* Model + reparation */}
+                  <p style={{ margin: 0, fontWeight: "bold" }}>
+                    {model}{repairTitle ? ` — ${repairTitle}` : ""}
+                  </p>
+                  {/* Kunde */}
                   <p style={{ margin: 0, color: "#333" }}>{customer}</p>
+                  {/* Status badge */}
                   <span style={{ ...badgeBase, backgroundColor: statusColor(status) }}>
                     {String(status)}
                   </span>
+                  {/* Dato + tid og pris */}
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
-                    <p style={{ fontSize: "0.8rem", color: "#999", margin: 0 }}>{formatDkDate(date)}</p>
+                    <p style={{ fontSize: "0.8rem", color: "#999", margin: 0 }}>
+                      {formatDkDateTime(createdAt)}
+                    </p>
                     <p style={{ fontSize: "0.85rem", color: "#444", margin: 0 }}>
                       <strong>{formatPrice(price)}</strong>
                     </p>
@@ -230,7 +270,7 @@ export default function Dashboard() {
             })
           ) : (
             Array.from({ length: placeholderCount }).map((_, i) => (
-              <div key={i} style={cardStyle}>
+              <div key={i} style={{ ...cardStyle, cursor: "default" }}>
                 <p style={{ margin: 0, fontWeight: "bold" }}>—</p>
                 <p style={{ margin: 0 }}>Ingen data</p>
                 <span style={{ ...badgeBase, backgroundColor: "#6b7280" }}>—</span>
@@ -240,6 +280,14 @@ export default function Dashboard() {
           )}
         </div>
       )}
+
+      {/* ✅ NY: Seneste bookinger */}
+      <h2 style={{ fontFamily: "Archivo Black", textTransform: "uppercase", margin: "1rem 0" }}>
+        Seneste bookinger
+      </h2>
+      <div style={{ marginBottom: "2.5rem" }}>
+        <DashboardRecentBookings />
+      </div>
 
       {/* Analysekomponent */}
       <DashboardStats />

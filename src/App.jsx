@@ -1,25 +1,28 @@
-import { useState, useEffect } from "react";
-import { Routes, Route } from "react-router-dom";
-import Dashboard from "./pages/Dashboard";
-import NewRepair from "./pages/NewRepair";
-import RepairsPage from "./pages/RepairsPage";
-import CustomersPage from "./pages/CustomersPage";
-import CustomerDetailPage from "./pages/CustomerDetailPage";
+// src/App.jsx
+import React, { useState, useEffect, Suspense, lazy } from "react";
+import { Routes, Route, Navigate } from "react-router-dom";
 import { RepairProvider } from "./context/RepairContext";
-import EditRepairsPage from "./pages/EditRepairsPage";
-import SparePartsPage from "./pages/SparePartsPage";
-import RepairSlipPrint from "./pages/RepairSlipPrint";
-import { api } from "./data/apiClient"; // ← brug proxy
+import { api } from "./data/apiClient";
+
+// Lazy-load pages to avoid any top-level side-effects on import
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const NewRepair = lazy(() => import("./pages/NewRepair"));
+const RepairsPage = lazy(() => import("./pages/RepairsPage"));
+const CustomersPage = lazy(() => import("./pages/CustomersPage"));
+const CustomerDetailPage = lazy(() => import("./pages/CustomerDetailPage"));
+const EditRepairsPage = lazy(() => import("./pages/EditRepairsPage"));
+const SparePartsPage = lazy(() => import("./pages/SparePartsPage"));
+const RepairSlipPrint = lazy(() => import("./pages/RepairSlipPrint"));
+const BookingsPage = lazy(() => import("./pages/BookingsPage"));
 
 export default function App() {
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Hent kunder med reparationer (via proxy for konsistens)
   useEffect(() => {
     (async () => {
       try {
-        const data = await api.getCustomersWithRepairs();
+        const data = await api.getCustomers();
         setCustomers(Array.isArray(data) ? data : []);
       } catch (err) {
         console.error("Fejl ved hentning af kunder:", err);
@@ -34,31 +37,38 @@ export default function App() {
   return (
     <RepairProvider>
       <div style={{ fontFamily: "Inter, sans-serif", background: "#f8f8f8", minHeight: "100vh" }}>
-        <header style={{
-          display: "flex",
-          justifyContent: "flex-start",
-          alignItems: "center",
-          padding: "1rem 2rem",
-          backgroundColor: "white",
-          boxShadow: "0 1px 4px rgba(0,0,0,0.05)"
-        }}>
+        <header
+          style={{
+            display: "flex",
+            justifyContent: "flex-start",
+            alignItems: "center",
+            padding: "1rem 2rem",
+            backgroundColor: "white",
+            boxShadow: "0 1px 4px rgba(0,0,0,0.05)"
+          }}
+        >
           <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
             <img src="/logo.png" alt="Telegiganten" style={{ height: 40 }} />
           </div>
         </header>
 
         <main style={{ padding: "2rem" }}>
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/opret" element={<NewRepair />} />
-            <Route path="/repairs" element={<RepairsPage />} />
-            <Route path="/customers" element={<CustomersPage customers={customers} />} />
-            <Route path="/customers/:id" element={<CustomerDetailPage customers={customers} />} />
-            <Route path="/edit-repairs" element={<EditRepairsPage />} />
-            <Route path="/spareparts" element={<SparePartsPage />} />
-            {/* 🔧 Fix: brug den rigtige route til print-siden */}
-            <Route path="/print-slip/:orderId" element={<RepairSlipPrint />} />
-          </Routes>
+          <Suspense fallback={<div>Indlæser side…</div>}>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/opret" element={<NewRepair />} />
+              <Route path="/repairs" element={<RepairsPage />} />
+              <Route path="/customers" element={<CustomersPage customers={customers} />} />
+              <Route path="/customers/:id" element={<CustomerDetailPage />} />
+              <Route path="/edit-repairs" element={<EditRepairsPage />} />
+              <Route path="/spareparts" element={<SparePartsPage />} />
+              <Route path="/print-slip/:orderId" element={<RepairSlipPrint />} />
+              <Route path="/bookings" element={<BookingsPage />} />
+
+              {/* 404 fallback – undgår at en forkert sti viser en “tilfældig” side */}
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Suspense>
         </main>
       </div>
     </RepairProvider>

@@ -7,7 +7,6 @@ export default function CreateCustomerModal({ onClose, onCreate, customers = [] 
   const [formData, setFormData] = useState({
     name: "",
     phone: "",
-    extraPhone: "",
     email: "",
   });
   const [errors, setErrors] = useState({});
@@ -27,24 +26,23 @@ export default function CreateCustomerModal({ onClose, onCreate, customers = [] 
     setServerError("");
   };
 
-  const cleaned = useMemo(() => ({
-    name: formData.name.trim(),
-    phone: normalizePhone(formData.phone),
-    extraPhone: normalizePhone(formData.extraPhone),
-    email: formData.email.trim().toLowerCase(),
-  }), [formData]);
+  const cleaned = useMemo(
+    () => ({
+      name: formData.name.trim(),
+      phone: normalizePhone(formData.phone),
+      email: formData.email.trim().toLowerCase(),
+    }),
+    [formData]
+  );
 
   const validate = () => {
     const e = {};
     if (!cleaned.name) e.name = "Navn er påkrævet.";
     if (!validatePhone(cleaned.phone)) e.phone = "Ugyldigt telefonnummer.";
-    if (cleaned.extraPhone && !validatePhone(cleaned.extraPhone)) e.extraPhone = "Ugyldigt ekstra telefonnummer.";
     if (!validateEmail(cleaned.email)) e.email = "Ugyldig e-mailadresse.";
 
-    // Lokal duplikat-tjek
-    const exists = customers.find(
-      (c) => normalizePhone(c.phone) === cleaned.phone
-    );
+    // Lokal duplikat-tjek (telefon skal være unik)
+    const exists = customers.find((c) => normalizePhone(c.phone) === cleaned.phone);
     if (exists) e.phone = `Telefonnummer findes allerede: ${exists.name}`;
 
     return e;
@@ -68,9 +66,11 @@ export default function CreateCustomerModal({ onClose, onCreate, customers = [] 
     setSaving(true);
     setServerError("");
     try {
-      const data = await api.createCustomer(cleaned);
+      const payload = cleaned; // { name, phone, email }
+      const data = await api.createCustomer(payload);
+
       if (data?.status === "created" || data?.status === "exists") {
-        const newCustomer = { id: data.customer_id, ...cleaned };
+        const newCustomer = { id: data.customer_id, ...payload };
         onCreate?.(newCustomer);
         onClose?.();
       } else {
@@ -78,7 +78,6 @@ export default function CreateCustomerModal({ onClose, onCreate, customers = [] 
       }
     } catch (err) {
       console.error("Fejl ved oprettelse af kunde:", err);
-      // Hvis backend returnerer WP_Error med status 409 for telefon-unik, prøv at læse beskeden
       const msg = err?.message || "Der opstod en fejl under oprettelsen.";
       setServerError(msg);
     } finally {
@@ -95,7 +94,7 @@ export default function CreateCustomerModal({ onClose, onCreate, customers = [] 
         display: "flex",
         justifyContent: "center",
         alignItems: "center",
-        zIndex: 1000
+        zIndex: 1000,
       }}
       onClick={onClose}
     >
@@ -107,13 +106,21 @@ export default function CreateCustomerModal({ onClose, onCreate, customers = [] 
           padding: "2rem",
           borderRadius: "10px",
           width: "90%",
-          maxWidth: "500px"
+          maxWidth: "500px",
         }}
       >
         <h2 style={{ marginTop: 0 }}>Opret kunde</h2>
 
         {serverError && (
-          <p style={{ color: "#a40000", background: "#ffe8e8", border: "1px solid #f5b5b5", padding: "0.5rem 0.75rem", borderRadius: 8 }}>
+          <p
+            style={{
+              color: "#a40000",
+              background: "#ffe8e8",
+              border: "1px solid #f5b5b5",
+              padding: "0.5rem 0.75rem",
+              borderRadius: 8,
+            }}
+          >
             {serverError}
           </p>
         )}
@@ -134,14 +141,6 @@ export default function CreateCustomerModal({ onClose, onCreate, customers = [] 
           style={{ marginBottom: "0.5rem", width: "100%", padding: "0.5rem" }}
         />
         {errors.phone && <p style={{ color: "red", marginTop: "-0.3rem" }}>{errors.phone}</p>}
-
-        <input
-          placeholder="Ekstra telefonnummer"
-          value={formData.extraPhone}
-          onChange={(e) => handleChange("extraPhone", e.target.value)}
-          style={{ marginBottom: "0.5rem", width: "100%", padding: "0.5rem" }}
-        />
-        {errors.extraPhone && <p style={{ color: "red", marginTop: "-0.3rem" }}>{errors.extraPhone}</p>}
 
         <input
           placeholder="E-mail"
@@ -177,7 +176,7 @@ export default function CreateCustomerModal({ onClose, onCreate, customers = [] 
               borderRadius: "6px",
               border: "none",
               cursor: "pointer",
-              opacity: saving || formInvalid ? 0.7 : 1
+              opacity: saving || formInvalid ? 0.7 : 1,
             }}
           >
             {saving ? "Gemmer…" : "Gem kunde"}

@@ -21,7 +21,40 @@ const TO_SHEET_HEADER = {
   repair: "Reparation",
 };
 
-/** --- små helpers --- */
+/* -------------------- UI styles (matcher EditRepairsPage) -------------------- */
+const BLUE = "#2166AC";
+const btnPrimary = {
+  backgroundColor: BLUE,
+  color: "white",
+  padding: "10px 16px",
+  border: "none",
+  borderRadius: "6px",
+  cursor: "pointer",
+};
+const btnGhost = {
+  background: "white",
+  color: BLUE,
+  border: `1px solid ${BLUE}33`,
+  padding: "8px 12px",
+  borderRadius: "6px",
+  cursor: "pointer",
+};
+const btnDanger = {
+  backgroundColor: "#cc0000",
+  color: "white",
+  padding: "6px 10px",
+  border: "none",
+  borderRadius: "6px",
+  cursor: "pointer",
+};
+const inputStyle = {
+  padding: "8px",
+  borderRadius: "6px",
+  border: "1px solid #ccc",
+};
+const chip = { fontSize: 12, color: "#64748b" };
+
+/* -------------------- små helpers -------------------- */
 function useRowDebouncers() {
   const mapRef = useRef(new Map());
   return (key, fn, delay = 600) => {
@@ -48,7 +81,7 @@ function useDebouncedValue(value, delay = 500) {
   return v;
 }
 
-/** --- HTTP mod GAS --- */
+/* -------------------- HTTP mod GAS -------------------- */
 async function httpGet(paramsObj, signal) {
   const qs = new URLSearchParams(paramsObj).toString();
   const res = await fetch(`${GAS_URL}?${qs}`, { method: "GET", signal });
@@ -58,7 +91,6 @@ async function httpGet(paramsObj, signal) {
   if (!res.ok || data?.error) throw new Error(data?.error || "Request failed");
   return data;
 }
-
 // text/plain for at undgå CORS preflight på GAS
 async function httpPost(body) {
   const res = await fetch(GAS_URL, {
@@ -84,7 +116,7 @@ async function httpPost(body) {
   return data;
 }
 
-/** --- API wrapper --- */
+/* -------------------- API wrapper -------------------- */
 async function apiList({ offset = 0, limit = 200, search = "", lokation = "" } = {}, signal) {
   return httpGet({ api: "list", offset: String(offset), limit: String(limit), search, lokation }, signal);
 }
@@ -104,9 +136,9 @@ async function apiDelete(id) {
   return httpPost({ action: "delete", id });
 }
 
-/** --- Komponent --- */
+/* -------------------- Komponent -------------------- */
 export default function SparePartsPage() {
-  const [parts, setParts] = useState([]);       // viste rækker (200 pr. side)
+  const [parts, setParts] = useState([]);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 500);
 
@@ -121,7 +153,6 @@ export default function SparePartsPage() {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
 
-  // den query der faktisk er i brug i resultaterne
   const [activeQuery, setActiveQuery] = useState("");
 
   // anti-stale guards
@@ -170,14 +201,14 @@ export default function SparePartsPage() {
   // Første load
   useEffect(() => { fetchPage({ pageArg: 1, query: "" }); /* eslint-disable-next-line */ }, []);
 
-  // Når debounced søgning ændres -> gå til side 1 og hent
+  // Debounced søgning -> side 1
   useEffect(() => {
     setPage(1);
     fetchPage({ pageArg: 1, query: debouncedSearch });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedSearch]);
 
-  // Når side ændres (via knapper), hent ny side for den AKTIVE query
+  // Side skifter -> hent
   useEffect(() => {
     fetchPage({ pageArg: page, query: activeQuery });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -185,31 +216,25 @@ export default function SparePartsPage() {
 
   /** Gem ændring (optimistic + debounce + kø) */
   const saveChange = (id, field, value) => {
-    // DEFENSIVT: hvis der mangler id, så lad være og refetch
     if (id == null) {
       alert("Denne række mangler ID – opdaterer visningen.");
       fetchPage({ pageArg: page, query: activeQuery });
       return;
     }
-
     const prevRow = parts.find((p) => p.id === id);
     const old = prevRow ? prevRow[field] : undefined;
 
-    // Optimistisk UI kun for den ene række (kræv id match)
     setParts((prev) =>
       prev.map((p) => (p.id != null && p.id === id ? { ...p, [field]: value } : p))
     );
     setHistory((prev) => [{ id, field, old, newVal: value }, ...prev.slice(0, 9)]);
 
-    // Debounce-nøgle per række+felt
     const debKey = `${id}:${field}`;
-
     debounceRow(
       debKey,
       () =>
         enqueue(async () => {
           try {
-            // brug seneste updatedAt for netop denne række
             const current = (parts.find((p) => p.id === id) || {});
             await apiUpdate(id, { [field]: value }, current.updatedAt);
             await fetchPage({ pageArg: page, query: activeQuery });
@@ -218,7 +243,6 @@ export default function SparePartsPage() {
               await fetchPage({ pageArg: page, query: activeQuery });
               alert("Rækken blev ændret et andet sted. Se opdaterede værdier og prøv igen.");
             } else {
-              // rulle visuelt tilbage i nuværende side
               setParts((prev) =>
                 prev.map((p) => (p.id != null && p.id === id ? { ...p, [field]: old } : p))
               );
@@ -268,120 +292,143 @@ export default function SparePartsPage() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
-    <>
-      <div className="mb-8 p1-2">
-        <button
-          onClick={() => navigate("/")}
-          style={{
-            backgroundColor: "#2166AC",
-            color: "white",
-            padding: "0.6rem 1rem",
-            borderRadius: "6px",
-            border: "none",
-            cursor: "pointer",
-          }}
-        >
-          <FaHome style={{ marginRight: "6px" }} /> Dashboard
+    <div style={{ padding: "2rem" }}>
+      {/* Top-knap (samme som EditRepairsPage) */}
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1.5rem" }}>
+        <button onClick={() => navigate("/")} style={btnPrimary}>
+          <FaHome style={{ marginRight: 6 }} /> Dashboard
         </button>
       </div>
 
-      <div className="p-6">
-        <div className="flex justify-between items-center mb-6 px-2">
-          <div className="flex gap-3">
-            <button onClick={undoLast} className="bg-green-600 text-white p-2 rounded" title="Fortryd sidste ændring">
-              <FaUndo />
-            </button>
-            <button onClick={() => alert(JSON.stringify(history, null, 2))} className="bg-green-600 text-white p-2 rounded" title="Vis historik (debug)">
-              <FaHistory />
-            </button>
-          </div>
+      <h2 style={{ textTransform: "uppercase", fontWeight: "bold", marginBottom: "1rem" }}>
+        Reservedele
+      </h2>
 
-          <div className="flex gap-2 items-center">
-            <input
-              className="border p-2 rounded"
-              placeholder="Søg… (server, debounce)"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              title="Server-side søgning (hele arket)"
-            />
-            {loading && (
-              <span className="text-xs text-gray-600" aria-live="polite">
-                Indlæser…
-              </span>
-            )}
-          </div>
+      {/* Sticky værktøjsbar (matcher EditRepairsPage) */}
+      <div
+        style={{
+          position: "sticky",
+          top: 0,
+          zIndex: 10,
+          background: "#f9f9f9",
+          padding: "1rem 0",
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "1rem",
+          alignItems: "center",
+          marginBottom: "1.5rem",
+          borderBottom: "1px solid #ddd",
+        }}
+      >
+        <button onClick={undoLast} style={btnGhost} title="Fortryd sidste ændring">
+          <FaUndo style={{ marginRight: 6 }} />
+          Fortryd
+        </button>
 
-          <div>
-            <button
-              onClick={() => setEditingIndex(editingIndex === -1 ? null : -1)}
-              className="bg-green-600 text-white p-2 rounded"
-              title="Tilføj ny række"
-            >
-              <FaPlus />
-            </button>
-          </div>
+        <button onClick={() => alert(JSON.stringify(history, null, 2))} style={btnGhost} title="Vis historik (debug)">
+          <FaHistory style={{ marginRight: 6 }} />
+          Historik
+        </button>
+
+        <input
+          style={{ ...inputStyle, width: 320 }}
+          placeholder="Søg… (server, debounce)"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          title="Server-side søgning (hele arket)"
+        />
+
+        <div style={{ marginLeft: "auto", display: "flex", gap: 12 }}>
+          <button
+            onClick={() => setEditingIndex(editingIndex === -1 ? null : -1)}
+            style={btnPrimary}
+            title="Tilføj ny række"
+          >
+            <FaPlus style={{ marginRight: 6 }} />
+            Tilføj reservedel
+          </button>
+
+          {loading && <span style={chip} aria-live="polite">Indlæser…</span>}
         </div>
+      </div>
 
-        <div className="mb-2 text-sm">
-          {problem ? (
-            <span className="text-red-600">{problem}</span>
-          ) : (
-            <>
-              <span>Viser {parts.length} af {total} match</span>
-              <span> · Side {page} / {totalPages}</span>
-              {activeQuery && <span> · Søg: “{activeQuery}”</span>}
-            </>
-          )}
-        </div>
+      {/* Info / fejl */}
+      <div style={{ marginBottom: "0.75rem", fontSize: "0.95rem" }}>
+        {problem ? (
+          <span style={{ color: "#cc0000" }}>{problem}</span>
+        ) : (
+          <>
+            <span>Viser {parts.length} af {total} match</span>
+            <span> · Side {page} af {totalPages}</span>
+            {activeQuery && <span style={chip}> · Søg: “{activeQuery}”</span>}
+          </>
+        )}
+      </div>
 
-        {editingIndex === -1 && (
-          <div className="grid grid-cols-7 gap-2 mb-6">
+      {/* Opret ny række (inline form) */}
+      {editingIndex === -1 && (
+        <div
+          style={{
+            marginBottom: "1rem",
+            border: "1px solid #ddd",
+            padding: "1rem",
+            borderRadius: "6px",
+            background: "#fff",
+          }}
+        >
+          <h4 style={{ marginBottom: "0.75rem", fontSize: "1.05rem", fontWeight: "bold" }}>
+            Opret ny reservedel
+          </h4>
+          <div style={{ display: "grid", gridTemplateColumns: "1.6fr 0.6fr 0.6fr 1fr 1fr 1fr 1.2fr auto", gap: "0.5rem" }}>
             {FIELDS.map((field) => (
               <input
                 key={`new-${field}`}
                 placeholder={field}
                 value={newPart[field]}
                 onChange={(e) => setNewPart((prev) => ({ ...prev, [field]: e.target.value }))}
-                className="border p-2 rounded"
+                style={inputStyle}
               />
             ))}
-            <button onClick={addPart} className="col-span-1 bg-blue-600 text-white p-2 rounded">
+            <button onClick={addPart} style={btnPrimary}>
               Tilføj
             </button>
           </div>
-        )}
+        </div>
+      )}
 
-        <table className="w-full text-sm border">
-          <thead className="bg-gray-100">
+      {/* Tabel */}
+      <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden" }}>
+        <table className="w-full text-sm">
+          <thead style={{ background: "#f8fafc", borderBottom: "1px solid #e5e7eb" }}>
             <tr>
               <th className="p-2 text-left" style={{ width: "40%" }}>Model</th>
-              <th className="p-2 text-left" style={{ width: "5%" }}>Pris</th>
-              <th className="p-2 text-left" style={{ width: "5%" }}>Lager</th>
-              <th className="p-2 text-left" style={{ width: "10%" }}>Lokation</th>
-              <th className="p-2 text-left" style={{ width: "10%" }}>Kategori</th>
-              <th className="p-2 text-left" style={{ width: "10%" }}>Kostpris</th>
-              <th className="p-2 text-left" style={{ width: "15%" }}>Reparation</th>
-              <th className="p-2 text-left" style={{ width: "5%" }}></th>
+              <th className="p-2 text-left" style={{ width: "6%" }}>Pris</th>
+              <th className="p-2 text-left" style={{ width: "6%" }}>Lager</th>
+              <th className="p-2 text-left" style={{ width: "12%" }}>Lokation</th>
+              <th className="p-2 text-left" style={{ width: "12%" }}>Kategori</th>
+              <th className="p-2 text-left" style={{ width: "12%" }}>Kostpris</th>
+              <th className="p-2 text-left" style={{ width: "12%" }}>Reparation</th>
+              <th className="p-2 text-left" style={{ width: "6%" }}></th>
             </tr>
           </thead>
           <tbody>
             {parts.map((part, idx) => {
-              const keyBase = part.id ?? `row-${idx}`; // fallback hvis id mangler
+              const keyBase = part.id ?? `row-${idx}`;
               return (
-                <tr key={keyBase} className="border-t">
+                <tr key={keyBase} style={{ borderTop: "1px dashed #e5e7eb" }}>
                   {FIELDS.map((field) => (
                     <td key={`${keyBase}-${field}`} className="p-1">
                       <input
-                        className="border p-1 w-full"
+                        style={{ ...inputStyle, padding: "6px", width: "100%" }}
                         value={part[field] ?? ""}
                         onChange={(e) => saveChange(part.id, field, e.target.value)}
                       />
                     </td>
                   ))}
-                  <td>
+                  <td className="p-1" style={{ textAlign: "right" }}>
                     <button
                       onClick={() => part.id != null && deletePart(part.id)}
-                      className="bg-red-600 text-white px-2 py-1 rounded"
+                      style={btnDanger}
                       title="Slet række"
                       disabled={part.id == null}
                     >
@@ -391,27 +438,60 @@ export default function SparePartsPage() {
                 </tr>
               );
             })}
+            {parts.length === 0 && (
+              <tr>
+                <td colSpan={8} style={{ padding: "1rem", color: "#64748b" }}>
+                  Ingen resultater.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
-
-        {/* Pagination controls */}
-        <div className="flex items-center gap-2 mt-3">
-          <button
-            className="px-3 py-1 border rounded"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page <= 1 || loading}
-          >
-            ← Forrige
-          </button>
-          <button
-            className="px-3 py-1 border rounded"
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages || loading}
-          >
-            Næste →
-          </button>
-        </div>
       </div>
-    </>
+
+      {/* Pagination controls (samme look & feel) */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "1rem",
+          marginTop: "1.25rem",
+          flexWrap: "wrap",
+        }}
+      >
+        <button
+          onClick={() => setPage((p) => Math.max(1, p - 1))}
+          disabled={page <= 1 || loading}
+          style={{
+            ...(page <= 1 || loading ? { backgroundColor: "#ccc", cursor: "not-allowed" } : { backgroundColor: BLUE, cursor: "pointer" }),
+            color: "white",
+            padding: "6px 14px",
+            borderRadius: "6px",
+            border: "none",
+          }}
+        >
+          Forrige
+        </button>
+
+        <span style={{ fontSize: "0.95rem" }}>
+          Side {page} af {totalPages}{" "}
+          <span style={chip}>({total} rækker)</span>
+        </span>
+
+        <button
+          onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+          disabled={page >= totalPages || loading}
+          style={{
+            ...(page >= totalPages || loading ? { backgroundColor: "#ccc", cursor: "not-allowed" } : { backgroundColor: BLUE, cursor: "pointer" }),
+            color: "white",
+            padding: "6px 14px",
+            borderRadius: "6px",
+            border: "none",
+          }}
+        >
+          Næste
+        </button>
+      </div>
+    </div>
   );
 }

@@ -2,101 +2,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { FaPlus } from "react-icons/fa";
 import PartsPicker from "./PartsPicker";
-
-// ---- RepairModal helpers: priority sorting ----
-const REPAIR_PRIORITY = [
-  "SKÆRM_A+",                 // Skærm (A+)
-  "SKÆRM_OEM",                // Skærm (OEM)
-  "SKÆRM_OTHER",              // Skærm [alle andre typer]
-  "BESKYTTELSESGLAS",
-  "BATTERI",
-  "BUNDSTIK",
-  "BAGCOVER_GLAS",
-  "BAGCOVER_RAMME",
-  "BAGKAMERA",
-  "FRONTKAMERA",
-  "HØJTTALER",                // (loudspeaker / højtaler)
-  "ØREHØJTTALER",             // (earpiece / ørehøjtaler)
-  "VANDSKADE",
-  "TÆND_SLUK",
-  "VOLUMEKNAP",
-  "SOFTWARE",
-  "OVERFØR_DATA",
-  "DIAGNOSE",
-];
-
-function normalizeTitle(raw) {
-  if (!raw) return "";
-  // Fjern alt efter | (så "Skærm | iPhone 12" stadig matches)
-  const clean = String(raw).split("|")[0].trim().toLowerCase();
-  // Normaliser danske tegn til simple sammenligninger
-  return clean
-    .replace(/ø/g, "oe")
-    .replace(/å/g, "aa")
-    .replace(/æ/g, "ae");
-}
-
-function classifyRepair(titleRaw) {
-  const t = normalizeTitle(titleRaw);
-
-  // --- Skærm varianter: A+ og OEM skal komme først, resten som "other"
-  if (t.includes("skaerm")) {
-    if (/\b(a\+|a plus)\b/.test(t)) return "SKÆRM_A+";
-    if (/\boem\b/.test(t))          return "SKÆRM_OEM";
-    return "SKÆRM_OTHER";
-  }
-
-  if (t.includes("beskyttelsesglas"))       return "BESKYTTELSESGLAS";
-  if (t.includes("batteri"))                return "BATTERI";
-  if (t.includes("bundstik"))               return "BUNDSTIK";
-
-  // Bagcover varianter
-  if (t.includes("bagcover")) {
-    if (t.includes("inkl") && t.includes("ramme")) return "BAGCOVER_RAMME";
-    if (t.includes("glas"))                        return "BAGCOVER_GLAS";
-    // Hvis hverken glas eller inkl. ramme er nævnt, lad dem falde udenfor listen (efter)
-  }
-
-  // Kamera
-  if (t.includes("bagkamera") || (t.includes("kamera") && t.includes("bag"))) return "BAGKAMERA";
-  if (t.includes("frontkamera") || (t.includes("kamera") && t.includes("front"))) return "FRONTKAMERA";
-
-  // Lyd
-  if (t.includes("hoejtaler") || t.includes("hoytaler") || t.includes("hojtaler")) return "HØJTTALER";
-  if (t.includes("oerehoejtaler") || t.includes("orehoejtaler") || t.includes("oerehojtaler") || t.includes("oreh")) return "ØREHØJTTALER";
-
-  // Øvrige
-  if (t.includes("vandskade"))              return "VANDSKADE";
-  if (t.includes("taend") || t.includes("tænd") || t.includes("power")) return "TÆND_SLUK";
-  if (t.includes("volumeknap") || (t.includes("volume") && t.includes("knap"))) return "VOLUMEKNAP";
-  if (t.includes("software"))              return "SOFTWARE";
-  if (t.includes("overfoer") || t.includes("overfør") || t.includes("dataoverfoer") || t.includes("dataoverfør")) return "OVERFØR_DATA";
-  if (t.includes("diagnose") || t.includes("fejlfinding")) return "DIAGNOSE";
-
-  // Ikke i prioriteret liste
-  return null;
-}
-
-function getPriorityIndex(titleRaw) {
-  const key = classifyRepair(titleRaw);
-  if (!key) return Number.POSITIVE_INFINITY; // alt ukendt kommer efter de kendte
-  const idx = REPAIR_PRIORITY.indexOf(key);
-  return idx === -1 ? Number.POSITIVE_INFINITY : idx;
-}
-
-// Stabil comparator: først efter prioritet, derefter alfabetisk som tie-breaker
-export function compareRepairsByPriority(a, b) {
-  const label = (o) => (o?.title || o?.name || o?.repair || "");
-
-  const pa = getPriorityIndex(label(a));
-  const pb = getPriorityIndex(label(b));
-  if (pa !== pb) return pa - pb;
-
-  // Tie-break: alfabetisk på “visningsnavn”
-  const ta = normalizeTitle(label(a));
-  const tb = normalizeTitle(label(b));
-  return ta.localeCompare(tb);
-}
+import { sortRepairs } from "../helpers/sorting"; // justér evt. stien hvis du bruger alias
 
 /** Udleder en "basis-type" for at matche arket's kolonne 'Reparation' */
 function baseRepairType(title) {
@@ -129,7 +35,7 @@ export default function RepairModal({ device, repairs, onAdd, onClose }) {
   const deviceTitle = device.title || device.name || "Ukendt enhed";
   const safeRepairs = useMemo(() => (Array.isArray(repairs) ? repairs : []), [repairs]);
   const sortedRepairs = useMemo(
-    () => safeRepairs.slice().sort(compareRepairsByPriority),
+    () => safeRepairs.slice().sort(sortRepairs),
     [safeRepairs]
   );
 
@@ -185,7 +91,7 @@ export default function RepairModal({ device, repairs, onAdd, onClose }) {
           <p>Ingen reparationer tilgængelige for denne enhed.</p>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {sortedRepairs.map((r, i) => {
+            {sortedRepairs.map((r, i) => {
               const itemKey = r.id ?? `${deviceTitle}-${i}`;
               const title = r.title || r.name || "—";
               const type = baseRepairType(title);
@@ -216,11 +122,11 @@ export default function RepairModal({ device, repairs, onAdd, onClose }) {
                     <div>
                       <div style={{ fontWeight: 700, fontSize: 16 }}>{title}</div>
                       <div style={{ fontSize: 12, color: "#6b7280" }}>
-                       {r.time != null ? `${Number(r.time)} min` : ""}
-                       {typeof r.price !== "undefined" && r.price !== null
-                       ? ` • ${Number(r.price)} kr`
-                       : ""}
-                     </div>
+                        {r.time != null ? `${Number(r.time)} min` : ""}
+                        {typeof r.price !== "undefined" && r.price !== null
+                          ? ` • ${Number(r.price)} kr`
+                          : ""}
+                      </div>
 
                       {/* badge med valgt reservedel (hvis valgt) */}
                       {chosen && (
@@ -285,7 +191,6 @@ export default function RepairModal({ device, repairs, onAdd, onClose }) {
                   {/* Body (collapsible) */}
                   {open && (
                     <div style={{ padding: "10px 14px 12px", borderTop: "1px solid #eef2f7" }}>
-                      {/* PartsPicker filtrerer selv efter deviceName + repairType; ingen priser vises der */}
                       <PartsPicker
                         deviceName={deviceTitle}
                         repairType={type}
