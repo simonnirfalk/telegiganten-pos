@@ -152,7 +152,7 @@ export default function CustomerDetailPage() {
           <FaHome /> Dashboard
         </button>
         <button onClick={() => navigate("/customers")} style={buttonStyle}>
-          ⬅️ Tilbage til kunder
+          Tilbage til kunder
         </button>
       </div>
 

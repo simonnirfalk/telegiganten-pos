@@ -6,22 +6,46 @@ import BookingModal from "../components/BookingModal";
 import { fetchBookings } from "../data/apiClient";
 
 const STATUS_OPTIONS = [
-  { value: "", label: "Alle" },
-  { value: "booking_pending", label: "Pending" },
-  { value: "booking_confirmed", label: "Confirmed" },
-  { value: "booking_processing", label: "Processing" },
-  { value: "booking_completed", label: "Completed" },
-  { value: "booking_canceled", label: "Canceled" },
+  { value: "booking_pending", label: "Booket" },
+  { value: "booking_confirmed", label: "Bekræftet" },
+  { value: "booking_processing", label: "Under behandling" },
+  { value: "booking_completed", label: "Afsluttet" },
+  { value: "booking_canceled", label: "Annulleret" },
 ];
+
+const STATUS_STYLES = {
+  booking_pending:   { bg: "#e0f2fe", text: "#075985" },
+  booking_confirmed: { bg: "#dcfce7", text: "#166534" },
+  booking_processing:{ bg: "#fef9c3", text: "#92400e" },
+  booking_completed: { bg: "#e5e7eb", text: "#111827" },
+  booking_canceled:  { bg: "#fee2e2", text: "#991b1b" },
+};
+const statusLabel = (v) => STATUS_OPTIONS.find(o => o.value === v)?.label ?? v;
+
+/** DK-format helper for dato/tid */
+function formatDkDate(dateStr) {
+  if (!dateStr) return "";
+  const parts = String(dateStr).split("-");
+  if (parts.length === 3) {
+    const [y, m, d] = parts.map((p) => parseInt(p, 10));
+    if (y && m && d) {
+      return `${String(d).padStart(2, "0")}/${String(m).padStart(2, "0")}/${y}`;
+    }
+  }
+  return dateStr;
+}
+function formatDkDateTime(dateStr, timeStr) {
+  const d = formatDkDate(dateStr);
+  if (!d && !timeStr) return "—";
+  return `${d}${timeStr ? ` kl. ${timeStr}` : ""}`.trim();
+}
 
 /** Normaliserer booking til et fladt "view" (samme semantik som i modalen) */
 function getView(item) {
-  // Customer
   const customer_name  = item.customer_name  ?? item?.customer?.name  ?? "";
   const customer_email = item.customer_email ?? item?.customer?.email ?? "";
   const customer_phone = item.customer_phone ?? item?.customer?.phone ?? "";
 
-  // Device / selection
   const brand = item.brand ?? item?.selection?.brand?.title ?? "";
   const model =
     item.model ??
@@ -33,13 +57,11 @@ function getView(item) {
     ? item.repairs
     : (Array.isArray(item?.selection?.repairs) ? item.selection.repairs : []);
 
-  // Booking meta
   const date = item.booking_date ?? item?.booking?.date ?? item.date ?? "";
   const time = item.booking_time ?? item?.booking?.time ?? item.time ?? "";
   const shipping_option = item.shipping_option ?? item?.booking?.shipping_option ?? "";
   const comment = item.comment ?? item?.booking?.comment ?? "";
 
-  // Totals (understøt begge navne)
   const price_before =
     item.total_price_before ??
     item?.totals?.price_before ??
@@ -88,7 +110,8 @@ function getView(item) {
 
 export default function BookingsPage() {
   const navigate = useNavigate();
-  const { pathname } = useLocation();
+  const location = useLocation();                    // ✅ brug hook inde i komponent
+  const { pathname, state } = location;
 
   useEffect(() => {
     console.log("%c[BookingsPage] mounted:", "color:#2166AC;font-weight:bold;", pathname);
@@ -97,7 +120,6 @@ export default function BookingsPage() {
 
   if (pathname !== "/bookings") return null;
 
-  // Vi gemmer både normaliseret view + rå data
   const [items, setItems] = useState([]); // [{...view, __raw}]
   const [status, setStatus] = useState("");
   const [search, setSearch] = useState("");
@@ -111,26 +133,20 @@ export default function BookingsPage() {
     setLoading(true);
     try {
       const res = await fetchBookings({ status, search, page, per_page: perPage });
-
       const raw = Array.isArray(res) ? res : (res?.items ?? []);
       const normalized = raw.map((it) => ({ ...getView(it), __raw: it }));
-
-      // Debug: se første 5 rå vs. normaliseret
       console.debug("[Bookings] raw sample:", raw.slice(0, 3));
       console.table(
         normalized.slice(0, 5).map(v => ({
           id: v.id,
+          when: formatDkDateTime(v.date, v.time),
           customer_name: v.customer_name,
-          phone: v.customer_phone,
-          email: v.customer_email,
-          brand: v.brand,
           model: v.model,
           price: v.totals.price,
           time: v.totals.time,
           status: v.status
         }))
       );
-
       setItems(normalized);
       setTotal(Array.isArray(res) ? res.length : (res.total || raw.length));
     } catch (e) {
@@ -143,7 +159,16 @@ export default function BookingsPage() {
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [status, page, perPage]);
 
-  // Søgning på de normaliserede felter
+  // Åbn booking fra dashboard (state.openBookingId)
+  useEffect(() => {
+    const fromDash = state?.openBookingId;
+    if (fromDash && items.length) {
+      setSelectedId(fromDash);
+      // ryd route state på en sikker måde
+      navigate("/bookings", { replace: true, state: {} });
+    }
+  }, [state, items, navigate]);
+
   const filtered = useMemo(() => {
     if (!search.trim()) return items;
     const q = search.toLowerCase();
@@ -158,8 +183,8 @@ export default function BookingsPage() {
     setItems(prev => prev.map(x => (x.id === id ? { ...x, status: newStatus, __raw: { ...x.__raw, status: newStatus } } : x)));
   };
 
-  const onCreateRepair = ({ repair_id, customer_id }) => {
-    navigate(`/step1?repair_id=${repair_id}&customer_id=${customer_id}`, { replace: false });
+  const onCreateRepair = (prefill) => {
+    navigate("/opret", { state: { prefillFromBooking: prefill } });
   };
 
   const selected = useMemo(
@@ -169,7 +194,6 @@ export default function BookingsPage() {
 
   return (
     <div style={{ padding: "2rem" }}>
-      {/* Top bar */}
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1.5rem" }}>
         <button
           onClick={() => navigate("/")}
@@ -200,8 +224,9 @@ export default function BookingsPage() {
         <select
           value={status}
           onChange={(e) => { setStatus(e.target.value); setPage(1); }}
-          style={{ padding: 8, borderRadius: 6, border: "1px solid #ccc", width: 200 }}
+          style={{ padding: 8, borderRadius: 6, border: "1px solid #ccc", width: 220 }}
         >
+          <option value="">Alle</option>
           {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
         <button onClick={load} disabled={loading} style={{ padding: "8px 14px", borderRadius: 6, border: "none", background: "#2166AC", color: "#fff" }}>
@@ -226,53 +251,78 @@ export default function BookingsPage() {
       <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden", background: "#fff" }}>
         <div
           style={{
-            display: "grid", gridTemplateColumns: "110px 1fr 1fr 1fr 140px 120px", gap: 8,
-            padding: "10px 12px", background: "#f1f5f9", fontWeight: 600, color: "#334155",
+            display: "grid",
+            gridTemplateColumns: "160px 1fr 1fr 1fr 160px 120px",
+            gap: 8,
+            padding: "10px 12px",
+            background: "#f1f5f9",
+            fontWeight: 600,
+            color: "#334155",
           }}
         >
-          <div>ID</div>
+          <div>Dato/tid</div>
           <div>Kunde</div>
           <div>Kontakt</div>
-          <div>Enhed/Model</div>
+          <div>Model / Reparation</div>
           <div>Status</div>
           <div>Pris / Tid</div>
         </div>
 
         {(filtered || []).map((v) => {
           const price = (v?.totals?.price ?? 0);
-          const time = (v?.totals?.time ?? 0);
+          const ttime = (v?.totals?.time ?? 0);
           const priceText = price > 0 ? `${price} kr` : "—";
-          const timeText = `${time} min`;
+          const timeText = `${ttime} min`;
+          const st = STATUS_STYLES[v.status] || { bg: "#e5e7eb", text: "#111827" };
 
           return (
             <button
               key={v.id}
               onClick={() => setSelectedId(v.id)}
               style={{
-                display: "grid", width: "100%", textAlign: "left", border: "none", background: "white",
-                gridTemplateColumns: "110px 1fr 1fr 1fr 140px 120px", gap: 8, padding: "10px 12px",
-                borderTop: "1px dashed #e5e7eb", cursor: "pointer", color: "#111827",
+                display: "grid",
+                width: "100%",
+                textAlign: "left",
+                border: "none",
+                background: "white",
+                gridTemplateColumns: "160px 1fr 1fr 1fr 160px 120px",
+                gap: 8,
+                padding: "10px 12px",
+                borderTop: "1px dashed #e5e7eb",
+                cursor: "pointer",
+                color: "#111827",
               }}
               title="Klik for at åbne"
             >
-              <div style={{ color: "#64748b" }}>#{v.id}</div>
+              <div style={{ color: "#64748b" }}>{formatDkDateTime(v.date, v.time)}</div>
+
               <div>{v.customer_name?.trim() ? v.customer_name : "—"}</div>
+
               <div style={{ color: "#64748b" }}>
                 {[v.customer_phone, v.customer_email].filter(Boolean).join(" · ") || "—"}
               </div>
-             <div>
-             {v.model || "—"}
-             {v.repairs?.length > 0 && (
-                <span style={{ color: "#64748b" }}>
-                {" — " + v.repairs.map(r => r.name || r.title).join(", ")}
-                </span>
-             )}
-             </div>
+
               <div>
-                <span style={{ background: "#eef2ff", padding: "2px 6px", borderRadius: 6 }}>
-                  {(v.status || "").replace("booking_", "")}
+                {v.model || "—"}
+                {v.repairs?.length > 0 && (
+                  <span style={{ color: "#64748b" }}>
+                    {" — " + v.repairs.map(r => r.name || r.title).join(", ")}
+                  </span>
+                )}
+              </div>
+
+              <div>
+                <span style={{
+                  background: st.bg,
+                  color: st.text,
+                  padding: "2px 8px",
+                  borderRadius: 999,
+                  fontWeight: 600
+                }}>
+                  {statusLabel(v.status)}
                 </span>
               </div>
+
               <div>
                 <b>{priceText}</b>
                 <span style={{ color: "#64748b" }}> · {timeText}</span>
@@ -307,7 +357,7 @@ export default function BookingsPage() {
 
       {selected && (
         <BookingModal
-          booking={selected.__raw || selected}  // giv modalen rå data
+          booking={selected.__raw || selected}
           onClose={() => setSelectedId(null)}
           onStatusChange={onStatusChange}
           onCreateRepair={onCreateRepair}

@@ -1,34 +1,58 @@
 // src/pages/NewRepair.jsx
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { useLocation } from "react-router-dom";
 import Step1_AddRepairToOrder from "../components/Step1_AddRepairToOrder";
 import Step2_ReviewAndPayment from "../components/Step2_ReviewAndPayment";
 
 export default function NewRepair() {
   const [step, setStep] = useState(1);
-
-  const availableDevices = [
-    { name: "iPhone 13" },
-    { name: "Samsung Galaxy A55" }
-  ];
-
-  const availableRepairs = [
-    { device: "iPhone 13", name: "Skærmskift", price: 1399, time: 60 },
-    { device: "iPhone 13", name: "Beskyttelsesglas", price: 199, time: 10 },
-    { device: "Samsung Galaxy A55", name: "Skærmskift", price: 1199, time: 50 }
-  ];
-
   const [order, setOrder] = useState({
+    id: undefined,
     repairs: [],
     customer: null,
     password: "",
+    contact: "",
     note: "",
-    payment: {
-      method: "efter", // "efter", "betalt", "delvis", "garanti"
-      upfront: 0
-    }
+    source: null, // { type: "booking", booking_id }
+    payment: { method: "efter", upfront: 0 },
   });
 
-  const [customers, setCustomers] = useState([]);
+  const { state } = useLocation();
+  const prefill = state?.prefillFromBooking;
+  const prefillApplied = useRef(false);
+
+  // Anvend prefill én gang når vi kommer fra booking
+  useEffect(() => {
+    if (!prefill || prefillApplied.current) return;
+    prefillApplied.current = true;
+
+    const mappedRepairs = (prefill.repairs || []).map(r => ({
+      device: prefill.model_title || "",   // visningen i sidebaren
+      repair: r.title || "",
+      price: Number(r.price || 0) || 0,
+      time: Number(r.time || 0) || 0,
+      model_id: prefill.model_id || 0,
+      part: null,
+    }));
+
+    setOrder(prev => ({
+      ...prev,
+      repairs: mappedRepairs,
+      customer: prefill.customer
+        ? {
+            id: prefill.customer.id || "booking-customer",
+            name: prefill.customer.name || "",
+            phone: prefill.customer.phone || "",
+            email: prefill.customer.email || "",
+          }
+        : prev.customer,
+      note: prefill.note || prev.note,
+      source: { type: "booking", booking_id: prefill.booking_id },
+    }));
+
+    // sørg for, at vi står på Step1
+    setStep(1);
+  }, [prefill]);
 
   const handleFinish = () => {
     console.log("Reparation oprettet:", order);
@@ -38,11 +62,10 @@ export default function NewRepair() {
       repairs: [],
       customer: null,
       password: "",
+      contact: "",
       note: "",
-      payment: {
-        method: "efter",
-        upfront: 0
-      }
+      source: null,
+      payment: { method: "efter", upfront: 0 },
     });
   };
 
@@ -50,13 +73,12 @@ export default function NewRepair() {
     <div style={{ width: "100%", height: "100vh", overflow: "hidden" }}>
       {step === 1 && (
         <Step1_AddRepairToOrder
-          devices={availableDevices}
-          repairs={availableRepairs}
           order={order}
           setOrder={setOrder}
-          customers={customers}
-          setCustomers={setCustomers}
           onNext={() => setStep(2)}
+          customers={[]}          // kunderne hentes i Step1 via api.getCustomers()
+          setCustomers={() => {}}
+          prefillFromBooking={prefill} // valgfrit; Step1 bruger den ikke nødvendigvis, men fint at have
         />
       )}
 

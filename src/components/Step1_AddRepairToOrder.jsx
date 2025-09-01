@@ -66,6 +66,7 @@ export default function Step1_AddRepairToOrder({
   onNext,
   customers,
   setCustomers,
+  prefillFromBooking,
 }) {
   const navigate = useNavigate();
 
@@ -110,6 +111,13 @@ export default function Step1_AddRepairToOrder({
       isMounted = false;
     };
   }, [setCustomers]);
+
+  useEffect(() => {
+    if (prefillFromBooking?.model_id) {
+      api.incrementModelUsage(prefillFromBooking.model_id).catch(() => {});
+    }
+  }, [prefillFromBooking]);
+
 
   /* ---------- UI styles ---------- */
   const buttonStyle = {

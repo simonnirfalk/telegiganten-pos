@@ -1,7 +1,7 @@
 // src/pages/Dashboard.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import DashboardStats from "../components/DashboardStats";
-import DashboardRecentBookings from "../components/DashboardRecentBookings"; // ✅ NY
+import DashboardRecentBookings from "../components/DashboardRecentBookings"; // ✅
 import { useNavigate } from "react-router-dom";
 import { api } from "../data/apiClient";
 
@@ -66,6 +66,7 @@ function statusColor(status) {
   if (s === "under reparation") return "#2166AC";        // blå
   if (s === "klar til afhentning") return "#f59e0b";     // orange
   if (s === "afsluttet") return "#1f9d55";               // grøn
+  if (s === "annulleret") return "#861212ff"
   return "#6b7280"; // fallback grå
 }
 
@@ -115,18 +116,18 @@ export default function Dashboard() {
     return () => { cancelled = true; };
   }, []);
 
-  // Nyeste først, top 5
+  // Nyeste først, top 6 med robust sortering (updated_at > created_at > date > createdAt)
   const latestRepairs = useMemo(() => {
     const list = Array.isArray(repairs) ? repairs.slice() : [];
     list.sort((a, b) => {
-      const ta = new Date(a?.created_at || a?.date || a?.createdAt || 0).getTime();
-      const tb = new Date(b?.created_at || b?.date || b?.createdAt || 0).getTime();
+      const ta = new Date(a?.updated_at || a?.created_at || a?.date || a?.createdAt || 0).getTime();
+      const tb = new Date(b?.updated_at || b?.created_at || b?.date || b?.createdAt || 0).getTime();
       return tb - ta;
     });
-    return list.slice(0, 5);
+    return list.slice(0, 6);
   }, [repairs]);
 
-  const placeholderCount = 5;
+  const placeholderCount = 6;
   const hasData = latestRepairs.length > 0;
 
   const openRepair = (repair) => {
@@ -235,7 +236,7 @@ export default function Dashboard() {
               const repairTitle = r?.repair_title || r?.repair || r?.title || "";
               const customer = r?.customer_name || r?.customer || "—";
               const status = r?.status || "—";
-              const createdAt = r?.created_at || r?.date || r?.createdAt;
+              const createdAt = r?.updated_at || r?.created_at || r?.date || r?.createdAt;
               const price = r?.price ?? r?.amount;
 
               return (
@@ -281,7 +282,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ✅ NY: Seneste bookinger */}
+      {/* ✅ Seneste bookinger */}
       <h2 style={{ fontFamily: "Archivo Black", textTransform: "uppercase", margin: "1rem 0" }}>
         Seneste bookinger
       </h2>

@@ -7,8 +7,8 @@ import { api } from "../data/apiClient";
 
 /** Utils */
 const dkMonths = [
-  "januar", "februar", "marts", "april", "maj", "juni",
-  "juli", "august", "september", "oktober", "november", "december"
+  "januar","februar","marts","april","maj","juni",
+  "juli","august","september","oktober","november","december"
 ];
 
 function formatDkDateTime(value) {
@@ -29,8 +29,34 @@ function formatPrice(v) {
   return n.toLocaleString("da-DK") + " kr.";
 }
 
-/** Statusliste (kun de tre ønskede + Alle) */
-const STATUS_OPTIONS = ["Alle", "under reparation", "klar til afhentning", "afsluttet"];
+/** Statusliste (nu med 'annulleret') */
+const STATUS_OPTIONS = ["Alle", "under reparation", "klar til afhentning", "afsluttet", "annulleret"];
+
+/** Badge-farver til status */
+function statusPill(statusRaw) {
+  const s = String(statusRaw || "").toLowerCase();
+  const map = {
+    "under reparation":    { bg: "#e0f2fe", fg: "#075985" }, // lyseblå
+    "klar til afhentning": { bg: "#fff7ed", fg: "#9a3412" }, // lys orange
+    "afsluttet":           { bg: "#dcfce7", fg: "#166534" }, // lysegrøn
+    "annulleret":          { bg: "#fee2e2", fg: "#991b1b" }, // rød
+  };
+  const c = map[s] || { bg: "#e5e7eb", fg: "#111827" }; // fallback grå
+  return (
+    <span style={{
+      background: c.bg,
+      color: c.fg,
+      padding: "2px 10px",
+      borderRadius: 999,
+      fontSize: 12,
+      fontWeight: 700,
+      display: "inline-block",
+      lineHeight: 1.6
+    }}>
+      {statusRaw || "—"}
+    </span>
+  );
+}
 
 export default function RepairsPage() {
   const navigate = useNavigate();
@@ -147,12 +173,12 @@ export default function RepairsPage() {
     gap: "0.5rem",
   };
 
-  /** Normaliser felter, så filtrering/visning bliver robust */
+  /** Normaliser felter */
   const normalizedRepairs = useMemo(() => {
     return (Array.isArray(repairs) ? repairs : []).map((r) => ({
       id: r.id ?? r.ID ?? r.post_id ?? r.order_id ?? Math.random().toString(36).slice(2),
       order_id: r.order_id ?? r.id ?? r.ID ?? "",
-      created_at: r.created_at ?? r.date ?? r.createdAt ?? r.timestamp ?? null,
+      created_at: r.updated_at ?? r.created_at ?? r.date ?? r.createdAt ?? r.timestamp ?? null,
       customer: r.customer_name ?? r.customer ?? r.name ?? "",
       phone: r.phone ?? r.customer_phone ?? "",
       model: r.model_name ?? r.model ?? "",
@@ -296,7 +322,7 @@ export default function RepairsPage() {
                     {r.payment || "—"}
                   </td>
                   <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>
-                    {r.status || "—"}
+                    {statusPill(r.status)}
                   </td>
                 </tr>
               ))}

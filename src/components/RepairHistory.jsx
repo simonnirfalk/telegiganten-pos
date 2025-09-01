@@ -1,5 +1,6 @@
 // src/components/RepairHistory.jsx
 import React, { useEffect, useRef, useState, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { FaTimes } from "react-icons/fa";
 import { Link } from "react-router-dom";
 import ReadOnlyPartBadge from "./ReadOnlyPartBadge";
@@ -23,7 +24,7 @@ const PAYMENT_OPTIONS = [
 ];
 
 /** Status (kun 3 muligheder) */
-const STATUS_OPTIONS = ["under reparation", "klar til afhentning", "afsluttet"].map((s) => ({
+const STATUS_OPTIONS = ["under reparation", "klar til afhentning", "afsluttet", "annulleret"].map((s) => ({
   value: s,
   label: s,
 }));
@@ -37,8 +38,57 @@ function inferPaymentType(paymentText = "") {
   return "efter";
 }
 
+function buildPrintOrderFromRepair(r) {
+  if (!r) r = {};
+  // totals: brug payment_total hvis sat; ellers pris
+  const total = Number.isFinite(Number(r.payment_total)) ? Number(r.payment_total) : Number(r.price || 0);
+  const upfront = Number.isFinite(Number(r.deposit_amount)) ? Number(r.deposit_amount) : 0;
+
+  // print-komponenten forventer:
+  // { id, today, created_at, customer, repairs: [{ device, repair, price, time, part }], password, note, contact, total, payment: { method, upfront } }
+  const part =
+    r.meta && typeof r.meta === "object"
+      ? r.meta
+      : {
+          id: r.spare_part_id ?? null,
+          model: r.spare_part_model ?? "",
+          stock: r.spare_part_stock ?? null,
+          location: r.spare_part_location ?? "",
+        };
+
+  return {
+    id: r.order_id || r.id || 0,
+    today: new Date().toLocaleDateString("da-DK"),
+    created_at: r.created_at || new Date().toISOString(),
+    customer: {
+      id: r.customer_id || 0,
+      name: r.customer || "",
+      phone: r.phone || "",
+      email: r.contact?.includes("@") ? r.contact : "", // bedste bud
+    },
+    repairs: [
+      {
+        device: r.model || r.device || "",
+        repair: r.repair || r.repair_title || "",
+        price: Number(r.price || 0),
+        time: Number(r.time || 0),
+        part,
+      },
+    ],
+    password: r.password || "",
+    note: r.note || "",
+    contact: r.contact || "",
+    total,
+    payment: {
+      method: (r.payment_type || "efter").toLowerCase(), // "efter" | "betalt" | "depositum" | "garanti"
+      upfront,
+    },
+  };
+}
+
 export default function RepairHistory({ repair, onClose, onSave }) {
   const overlayRef = useRef(null);
+  const navigate = useNavigate();
 
   // Start-state: inkluder evt. depositumfelter hvis backend sender dem
   const [edited, setEdited] = useState(() => ({
@@ -187,6 +237,21 @@ export default function RepairHistory({ repair, onClose, onSave }) {
       setSaving(false);
     }
   };
+
+  const handlePrintSlip = () => {
+    // tag evt. nyligt redigerede værdier med i slippen
+    const merged = { ...repair, ...edited };
+    const order = buildPrintOrderFromRepair(merged);
+
+    try { localStorage.setItem("tg_last_order", JSON.stringify(order)); } catch {}
+
+    const path = `/print-slip/${order.id || ""}`;
+    // Åbn i ny fane for at bevare modalen åbent
+    window.open(path, "_blank", "noopener,noreferrer");
+    // Alternativt: navigér i samme fane:
+    // navigate(path, { state: { order } });
+  };
+
 
   return (
     <div ref={overlayRef} onClick={handleOverlayClick} style={styles.overlay}>
@@ -436,6 +501,17 @@ export default function RepairHistory({ repair, onClose, onSave }) {
           <button onClick={onClose} disabled={saving} style={styles.cancel}>
             Annullér
           </button>
+
+          <button
+            type="button"
+            onClick={handlePrintSlip}
+            style={styles.print}
+            disabled={saving}
+            title="Print reparations-slip"
+          >
+            Print slip
+          </button>
+
           <button
             onClick={handleSave}
             style={styles.save}
@@ -466,6 +542,122 @@ export default function RepairHistory({ repair, onClose, onSave }) {
     </div>
   );
 }
+
+function formatDkDate(iso) {
+  if (!iso) return "—";
+  try { return new Date(iso).toLocaleString("da-DK"); } catch { return iso; }
+}
+
+function buildSlipHTML(r) {
+  const company = {
+    name: "Telegiganten",
+    addr1: "Enghavevej 1",
+    addr2: "1674 København V",
+    phone: "+45 12 34 56 78",
+    web: "telegiganten.dk",
+  };
+
+  const title = `${r.model || "Enhed"}${r.repair ? " — " + r.repair : ""}`;
+  const status = (r.status || "—").toLowerCase();
+
+  const total   = Number(r.payment_total ?? r.price ?? 0);
+  const deposit = Number(r.deposit_amount ?? 0);
+  const remain  = Math.max(total - (Number.isFinite(deposit) ? deposit : 0), 0);
+
+  // Enkel, printer-venlig HTML (A5/A4)
+  return `
+<!doctype html>
+<html lang="da">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Repair slip #${r.order_id || r.id || ""}</title>
+<style>
+  :root { --ink:#111; --muted:#666; --brand:#2166AC; }
+  * { box-sizing:border-box; }
+  body { color:var(--ink); font:14px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Arial; margin:0; padding:24px; }
+  .wrap { max-width:720px; margin:0 auto; }
+  h1 { font-size:18px; margin:0 0 8px; }
+  h2 { font-size:14px; margin:18px 0 8px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px 18px; }
+  .muted { color:var(--muted); }
+  .box { border:1px solid #e5e7eb; border-radius:8px; padding:12px; }
+  .row { display:flex; justify-content:space-between; gap:12px; }
+  .row + .row { margin-top:6px; }
+  .hr { height:1px; background:#e5e7eb; margin:12px 0; }
+  .status { display:inline-block; padding:4px 10px; border-radius:999px; color:#fff; font-weight:700; background:#6b7280; text-transform:lowercase; }
+  .status[data-s="under reparation"] { background:#2166AC; }
+  .status[data-s="klar til afhentning"] { background:#f59e0b; }
+  .status[data-s="afsluttet"] { background:#1f9d55; }
+  .status[data-s="annulleret"] { background:#861212; }
+  @media print {
+    body { padding:0; }
+    .noprint { display:none !important; }
+    .wrap { margin:0; }
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="row" style="align-items:flex-start; margin-bottom:10px;">
+      <div>
+        <h1>Reparationskvittering</h1>
+        <div class="muted">Ordre-ID #${r.order_id || r.id || "—"}</div>
+        <div class="muted">Oprettet: ${formatDkDate(r.created_at)}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-weight:800; color:var(--brand)">${company.name}</div>
+        <div class="muted">${company.addr1}</div>
+        <div class="muted">${company.addr2}</div>
+        <div class="muted">${company.phone}</div>
+        <div class="muted">${company.web}</div>
+      </div>
+    </div>
+
+    <div class="box">
+      <div class="grid">
+        <div><strong>Kunde</strong><br/>${r.customer || "—"}</div>
+        <div><strong>Telefon</strong><br/>${r.phone || "—"}</div>
+        <div><strong>Kontakt</strong><br/>${r.contact || "—"}</div>
+        <div><strong>Status</strong><br/><span class="status" data-s="${status}">${status}</span></div>
+      </div>
+      <div class="hr"></div>
+      <div class="grid">
+        <div><strong>Model</strong><br/>${r.model || "—"}</div>
+        <div><strong>Reparation</strong><br/>${r.repair || "—"}</div>
+        <div><strong>Adgangskode</strong><br/>${r.password || "—"}</div>
+        <div><strong>Noter</strong><br/>${r.note || "—"}</div>
+      </div>
+    </div>
+
+    <h2>Betaling</h2>
+    <div class="box">
+      <div class="row"><div>Betalingstype</div><div><strong>${(r.payment_type || "efter").toLowerCase()}</strong></div></div>
+      <div class="row"><div>Samlet pris</div><div><strong>${Number.isFinite(total) ? total : 0} kr</strong></div></div>
+      <div class="row"><div>Forudbetalt</div><div><strong>${Number.isFinite(deposit) ? deposit : 0} kr</strong></div></div>
+      <div class="row"><div>Mangler</div><div><strong>${Number.isFinite(remain) ? remain : 0} kr</strong></div></div>
+    </div>
+
+    <div class="muted" style="margin-top:12px;">Tak fordi du valgte ${company.name}. Gem denne slip som reference ved afhentning.</div>
+    <div class="noprint" style="margin-top:16px; text-align:right;">
+      <button onclick="window.print()" style="padding:8px 12px; background:#2166AC; color:#fff; border:0; border-radius:8px; font-weight:700; cursor:pointer;">Print</button>
+    </div>
+  </div>
+</body>
+</html>
+`;
+}
+
+function printRepairSlip(repair) {
+  const w = window.open("", "_blank", "noopener,noreferrer,width=820,height=900");
+  if (!w) return;
+  w.document.open();
+  w.document.write(buildSlipHTML(repair || {}));
+  w.document.close();
+  // vent et øjeblik så font/layout når at loade, og kald print
+  setTimeout(() => { try { w.focus(); w.print(); } catch {} }, 200);
+}
+
 
 /** Styles */
 const styles = {
@@ -560,4 +752,15 @@ const styles = {
     fontWeight: "bold",
     cursor: "pointer",
   },
+
+  print: {
+    background: "#fff",
+    color: "#111",
+    border: "2px solid #ddd",
+    padding: "0.55rem 1rem",
+    borderRadius: 8,
+    cursor: "pointer",
+    fontWeight: 600,
+  },
+
 };

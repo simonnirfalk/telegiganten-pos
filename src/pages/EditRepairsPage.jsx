@@ -83,6 +83,10 @@ export default function EditRepairsPage() {
   const [modelsPerPage, setModelsPerPage] = useState(50); // 50 | 100 | 200
   const [currentPage, setCurrentPage] = useState(1);
 
+  const [editingModel, setEditingModel] = useState(null); // modelKey
+  const [modelNameDraft, setModelNameDraft] = useState("");
+  const [savingModelName, setSavingModelName] = useState(false);
+
   // Accordion
   const [openModels, setOpenModels] = useState(new Set());
   const modelKey = (brand, model) => `${brand}||${model}`;
@@ -235,6 +239,45 @@ export default function EditRepairsPage() {
       setSavingAll(false);
     }
   };
+
+  const handleSaveModelName = async (brand, oldName) => {
+    if (!modelNameDraft.trim() || modelNameDraft === oldName) {
+      setEditingModel(null);
+      return;
+    }
+
+    try {
+      setSavingModelName(true);
+      const model_id = getModelIdByModelName(oldName);
+      if (!model_id) {
+        alert("Kunne ikke finde model_id for denne model.");
+        return;
+      }
+
+      await api.updateModel({ model_id, fields: { model: modelNameDraft.trim() } });
+
+      // UI-opdatering
+      setData(prev =>
+        prev.map(b => {
+          if (b.brand !== brand) return b;
+          return {
+            ...b,
+            models: b.models.map(m =>
+              m.model === oldName ? { ...m, model: modelNameDraft.trim() } : m
+            ),
+          };
+        })
+      );
+
+      setEditingModel(null);
+    } catch (err) {
+      console.error("Fejl ved opdatering af modelnavn:", err);
+      alert("Kunne ikke gemme modelnavn.");
+    } finally {
+      setSavingModelName(false);
+    }
+  };
+
 
   /* ---------- Opret ny template ---------- */
   const handleCreateRepair = async () => {
@@ -736,6 +779,8 @@ export default function EditRepairsPage() {
 
               {brand.models.map((m) => {
                 const open = isOpen(brand.brand, m.model);
+                const keyForThis = modelKey(brand.brand, m.model);
+
                 return (
                   <div
                     key={m.model}
@@ -747,8 +792,19 @@ export default function EditRepairsPage() {
                       background: "#fff",
                     }}
                   >
-                    <button
-                      onClick={() => toggleOpen(brand.brand, m.model)}
+                    {/* HEADER – ikke en <button> længere, for at undgå nested button */}
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => {
+                        if (editingModel !== keyForThis) toggleOpen(brand.brand, m.model);
+                      }}
+                      onKeyDown={(e) => {
+                        if ((e.key === "Enter" || e.key === " ") && editingModel !== keyForThis) {
+                          e.preventDefault();
+                          toggleOpen(brand.brand, m.model);
+                        }
+                      }}
                       style={{
                         width: "100%",
                         textAlign: "left",
@@ -765,11 +821,60 @@ export default function EditRepairsPage() {
                       }}
                       title="Klik for at folde ud"
                     >
-                      <span>{m.model}</span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1 }}>
+                        {editingModel === keyForThis ? (
+                          <>
+                            <input
+                              value={modelNameDraft}
+                              onChange={(e) => setModelNameDraft(e.target.value)}
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              style={{ flex: 1, padding: "4px 6px", border: "1px solid #ccc", borderRadius: 4 }}
+                            />
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSaveModelName(brand.brand, m.model);
+                              }}
+                              disabled={savingModelName}
+                              style={{ background: "#2166AC", color: "white", border: "none", borderRadius: 4, padding: "4px 10px", cursor: "pointer" }}
+                            >
+                              {savingModelName ? "Gemmer…" : "Gem"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingModel(null);
+                              }}
+                              style={{ background: "#ccc", border: "none", borderRadius: 4, padding: "4px 10px", cursor: "pointer" }}
+                            >
+                              Annuller
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <span>{m.model}</span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingModel(keyForThis);
+                                setModelNameDraft(m.model);
+                              }}
+                              style={{ background: "none", border: "none", color: "#2166AC", cursor: "pointer", fontSize: "0.85rem" }}
+                            >
+                              Rediger
+                            </button>
+                          </>
+                        )}
+                      </div>
+
                       <span style={{ fontSize: 12, color: "#64748b" }}>
-                        {m.options?.length || 0} reparationer
+                        {(m.options?.length || 0)} reparationer
                       </span>
-                    </button>
+                    </div>
 
                     {open && (
                       <div style={{ padding: 12 }}>
@@ -833,6 +938,7 @@ export default function EditRepairsPage() {
                                 </label>
 
                                 <button
+                                  type="button"
                                   onClick={() => handleSave(opt.id)}
                                   disabled={status === "saving"}
                                   style={{
@@ -848,6 +954,7 @@ export default function EditRepairsPage() {
                                 </button>
 
                                 <button
+                                  type="button"
                                   onClick={() => handleDeleteTemplate(opt.id)}
                                   style={{
                                     backgroundColor: "#cc0000",
@@ -884,6 +991,8 @@ export default function EditRepairsPage() {
           ))
         )}
       </div>
+
+
 
       {/* Pagination controls */}
       <div

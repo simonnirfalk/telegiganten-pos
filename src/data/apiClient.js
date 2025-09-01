@@ -397,6 +397,16 @@ export const api = {
       body: { brand, brand_id, model },
     }),
 
+  updateModel: ({ model_id, fields }) =>
+    proxyFetch({
+      path: `/wp-json/telegiganten/v1/update-model`,
+      method: "POST",
+      body: {
+        model_id,
+        fields: { model: fields?.model?.trim() }
+      }
+    }),
+
   /** Opret mange repair-skabeloner i ét hug (pris=0, tid=0, aktiv=0) */
   bulkCreateRepairTemplates: ({ model_id, titles, price = 0, time = 0, active = 0 }) =>
     proxyFetch({
@@ -541,5 +551,36 @@ export const api = {
   deleteSparePart: (id) => {
     if (SPAREPARTS_MODE === "wp") return primaryThenFallback(() => wpDelete(id), () => gasDelete(id));
     return primaryThenFallback(() => gasDelete(id), () => wpDelete(id));
+  },
+
+  /* ---------------------- CSV Import / Export ---------------------- */
+
+  /** NYT: returnerer direkte download-URL til CSV-eksport (samme origin) */
+  getExportUrl(type) {
+    const t = encodeURIComponent(type || "");
+    return `/wp-json/telegiganten/v1/export?type=${t}`;
+  },
+
+  /** NYT: multipart upload direkte til WP (ikke gennem proxy) */
+  async importCSV(type, file) {
+    if (!type) throw new Error("Mangler type");
+    if (!file) throw new Error("Mangler fil");
+    const form = new FormData();
+    form.append("type", type);
+    form.append("file", file);
+    const res = await fetch(`/wp-json/telegiganten/v1/import`, {
+      method: "POST",
+      credentials: "include",
+      body: form,
+    });
+    if (!res.ok) {
+      let msg = `Serverfejl (${res.status})`;
+      try {
+        const j = await res.json();
+        if (j?.message) msg = j.message;
+      } catch {}
+      throw new Error(msg);
+    }
+    return res.json();
   },
 };
