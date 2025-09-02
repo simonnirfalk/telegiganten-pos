@@ -1,3 +1,6 @@
 {
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "rewrites": [
+    { "source": "/wp-json/(.*)", "destination": "https://telegiganten.dk/wp-json/$1" },
+    { "source": "/(.*)", "destination": "/" }
+  ]
 }
