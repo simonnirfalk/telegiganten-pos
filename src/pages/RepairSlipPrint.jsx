@@ -199,7 +199,8 @@ export default function RepairSlipPrint() {
         {/* Sidefod (kun på kunde-slip) */}
         <div className="footer">
           Taastrup Hovedgade 66, 2630 Taastrup · Tlf: 70 70 78 56<br />
-          info@telegiganten.dk · Man–Fre 10–18, Lør 10–14
+          info@telegiganten.dk · Man–Fre 10–18, Lør 10–14 <br />
+         <p><strong>Husk din kvittering når du henter din reparation!</strong></p>
         </div>
       </div>
 
@@ -263,6 +264,7 @@ export default function RepairSlipPrint() {
                 <td className="tr"><strong>{total} kr</strong></td>
                 <td className="tr"></td>
               </tr>
+             <div><strong>Adgangskode:</strong> {order.password || "-"}</div>
             </tbody>
           </table>
         </div>
@@ -273,7 +275,6 @@ export default function RepairSlipPrint() {
           <div>{order.customer?.name || "-"}</div>
           <div>{order.customer?.phone || "-"}</div>
           {order.contact ? <div>Kontakt: {order.contact}</div> : null}
-          {order.password ? <div>Adgangskode: {order.password}</div> : null}
           {order.note ? <div>Note: {order.note}</div> : null}
         </div>
 

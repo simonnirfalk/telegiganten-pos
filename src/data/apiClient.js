@@ -583,4 +583,13 @@ export const api = {
     }
     return res.json();
   },
+
+  /* ---------------------- SMS ---------------------- */
+  sendSMS: ({ to, body, repair_id }) =>
+    proxyFetch({
+      path: "/wp-json/telegiganten/v1/send-sms",
+      method: "POST",
+      body: { to, body, repair_id },
+    }),
+
 };

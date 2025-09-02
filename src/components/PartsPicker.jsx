@@ -1,26 +1,39 @@
 // src/components/PartsPicker.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-const GAS_URL = import.meta.env.VITE_GAS_URL;
+/**
+ * LIST_URL: WP-proxy endpoint som henter fra GAS og håndterer CSP/caching.
+ * Forventede query params: offset, limit, search, lokation
+ */
+const LIST_URL = import.meta.env.VITE_GAS_URL;
 
+/* -------------------- HTTP GET (WP endpoint) -------------------- */
 async function httpGetJSON(url, params, signal) {
   const qs = new URLSearchParams(params).toString();
   const res = await fetch(`${url}?${qs}`, { method: "GET", signal });
   const text = await res.text();
   let data;
-  try { data = JSON.parse(text); } catch { throw new Error(text || "Ugyldigt svar"); }
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error(text || "Ugyldigt svar");
+  }
   if (!res.ok || data?.error) throw new Error(data?.error || "Fejl fra server");
   return data;
 }
 
+/* -------------------- Komponent -------------------- */
 export default function PartsPicker({
   deviceName,
-  repairType,
+  /** Ny prop: 'repair' (matcher arkkolonnen 'Reparation').
+   *  Backwards kompatibilitet: hvis 'repair' ikke er givet, bruger vi 'repairType'. */
+  repair,
+  repairType, // deprecated – beholdt for bagudkompatibilitet
   onPick,
-  gasUrl = GAS_URL,
   pageSize = 50,
   compact = false,
 }) {
+  const effectiveRepair = (repair ?? repairType ?? "").trim();
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -31,28 +44,41 @@ export default function PartsPicker({
   const abortRef = useRef(null);
   const reqIdRef = useRef(0);
 
+  // I compact-mode viser vi bare mange på én gang og tvinger på-lager filtrering
   const effectiveInStock = compact ? true : inStockOnly;
   const effectivePage = compact ? 1 : page;
-  const effectivePageSize = compact ? 500 : pageSize;
+  const effectivePageSize = compact ? 100 : pageSize;
 
+  // Cache pr. kombination (device + repair + inStock + side + size)
   const cacheRef = useRef(new Map());
   const cacheKey = useMemo(
     () =>
-      `${(deviceName || "").trim()}||${(repairType || "").trim()}||${
+      `${(deviceName || "").trim()}||${effectiveRepair}||${
         effectiveInStock ? "1" : "0"
       }||${effectivePage}||${effectivePageSize}`,
-    [deviceName, repairType, effectiveInStock, effectivePage, effectivePageSize]
+    [deviceName, effectiveRepair, effectiveInStock, effectivePage, effectivePageSize]
   );
 
-  const valid = Boolean(deviceName && repairType);
+  const valid = Boolean((deviceName || "").trim() && effectiveRepair);
 
   async function fetchParts() {
-    if (!valid) { setItems([]); setTotal(0); setProblem(null); return; }
-    if (cacheRef.current.has(cacheKey)) {
-      const c = cacheRef.current.get(cacheKey);
-      setItems(c.items); setTotal(c.total); setProblem(null); return;
+    if (!valid) {
+      setItems([]);
+      setTotal(0);
+      setProblem(null);
+      return;
     }
 
+    // Cache hit
+    if (cacheRef.current.has(cacheKey)) {
+      const c = cacheRef.current.get(cacheKey);
+      setItems(c.items);
+      setTotal(c.total);
+      setProblem(null);
+      return;
+    }
+
+    // Abort evt. tidligere request
     if (abortRef.current) abortRef.current.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -62,14 +88,15 @@ export default function PartsPicker({
     setProblem(null);
 
     try {
+      // Vi søger på kombinationen "deviceName + repair", da WP-endpointet har én 'search'
+      const combinedSearch = `${(deviceName || "").trim()} ${effectiveRepair}`.trim();
       const offset = (effectivePage - 1) * effectivePageSize;
+
       const data = await httpGetJSON(
-        gasUrl,
+        LIST_URL,
         {
-          api: "list",
-          search: deviceName || "",
-          repair: repairType || "",
-          inStock: effectiveInStock ? "true" : "false",
+          search: combinedSearch,
+          lokation: "",
           limit: String(effectivePageSize),
           offset: String(offset),
         },
@@ -77,18 +104,27 @@ export default function PartsPicker({
       );
       if (myId !== reqIdRef.current) return;
 
-      const parts = (data?.items || []).map((p) => ({
+      // Map felter – WP endpoint returnerer samme form som GAS list
+      let parts = (data?.items || []).map((p) => ({
         id: p.id,
         model: p.model,
-        stock: Number(p.stock || 0),
+        stock: Number(p.stock ?? 0),
         location: p.location || "",
         category: p.category || "",
         repair: p.repair || "",
       }));
 
+      // Klientside "Kun på lager" (WP endpoint har ikke denne)
+      if (effectiveInStock) {
+        parts = parts.filter((p) => (Number(p.stock || 0) || 0) > 0);
+      }
+
+      // NB: total i UI refererer til filtreret total hvis inStock er aktivt
+      const effectiveTotal = effectiveInStock ? parts.length : Number(data?.total || parts.length);
+
       setItems(parts);
-      setTotal(Number(data?.total || 0));
-      cacheRef.current.set(cacheKey, { items: parts, total: Number(data?.total || 0) });
+      setTotal(effectiveTotal);
+      cacheRef.current.set(cacheKey, { items: parts, total: effectiveTotal });
     } catch (e) {
       if (e.name === "AbortError") return;
       setProblem(e.message || "Kunne ikke hente reservedele");
@@ -97,15 +133,26 @@ export default function PartsPicker({
     }
   }
 
-  useEffect(() => { if (!compact) setPage(1); }, [deviceName, repairType, inStockOnly, compact]);
-  useEffect(() => { fetchParts(); /* eslint-disable-next-line */ }, [
-    deviceName, repairType, effectiveInStock, effectivePage, effectivePageSize
-  ]);
+  // Når input ændrer sig væsentligt, så hop tilbage til side 1 (i non-compact)
+  useEffect(() => {
+    if (!compact) setPage(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceName, effectiveRepair, inStockOnly, compact]);
+
+  // Hent data ved relevante ændringer
+  useEffect(() => {
+    fetchParts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceName, effectiveRepair, effectiveInStock, effectivePage, effectivePageSize]);
 
   const totalPages = Math.max(1, Math.ceil(total / (compact ? (items.length || 1) : pageSize)));
 
   if (!valid) {
-    return <div className="p-3 text-sm text-gray-600">Vælg enhed og reparation for at se relevante reservedele.</div>;
+    return (
+      <div className="p-3 text-sm text-gray-600">
+        Vælg enhed og reparation for at se relevante reservedele.
+      </div>
+    );
   }
 
   return (
@@ -113,11 +160,15 @@ export default function PartsPicker({
       {!compact && (
         <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
           <div className="text-sm">
-            <span className="font-medium">{repairType}</span> · {deviceName}
+            <span className="font-medium">{effectiveRepair}</span> · {deviceName}
             {loading && <span className="ml-2 text-gray-500">Indlæser…</span>}
           </div>
           <label className="text-sm flex items-center gap-2">
-            <input type="checkbox" checked={inStockOnly} onChange={(e) => setInStockOnly(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={inStockOnly}
+              onChange={(e) => setInStockOnly(e.target.checked)}
+            />
             Kun vis på lager
           </label>
         </div>
@@ -130,19 +181,31 @@ export default function PartsPicker({
         <table className="w-full" style={{ fontSize: "13px" }}>
           <thead className="bg-gray-50 sticky top-0">
             <tr>
-              <th className="p-2" style={{ width: "55%", textAlign: "left" }}>Model</th>
-              <th className="p-2" style={{ width: "15%", textAlign: "center" }}>Lager</th>
-              <th className="p-2" style={{ width: "20%", textAlign: "center" }}>Lokation</th>
+              <th className="p-2" style={{ width: "55%", textAlign: "left" }}>
+                Model
+              </th>
+              <th className="p-2" style={{ width: "15%", textAlign: "center" }}>
+                Lager
+              </th>
+              <th className="p-2" style={{ width: "20%", textAlign: "center" }}>
+                Lokation
+              </th>
               <th className="p-2" style={{ width: "10%" }}></th>
             </tr>
           </thead>
           <tbody>
             {items.length === 0 && !loading && (
-              <tr><td colSpan={4} className="p-3 text-center text-gray-500">Ingen match.</td></tr>
+              <tr>
+                <td colSpan={4} className="p-3 text-center text-gray-500">
+                  Ingen match.
+                </td>
+              </tr>
             )}
             {items.map((part) => (
               <tr key={part.id} className="border-t">
-                <td className="p-2" style={{ textAlign: "left" }}>{part.model}</td>
+                <td className="p-2" style={{ textAlign: "left" }}>
+                  {part.model}
+                </td>
                 <td className="p-2" style={{ textAlign: "center" }}>
                   <StockBadge qty={part.stock} />
                 </td>
@@ -166,7 +229,10 @@ export default function PartsPicker({
       </div>
 
       {!compact && (
-        <div className="flex items-center justify-between mt-3 text-sm" style={{ fontSize: "13px" }}>
+        <div
+          className="flex items-center justify-between mt-3 text-sm"
+          style={{ fontSize: "13px" }}
+        >
           <span>
             Viser {items.length} af {total} · Side {page}/{totalPages}
           </span>

@@ -55,6 +55,7 @@ export default function App() {
           {/* Lille header-knap til Import/Export */}
           <Link
             to="/import-export"
+            className="no-print"              // ⬅️ HIDE ON PRINT
             style={{
               display: "inline-flex",
               alignItems: "center",

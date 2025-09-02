@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { FaTimes } from "react-icons/fa";
 import { Link } from "react-router-dom";
 import ReadOnlyPartBadge from "./ReadOnlyPartBadge";
+import { api } from "../data/apiClient";
 
 /** Hjælper til robust datoformat */
 function formatDateTime(iso) {
@@ -251,6 +252,39 @@ export default function RepairHistory({ repair, onClose, onSave }) {
     // Alternativt: navigér i samme fane:
     // navigate(path, { state: { order } });
   };
+
+  // SMS UI state
+  const [smsOpen, setSmsOpen] = useState(false);
+  const [smsSending, setSmsSending] = useState(false);
+  const defaultSmsText = useMemo(() => {
+    const name = repair.customer || "kunde";
+    const id   = repair.order_id || repair.id || "";
+    const info = "Telegiganten – Taastrup hovedgade 66, 2630 Taastrup. Tlf. 70 70 78 56. Åbningstider: Man–Fre 10–18, Lør 10–14.";
+    return `Kære ${name}. Din reparation #${id} er klar til afhentning. ${info}`;
+  }, [repair.customer, repair.order_id, repair.id]);
+  const [smsText, setSmsText] = useState(defaultSmsText);
+  const [smsTo, setSmsTo] = useState(repair.phone || "");
+  useEffect(() => { setSmsText(defaultSmsText); setSmsTo(repair.phone || ""); }, [defaultSmsText, repair.phone]);
+
+  async function handleSendSMS() {
+    if (!smsTo || !smsText.trim()) return;
+    setSmsSending(true);
+    try {
+      await api.sendSMS({ to: smsTo, body: smsText, repair_id: Number(repair.id) || undefined });
+      // Optimistisk: læg et history-entry lokalt så man ser det med det samme
+      setHistory((h) => [
+        { timestamp: new Date().toISOString(), field: "sms_sent", old: "", new: `Til ${smsTo}: ${smsText.slice(0,160)}` },
+        ...(Array.isArray(h) ? h : []),
+      ]);
+      setSmsOpen(false);
+      alert("SMS sendt ✅");
+    } catch (err) {
+      console.error(err);
+      alert(err?.message || "Kunne ikke sende SMS.");
+    } finally {
+      setSmsSending(false);
+    }
+  }
 
 
   return (
@@ -504,6 +538,16 @@ export default function RepairHistory({ repair, onClose, onSave }) {
 
           <button
             type="button"
+            onClick={() => setSmsOpen((v) => !v)}
+            style={styles.sms}
+            disabled={saving}
+            title="Send SMS til kunden"
+          >
+            Send SMS
+          </button>
+
+          <button
+            type="button"
             onClick={handlePrintSlip}
             style={styles.print}
             disabled={saving}
@@ -521,6 +565,41 @@ export default function RepairHistory({ repair, onClose, onSave }) {
             {saving ? "Gemmer..." : "Gem ændringer"}
           </button>
         </div>
+
+        {smsOpen && (
+          <div style={styles.smsPanel}>
+            <div style={{ display: "grid", gap: 8 }}>
+              <div>
+                <label style={{ display: "block", marginBottom: 6 }}><strong>Modtager (telefon):</strong></label>
+                <input
+                  type="text"
+                  value={smsTo}
+                  onChange={(e) => setSmsTo(e.target.value)}
+                  style={styles.input}
+                  placeholder="+45XXXXXXXX"
+                />
+              </div>
+              <div>
+                <label style={{ display: "block", marginBottom: 6 }}><strong>Besked:</strong></label>
+                <textarea
+                  value={smsText}
+                  onChange={(e) => setSmsText(e.target.value)}
+                  rows={4}
+                  style={{ ...styles.input, resize: "vertical" }}
+                />
+                <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
+                  {smsText.length} tegn
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <button onClick={() => setSmsOpen(false)} style={styles.cancel}>Luk</button>
+                <button onClick={handleSendSMS} disabled={smsSending || !smsTo || !smsText.trim()} style={styles.save}>
+                  {smsSending ? "Sender…" : "Send SMS"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Historik */}
         {!!history?.length && (
@@ -762,5 +841,23 @@ const styles = {
     cursor: "pointer",
     fontWeight: 600,
   },
+
+  sms: {
+   background: "#fff",
+   color: "#2166AC",
+   border: "2px solid #2166AC",
+   padding: "0.55rem 1rem",
+   borderRadius: 8,
+   cursor: "pointer",
+   fontWeight: 600,
+ },
+
+ smsPanel: {
+   marginTop: "0.8rem",
+   padding: "0.9rem",
+   borderRadius: 10,
+   border: "1px solid #dbe2ee",
+   background: "#f7fbff",
+ },
 
 };

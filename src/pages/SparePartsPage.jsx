@@ -3,8 +3,12 @@ import React, { useEffect, useRef, useState } from "react";
 import { FaUndo, FaTrash, FaPlus, FaHistory, FaHome } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 
-/** Sæt til din GAS Web App EXEC-URL */
-const GAS_URL = import.meta.env.VITE_GAS_URL;
+/** URLs:
+ *  - LIST (WP endpoint): /wp-json/telegiganten/v1/spareparts
+ *  - EXEC (GAS):         https://script.google.com/.../exec
+ */
+const LIST_URL = import.meta.env.VITE_GAS_URL;   // fx "/wp-json/telegiganten/v1/spareparts"
+const EXEC_URL = import.meta.env.VITE_GAS_EXEC;  // din fulde GAS EXEC-URL
 
 /** Felter vi viser/redigerer (matcher Code.gs -> _apiList kortnøgler) */
 const FIELDS = ["model", "price", "stock", "location", "category", "cost_price", "repair"];
@@ -81,26 +85,39 @@ function useDebouncedValue(value, delay = 500) {
   return v;
 }
 
-/* -------------------- HTTP mod GAS -------------------- */
+/* -------------------- HTTP -------------------- */
+// GET -> WP endpoint (server-cacher og filtrerer)
 async function httpGet(paramsObj, signal) {
   const qs = new URLSearchParams(paramsObj).toString();
-  const res = await fetch(`${GAS_URL}?${qs}`, { method: "GET", signal });
+  const res = await fetch(`${LIST_URL}?${qs}`, { method: "GET", signal });
   const text = await res.text();
   let data;
-  try { data = JSON.parse(text); } catch { data = { ok: res.ok, raw: text }; }
-  if (!res.ok || data?.error) throw new Error(data?.error || "Request failed");
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = { ok: res.ok, raw: text };
+  }
+  if (!res.ok || data?.error) {
+    const err = new Error(data?.error || "Request failed");
+    err.status = res.status;
+    throw err;
+  }
   return data;
 }
-// text/plain for at undgå CORS preflight på GAS
+// POST/PUT/DELETE -> direkte til GAS EXEC (text/plain for at undgå preflight)
 async function httpPost(body) {
-  const res = await fetch(GAS_URL, {
+  const res = await fetch(EXEC_URL, {
     method: "POST",
     headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify(body),
   });
   const text = await res.text();
   let data;
-  try { data = JSON.parse(text); } catch { data = { ok: res.ok, raw: text }; }
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = { ok: res.ok, raw: text };
+  }
   if (data?.status === "conflict") {
     const err = new Error("Conflict");
     err.status = 409;
@@ -117,8 +134,15 @@ async function httpPost(body) {
 }
 
 /* -------------------- API wrapper -------------------- */
-async function apiList({ offset = 0, limit = 200, search = "", lokation = "" } = {}, signal) {
-  return httpGet({ api: "list", offset: String(offset), limit: String(limit), search, lokation }, signal);
+async function apiList(
+  { offset = 0, limit = 200, search = "", lokation = "" } = {},
+  signal
+) {
+  // WP endpoint forventer kun disse 4 parametre
+  return httpGet(
+    { offset: String(offset), limit: String(limit), search, lokation },
+    signal
+  );
 }
 async function apiCreate(rowShort) {
   const rowHeaders = {};
@@ -130,7 +154,12 @@ async function apiCreate(rowShort) {
   return httpPost({ action: "create", row: rowHeaders });
 }
 async function apiUpdate(id, patchShort, expectedUpdatedAt) {
-  return httpPost({ action: "update", id, patch: patchShort, expectedUpdatedAt: expectedUpdatedAt || null });
+  return httpPost({
+    action: "update",
+    id,
+    patch: patchShort,
+    expectedUpdatedAt: expectedUpdatedAt || null,
+  });
 }
 async function apiDelete(id) {
   return httpPost({ action: "delete", id });
@@ -148,8 +177,9 @@ export default function SparePartsPage() {
   const [loading, setLoading] = useState(false);
   const [problem, setProblem] = useState(null);
 
-  // paging
-  const PAGE_SIZE = 200;
+  // adaptiv paging
+  const LIMITS = [200, 100, 50, 25];          // stigende "aggressiv"
+  const [pageSize, setPageSize] = useState(50); // start konservativt
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
 
@@ -167,7 +197,7 @@ export default function SparePartsPage() {
   const debounceRow = useRowDebouncers();
   const enqueue = useUpdateQueue();
 
-  /** Hent side (med stale guards) */
+  /** Hent side (med stale guards + adaptiv fallback) */
   const fetchPage = async ({ pageArg = page, query = activeQuery } = {}) => {
     if (listAbortRef.current) listAbortRef.current.abort();
     const controller = new AbortController();
@@ -178,28 +208,49 @@ export default function SparePartsPage() {
     setLoading(true);
     setProblem(null);
 
-    try {
-      const offset = (pageArg - 1) * PAGE_SIZE;
-      const data = await apiList(
-        { offset, limit: PAGE_SIZE, search: query, lokation: "" },
-        controller.signal
-      );
-      if (myId !== listReqIdRef.current) return;
+    // forsøg med nuværende limit, og ved 500/502 prøv lavere
+    const currentIdx = Math.max(0, LIMITS.indexOf(pageSize));
+    const tryLimits = [pageSize, ...LIMITS.slice(currentIdx + 1)];
 
-      const items = data?.items || [];
-      setParts(items);
-      setTotal(Number(data?.total || 0));
-      setActiveQuery(query);
-    } catch (e) {
-      if (e.name === "AbortError") return;
-      setProblem(e.message || "Kunne ikke hente data");
-    } finally {
-      if (myId === listReqIdRef.current) setLoading(false);
+    for (const lim of tryLimits) {
+      try {
+        const offset = (pageArg - 1) * lim;
+        const data = await apiList(
+          { offset, limit: lim, search: query, lokation: "" },
+          controller.signal
+        );
+        if (myId !== listReqIdRef.current) return;
+
+        const items = data?.items || [];
+        setParts(items);
+        setTotal(Number(data?.total || 0));
+        setActiveQuery(query);
+
+        // hvis vi lykkes med en lavere limit end før, fasthold den fremadrettet
+        if (lim !== pageSize) setPageSize(lim);
+        return; // success
+      } catch (e) {
+        if (e.name === "AbortError") return;
+        const s = e.status || 0;
+        const serverErr = s === 500 || s === 502 || s === 504;
+        // hvis ikke serverfejl eller vi er nået sidste limit, så vis problemet
+        const isLastAttempt = lim === tryLimits[tryLimits.length - 1];
+        if (!serverErr || isLastAttempt) {
+          setProblem(e.message || "Kunne ikke hente data");
+          break;
+        }
+        // ellers loop videre og prøv med mindre limit
+      }
     }
+
+    if (myId === listReqIdRef.current) setLoading(false);
   };
 
   // Første load
-  useEffect(() => { fetchPage({ pageArg: 1, query: "" }); /* eslint-disable-next-line */ }, []);
+  useEffect(() => {
+    fetchPage({ pageArg: 1, query: "" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Debounced søgning -> side 1
   useEffect(() => {
@@ -235,7 +286,7 @@ export default function SparePartsPage() {
       () =>
         enqueue(async () => {
           try {
-            const current = (parts.find((p) => p.id === id) || {});
+            const current = parts.find((p) => p.id === id) || {};
             await apiUpdate(id, { [field]: value }, current.updatedAt);
             await fetchPage({ pageArg: page, query: activeQuery });
           } catch (e) {
@@ -265,7 +316,9 @@ export default function SparePartsPage() {
   /** Opret */
   const addPart = async () => {
     try {
-      await enqueue(async () => { await apiCreate(newPart); });
+      await enqueue(async () => {
+        await apiCreate(newPart);
+      });
       setNewPart(FIELDS.reduce((acc, k) => ((acc[k] = ""), acc), {}));
       await fetchPage({ pageArg: 1, query: activeQuery });
       setPage(1);
@@ -278,9 +331,11 @@ export default function SparePartsPage() {
   const deletePart = async (id) => {
     if (!window.confirm("Er du sikker på at du vil slette?")) return;
     try {
-      await enqueue(async () => { await apiDelete(id); });
+      await enqueue(async () => {
+        await apiDelete(id);
+      });
       const newTotal = Math.max(0, total - 1);
-      const maxPage = Math.max(1, Math.ceil(newTotal / PAGE_SIZE));
+      const maxPage = Math.max(1, Math.ceil(newTotal / pageSize));
       const nextPage = Math.min(page, maxPage);
       setPage(nextPage);
       await fetchPage({ pageArg: nextPage, query: activeQuery });
@@ -289,7 +344,7 @@ export default function SparePartsPage() {
     }
   };
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   return (
     <div style={{ padding: "2rem" }}>
@@ -361,6 +416,7 @@ export default function SparePartsPage() {
             <span>Viser {parts.length} af {total} match</span>
             <span> · Side {page} af {totalPages}</span>
             {activeQuery && <span style={chip}> · Søg: “{activeQuery}”</span>}
+            <span style={chip}> · pr. side: {pageSize}</span>
           </>
         )}
       </div>
