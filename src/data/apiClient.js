@@ -1,5 +1,20 @@
 // src/data/apiClient.js
-const PROXY_URL = "/wp-json/tg/v1/proxy";
+// ===== Konfiguration (Vercel-friendly) =====
+const WP_ORIGIN =
+  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_WP_ORIGIN) ||
+  "https://telegiganten.dk";
+
+const PROXY_URL =
+  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_PROXY_URL) ||
+  `${WP_ORIGIN}/wp-json/tg/v1/proxy`;
+
+const WP_API_BASE =
+  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_API_BASE) ||
+  `${WP_ORIGIN}/wp-json/telegiganten/v1`;
+
+const GAS_BASE_URL_ENV =
+  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_GAS_URL) ||
+  "";
 
 /* ================================
  * Hjælpere
@@ -22,7 +37,7 @@ function withQuery(path, query) {
 /** Simpel fetch der forventer JSON (bruges til eksterne endpoints – f.eks. GAS). */
 async function httpJson(url, options = {}) {
   const res = await fetch(url, {
-    credentials: "include",
+    credentials: "omit", // ← vigtigt på Vercel (cross-origin)
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
     ...options,
   });
@@ -48,13 +63,18 @@ async function httpJson(url, options = {}) {
 export async function proxyFetch({ path, method = "GET", query, body, headers = {} } = {}) {
   if (!path || typeof path !== "string") throw new Error("proxyFetch: 'path' er påkrævet");
 
-  const finalPath = withQuery(path, query);
+  // Sørg for at path er ABSOLUT mod WP (så vi undgår fejl på Vercel-origin)
+  const absolutePath = path.startsWith("http")
+    ? path
+    : `${WP_ORIGIN}${path.startsWith("/") ? "" : "/"}${path.replace(/^\//, "")}`;
+
+  const finalPath = withQuery(absolutePath, query);
 
   const payload = {
-    destination: "telegiganten-wp",
+    destination: "telegiganten-wp", // behold nuværende destination-navn
     data: {
       method,
-      path: finalPath,
+      path: finalPath, // absolut URL til WP REST
       as_json: true,
       body: body ?? null,
       headers: { "Content-Type": "application/json", ...(headers || {}) },
@@ -64,7 +84,7 @@ export async function proxyFetch({ path, method = "GET", query, body, headers = 
   const res = await fetch(PROXY_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    credentials: "include",
+    credentials: "omit", // ← vigtigt på Vercel (cross-origin)
     body: JSON.stringify(payload),
   });
 
@@ -257,14 +277,14 @@ const SPAREPARTS_MODE =
 
 /** GAS base URL prioritet */
 const GAS_BASE_URL =
-  env("VITE_GAS_URL") ||
+  GAS_BASE_URL_ENV ||
   env("VITE_SPAREPARTS_GAS_URL") ||
   (typeof window !== "undefined" && (window.__GAS_URL || window.__SPAREPARTS_GAS_URL)) ||
-  "https://script.google.com/macros/s/PASTE_YOUR_DEPLOYMENT_ID/exec";
+  "";
 
-if (GAS_BASE_URL.includes("PASTE_YOUR_DEPLOYMENT_ID")) {
+if (!GAS_BASE_URL) {
   console.warn(
-    "[spareparts] GAS_BASE_URL mangler. Sæt VITE_GAS_URL i .env eller window.__GAS_URL i runtime."
+    "[spareparts] GAS_BASE_URL mangler. Sæt VITE_GAS_URL i Vercel env eller window.__GAS_URL i runtime."
   );
 }
 
@@ -555,22 +575,22 @@ export const api = {
 
   /* ---------------------- CSV Import / Export ---------------------- */
 
-  /** NYT: returnerer direkte download-URL til CSV-eksport (samme origin) */
+  /** Returnerer direkte download-URL til CSV-eksport (absolut WP-URL) */
   getExportUrl(type) {
     const t = encodeURIComponent(type || "");
-    return `/wp-json/telegiganten/v1/export?type=${t}`;
+    return `${WP_API_BASE}/export?type=${t}`;
   },
 
-  /** NYT: multipart upload direkte til WP (ikke gennem proxy) */
+  /** Multipart upload direkte til WP (absolut URL, credentials omit) */
   async importCSV(type, file) {
     if (!type) throw new Error("Mangler type");
     if (!file) throw new Error("Mangler fil");
     const form = new FormData();
     form.append("type", type);
     form.append("file", file);
-    const res = await fetch(`/wp-json/telegiganten/v1/import`, {
+    const res = await fetch(`${WP_API_BASE}/import`, {
       method: "POST",
-      credentials: "include",
+      credentials: "omit",
       body: form,
     });
     if (!res.ok) {
@@ -591,5 +611,4 @@ export const api = {
       method: "POST",
       body: { to, body, repair_id },
     }),
-
 };
