@@ -26,8 +26,8 @@ export default function NewRepair() {
     if (!prefill || prefillApplied.current) return;
     prefillApplied.current = true;
 
-    const mappedRepairs = (prefill.repairs || []).map(r => ({
-      device: prefill.model_title || "",   // visningen i sidebaren
+    const mappedRepairs = (prefill.repairs || []).map((r) => ({
+      device: prefill.model_title || "", // visningen i sidebaren
       repair: r.title || "",
       price: Number(r.price || 0) || 0,
       time: Number(r.time || 0) || 0,
@@ -35,7 +35,7 @@ export default function NewRepair() {
       part: null,
     }));
 
-    setOrder(prev => ({
+    setOrder((prev) => ({
       ...prev,
       repairs: mappedRepairs,
       customer: prefill.customer
@@ -56,7 +56,7 @@ export default function NewRepair() {
 
   const handleFinish = () => {
     console.log("Reparation oprettet:", order);
-    alert("Reparation oprettet!");
+    alert("Reparation oprettet!<br>فلسطين حرة");
     setStep(1);
     setOrder({
       repairs: [],
@@ -70,13 +70,14 @@ export default function NewRepair() {
   };
 
   return (
-    <div style={{ width: "100%", height: "100vh", overflow: "hidden" }}>
+    // VIGTIGT: ingen overflow:hidden og ingen fast 100vh-højde
+    <div style={{ width: "100%", minHeight: "100vh" }}>
       {step === 1 && (
         <Step1_AddRepairToOrder
           order={order}
           setOrder={setOrder}
           onNext={() => setStep(2)}
-          customers={[]}          // kunderne hentes i Step1 via api.getCustomers()
+          customers={[]} // kunderne hentes i Step1 via api.getCustomers()
           setCustomers={() => {}}
           prefillFromBooking={prefill} // valgfrit; Step1 bruger den ikke nødvendigvis, men fint at have
         />
