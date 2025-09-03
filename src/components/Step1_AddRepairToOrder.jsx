@@ -233,7 +233,6 @@ export default function Step1_AddRepairToOrder({
     if (repair.model_id) {
       api.incrementModelUsage(repair.model_id).catch(() => {});
     }
-
     const next = {
       device: deviceName,
       repair: repair.title,
@@ -251,7 +250,6 @@ export default function Step1_AddRepairToOrder({
           }
         : null,
     };
-
     if (editingRepairIndex !== null && editingRepairIndex >= 0) {
       setOrder((prev) => {
         const updated = [...prev.repairs];
@@ -262,7 +260,6 @@ export default function Step1_AddRepairToOrder({
     } else {
       setOrder((prev) => ({ ...prev, repairs: [...prev.repairs, next] }));
     }
-
     setModalDevice(null);
   };
 
@@ -316,8 +313,10 @@ export default function Step1_AddRepairToOrder({
 
   /* ---------- Render ---------- */
   return (
-    <div style={{ display: "flex", height: "calc(100vh - 80px)", overflow: "hidden" }}>
-      <div style={{ flex: 1, padding: "2rem", overflowY: "auto" }}>
+    // VIGTIGT: ingen fast højde/overflow her -> hele siden kan blive høj og scrolle naturligt
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 0 }}>
+      {/* Venstre kolonne */}
+      <div style={{ flex: 1, padding: "2rem", minWidth: 0 }}>
         <button onClick={() => navigate("/")} style={{ ...buttonStyle, width: "fit-content" }}>
           <FaHome /> Dashboard
         </button>
@@ -344,10 +343,8 @@ export default function Step1_AddRepairToOrder({
             ))}
           </div>
 
-          <div style={{ flexGrow: 1 }}>
-            <h2 style={{ textTransform: "uppercase" }}>
-              Vælg enhed og reparation
-            </h2>
+          <div style={{ flexGrow: 1, minWidth: 0 }}>
+            <h2 style={{ textTransform: "uppercase" }}>Vælg enhed og reparation</h2>
             <input
               type="text"
               placeholder="Søg efter model..."
@@ -385,20 +382,16 @@ export default function Step1_AddRepairToOrder({
         </div>
       </div>
 
-      {/* Sidebar – HELE kassen scroller, knappen ligger under Note */}
+      {/* Sidebar – ingen sticky/egen scroll; følger sidens naturlige scroll */}
       <div
         style={{
           width: "400px",
           backgroundColor: "#fff",
           borderLeft: "1px solid #ddd",
           padding: "2rem 1rem",
-          height: "100vh",
-          position: "sticky",
-          top: 0,
-          overflowY: "auto",   // <— vigtig: hele sidebaren scroller
         }}
       >
-        {/* Reparationer – kompakt visning */}
+        {/* Reparationer */}
         <OrderSidebarCompact
           order={order}
           onEditRepair={onEditRepair}
@@ -510,7 +503,7 @@ export default function Step1_AddRepairToOrder({
           onChange={(e) => setOrder({ ...order, note: e.target.value })}
         />
 
-        {/* Fortsæt – lige under note, del af scrollen */}
+        {/* Fortsæt – under note, følger sidens scroll */}
         <div style={{ paddingTop: "1rem" }}>
           <button
             style={buttonStyle}
