@@ -27,7 +27,6 @@ function norm(str = "") {
     .replace(/\s+/g, " ")
     .trim();
 }
-
 function deriveShortCodes(titleNorm) {
   const codes = new Set();
   const compact = titleNorm.replace(/\s+/g, "");
@@ -42,7 +41,6 @@ function deriveShortCodes(titleNorm) {
   }
   return Array.from(codes);
 }
-
 function buildHaystack(model, brandTitle) {
   const raw = `${brandTitle || ""} ${model?.title || ""} ${
     Array.isArray(model?.aliases) ? model.aliases.join(" ") : ""
@@ -53,7 +51,6 @@ function buildHaystack(model, brandTitle) {
   const hay = [base, withoutGalaxy, shortCodes.join(" ")].join(" ");
   return hay.replace(/\s+/g, " ").trim();
 }
-
 function tokenize(q = "") {
   const n = norm(q);
   if (!n) return [];
@@ -78,9 +75,6 @@ export default function Step1_AddRepairToOrder({
   const [openSelectCustomer, setOpenSelectCustomer] = useState(false);
   const [openEditCustomer, setOpenEditCustomer] = useState(false);
 
-  // når !== null er vi i “rediger”-tilstand for denne index
-  const [editingRepairIndex, setEditingRepairIndex] = useState(null);
-
   const { data: repairStructure = [], loading } = useRepairContext();
 
   useEffect(() => {
@@ -101,7 +95,6 @@ export default function Step1_AddRepairToOrder({
           name: c.name || "",
           phone: c.phone || "",
           email: c.email || "",
-          // ekstraPhone fjernes senere
           extraPhone: c.extraPhone || "",
         }));
         setCustomers(mapped);
@@ -131,7 +124,6 @@ export default function Step1_AddRepairToOrder({
     justifyContent: "center",
     marginBottom: "0.5rem",
   };
-
   const inputStyle = {
     width: "100%",
     marginBottom: "0.5rem",
@@ -140,7 +132,6 @@ export default function Step1_AddRepairToOrder({
     borderRadius: "6px",
     fontSize: "0.9rem",
   };
-
   const deviceStyle = {
     background: "linear-gradient(135deg, #e0e0e0 0%, #f9f9f9 100%)",
     border: "1px solid #ccc",
@@ -167,7 +158,7 @@ export default function Step1_AddRepairToOrder({
   const customCategoryOrder = [
     "Alle","iPhone","Samsung mobil","iPad","MacBook","iMac","Samsung Galaxy Tab","Motorola mobil","OnePlus mobil",
     "Nokia mobil","Xiaomi mobil","Sony Xperia","Oppo mobil","Microsoft mobil","Honor mobil",
-    "Google Pixel","Apple Watch","Samsung Book","Huawei tablet",
+    "Google Pixel","Apple Watch","Samsung Book","Huawei tablet","Mobil","Tablet","Laptop","Stationær computer",
   ];
 
   const allCategories = useMemo(
@@ -218,16 +209,6 @@ export default function Step1_AddRepairToOrder({
     });
   }, [brandsFiltered, selectedCategory, searchTokens, popularModelNames]);
 
-  /* ---------- Hjælpere ---------- */
-  function findModelByTitle(title) {
-    const allModels = repairStructure.flatMap((b) => b.models || []);
-    return (
-      allModels.find(
-        (m) => (m.title || "").trim() === (title || "").trim()
-      ) || null
-    );
-  }
-
   /* ---------- Handlers ---------- */
   const handleAddRepair = (deviceName, repair) => {
     if (repair.model_id) {
@@ -250,24 +231,8 @@ export default function Step1_AddRepairToOrder({
           }
         : null,
     };
-    if (editingRepairIndex !== null && editingRepairIndex >= 0) {
-      setOrder((prev) => {
-        const updated = [...prev.repairs];
-        updated[editingRepairIndex] = next;
-        return { ...prev, repairs: updated };
-      });
-      setEditingRepairIndex(null);
-    } else {
-      setOrder((prev) => ({ ...prev, repairs: [...prev.repairs, next] }));
-    }
+    setOrder((prev) => ({ ...prev, repairs: [...prev.repairs, next] }));
     setModalDevice(null);
-  };
-
-  const onEditRepair = (idx) => {
-    const r = order.repairs[idx];
-    const model = findModelByTitle(r.device);
-    setEditingRepairIndex(idx);
-    setModalDevice(model || null);
   };
 
   const onRemoveRepair = (idx) => {
@@ -277,17 +242,24 @@ export default function Step1_AddRepairToOrder({
     }));
   };
 
+  // NY: opdater KUN pris/tid for en specifik linje
+  const onUpdateRepair = (idx, patch) => {
+    setOrder((prev) => {
+      const next = [...prev.repairs];
+      next[idx] = { ...next[idx], ...patch };
+      return { ...prev, repairs: next };
+    });
+  };
+
   const handleCreateCustomer = (newCustomer) => {
     setCustomers((prev) => [...prev, newCustomer]);
     setOrder((prev) => ({ ...prev, customer: newCustomer }));
     setOpenCreateCustomer(false);
   };
-
   const handleSelectCustomer = (selectedCustomer) => {
     setOrder({ ...order, customer: selectedCustomer });
     setOpenSelectCustomer(false);
   };
-
   const handleSaveCustomer = (editedCustomer) => {
     const updatedCustomers = customers.map((c) =>
       c.id === editedCustomer.id ? editedCustomer : c
@@ -295,10 +267,6 @@ export default function Step1_AddRepairToOrder({
     setCustomers(updatedCustomers);
     setOrder({ ...order, customer: editedCustomer });
     setOpenEditCustomer(false);
-  };
-
-  const handleRemoveCustomer = () => {
-    setOrder({ ...order, customer: null });
   };
 
   // Bekræft hvis adgangskode er tom
@@ -313,7 +281,6 @@ export default function Step1_AddRepairToOrder({
 
   /* ---------- Render ---------- */
   return (
-    // VIGTIGT: ingen fast højde/overflow her -> hele siden kan blive høj og scrolle naturligt
     <div style={{ display: "flex", alignItems: "flex-start", gap: 0 }}>
       {/* Venstre kolonne */}
       <div style={{ flex: 1, padding: "2rem", minWidth: 0 }}>
@@ -382,7 +349,7 @@ export default function Step1_AddRepairToOrder({
         </div>
       </div>
 
-      {/* Sidebar – ingen sticky/egen scroll; følger sidens naturlige scroll */}
+      {/* Sidebar */}
       <div
         style={{
           width: "400px",
@@ -391,11 +358,10 @@ export default function Step1_AddRepairToOrder({
           padding: "2rem 1rem",
         }}
       >
-        {/* Reparationer */}
         <OrderSidebarCompact
           order={order}
-          onEditRepair={onEditRepair}
           onRemoveRepair={onRemoveRepair}
+          onUpdateRepair={onUpdateRepair}  /* <— NY prop */
         />
 
         {/* Kunde */}
@@ -503,7 +469,7 @@ export default function Step1_AddRepairToOrder({
           onChange={(e) => setOrder({ ...order, note: e.target.value })}
         />
 
-        {/* Fortsæt – under note, følger sidens scroll */}
+        {/* Fortsæt */}
         <div style={{ paddingTop: "1rem" }}>
           <button
             style={buttonStyle}
@@ -516,7 +482,7 @@ export default function Step1_AddRepairToOrder({
         </div>
       </div>
 
-      {/* Modals */}
+      {/* Modals (kun til at TILFØJE reparationer) */}
       <RepairModal
         device={modalDevice}
         repairs={
@@ -527,10 +493,7 @@ export default function Step1_AddRepairToOrder({
           ).repairs || []
         }
         onAdd={handleAddRepair}
-        onClose={() => {
-          setModalDevice(null);
-          setEditingRepairIndex(null);
-        }}
+        onClose={() => setModalDevice(null)}
       />
 
       {openCreateCustomer && (
