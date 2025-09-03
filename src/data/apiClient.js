@@ -5,26 +5,48 @@ const WP_ORIGIN =
   (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_WP_ORIGIN) ||
   "https://telegiganten.dk";
 
-// Brug relative default-URLs, så Vercel rewrites rammer WordPress.
 const PROXY_URL =
   (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_PROXY_URL) ||
-  "/wp-json/tg/v1/proxy";
+  `${WP_ORIGIN}/wp-json/tg/v1/proxy`;
 
 const WP_API_BASE =
   (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_API_BASE) ||
-  "/wp-json/telegiganten/v1";
+  `${WP_ORIGIN}/wp-json/telegiganten/v1`;
 
 const GAS_BASE_URL_ENV =
   (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_GAS_URL) ||
+  "";
+
+// Vercel Security Checkpoint bypass token (læses fra Vite env eller window)
+const VERCEL_BYPASS_TOKEN =
+  (typeof import.meta !== "undefined" &&
+    import.meta.env &&
+    import.meta.env.VITE_VERCEL_BYPASS_TOKEN) ||
+  (typeof window !== "undefined" && window.__VERCEL_BYPASS_TOKEN) ||
   "";
 
 /* ================================
  * Hjælpere
  * ================================ */
 
+/** Er en URL (string) same-origin ift. den kørende app? */
+function isSameOrigin(url) {
+  if (typeof window === "undefined") return false;
+  if (!url) return false;
+  if (url.startsWith("/")) return true;
+  try {
+    const u = new URL(url, window.location.href);
+    return u.origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
 /** Bygger en URL-sti med query params. */
 function withQuery(path, query) {
-  if (!query || typeof query !== "object" || Object.keys(query).length === 0) return path;
+  if (!query || typeof query !== "object" || Object.keys(query).length === 0) {
+    return path;
+  }
   const usp = new URLSearchParams();
   for (const [k, v] of Object.entries(query)) {
     if (v === undefined || v === null) continue;
@@ -34,26 +56,37 @@ function withQuery(path, query) {
   return `${path}${sep}${usp.toString()}`;
 }
 
-/** Sørger for at en path er RELATIV (WP-proxyen vil selv gøre den absolut). */
-function toRelativePath(p) {
-  let s = String(p || "");
-  // Fjern evt. "https://domæne.tld"
-  s = s.replace(/^https?:\/\/[^/]+/i, "");
-  if (!s.startsWith("/")) s = "/" + s;
-  return s;
+/** Sæt Vercel bypass-cookie, hvis muligt. */
+async function ensureVercelBypassCookie() {
+  if (typeof window === "undefined") return false;
+  if (!VERCEL_BYPASS_TOKEN) return false;
+
+  try {
+    const u = new URL(window.location.href);
+    u.searchParams.set("x-vercel-set-bypass-cookie", "true");
+    u.searchParams.set("x-vercel-protection-bypass", VERCEL_BYPASS_TOKEN);
+    // Same-origin: send cookies med så Vercel kan sætte den nye.
+    await fetch(u.toString(), { credentials: "include" });
+    return true;
+  } catch (err) {
+    console.warn("[vercel-bypass] Kunne ikke sætte cookie:", err);
+    return false;
+  }
 }
 
 /** Simpel fetch der forventer JSON (bruges til eksterne endpoints – f.eks. GAS). */
 async function httpJson(url, options = {}) {
   const res = await fetch(url, {
-    credentials: "omit", // ← vigtigt på Vercel (cross-origin)
+    credentials: "omit", // eksternt
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
     ...options,
   });
   const ct = res.headers.get("content-type") || "";
   const payload = ct.includes("application/json") ? await res.json() : await res.text();
   if (!res.ok) {
-    throw new Error(`HTTP ${res.status} - ${typeof payload === "string" ? payload : JSON.stringify(payload)}`);
+    throw new Error(
+      `HTTP ${res.status} - ${typeof payload === "string" ? payload : JSON.stringify(payload)}`
+    );
   }
   return payload;
 }
@@ -68,34 +101,64 @@ async function httpJson(url, options = {}) {
 export async function proxyFetch({ path, method = "GET", query, body, headers = {} } = {}) {
   if (!path || typeof path !== "string") throw new Error("proxyFetch: 'path' er påkrævet");
 
-  // Tving RELATIV sti – WP-proxyen accepterer ikke eksterne origins.
-  const finalPath = withQuery(toRelativePath(path), query);
+  // Sørg for at path er ABSOLUT mod WP (så vi undgår fejl på Vercel-origin)
+  const absolutePath = path.startsWith("http")
+    ? path
+    : `${WP_ORIGIN}${path.startsWith("/") ? "" : "/"}${path.replace(/^\//, "")}`;
+
+  const finalPath = withQuery(absolutePath, query);
 
   const payload = {
     destination: "telegiganten-wp",
     data: {
       method,
-      path: finalPath,               // ← altid relativ nu
+      path: finalPath, // absolut URL til WP REST
       as_json: true,
       body: body ?? null,
       headers: { "Content-Type": "application/json", ...(headers || {}) },
     },
   };
 
-  const res = await fetch(PROXY_URL, {
+  const sameOrigin = isSameOrigin(PROXY_URL);
+  const baseHeaders = { "Content-Type": "application/json" };
+  if (sameOrigin && VERCEL_BYPASS_TOKEN) {
+    baseHeaders["x-vercel-protection-bypass"] = VERCEL_BYPASS_TOKEN;
+  }
+
+  // 1. forsøg
+  let res = await fetch(PROXY_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "omit",
+    headers: baseHeaders,
+    credentials: sameOrigin ? "include" : "omit",
+    cache: "no-store",
     body: JSON.stringify(payload),
   });
+
+  // Hvis Vercel Security Checkpoint blokerer (401/403), så sæt cookie og prøv igen
+  if ((res.status === 401 || res.status === 403) && sameOrigin && VERCEL_BYPASS_TOKEN) {
+    await ensureVercelBypassCookie();
+
+    res = await fetch(PROXY_URL, {
+      method: "POST",
+      headers: baseHeaders,
+      credentials: "include",
+      cache: "no-store",
+      body: JSON.stringify(payload),
+    });
+  }
 
   const contentType = res.headers.get("content-type") || "";
   if (!res.ok) {
     let errText;
-    try { errText = await res.text(); } catch { errText = `HTTP ${res.status}`; }
+    try {
+      errText = await res.text();
+    } catch {
+      errText = `HTTP ${res.status}`;
+    }
     throw new Error(`Proxy fejl: ${res.status} - ${errText}`);
   }
-  return contentType.includes("application/json") ? res.json() : res.text();
+  if (contentType.includes("application/json")) return res.json();
+  return res.text();
 }
 
 /* ===== (ALIAS) Named exports til bagudkompatibilitet ===== */
@@ -126,32 +189,32 @@ export async function bulkCreateRepairTemplates({
 /** Gør bookings ensartede uanset om API'et returnerer fladt eller nested. */
 function normalizeBooking(b = {}) {
   const customer = b.customer || {};
-  const booking  = b.booking  || {};
-  const sel      = b.selection || {};
-  const totals   = b.totals || {};
+  const booking = b.booking || {};
+  const sel = b.selection || {};
+  const totals = b.totals || {};
 
   const brandTitle = b.brand ?? sel.brand?.title ?? "";
   const modelTitle = b.model ?? sel.model?.title ?? sel.device?.title ?? "";
 
   // Ensartede totals
   const total_price_before = totals.total_price_before ?? totals.price_before ?? 0;
-  const total_price        = totals.total_price        ?? totals.price        ?? 0;
-  const total_time         = totals.total_time         ?? totals.time         ?? 0;
-  const discount           = totals.discount           ?? totals.discount_pct ?? 0;
+  const total_price = totals.total_price ?? totals.price ?? 0;
+  const total_time = totals.total_time ?? totals.time ?? 0;
+  const discount = totals.discount ?? totals.discount_pct ?? 0;
 
   return {
     ...b,
-    customer_name:  b.customer_name  ?? customer.name  ?? "",
+    customer_name: b.customer_name ?? customer.name ?? "",
     customer_phone: b.customer_phone ?? customer.phone ?? "",
     customer_email: b.customer_email ?? customer.email ?? "",
-    date:            b.date            ?? booking.date            ?? "",
-    time:            b.time            ?? booking.time            ?? "",
+    date: b.date ?? booking.date ?? "",
+    time: b.time ?? booking.time ?? "",
     shipping_option: b.shipping_option ?? booking.shipping_option ?? "",
-    comment:         b.comment         ?? booking.comment         ?? "",
-    brand:    brandTitle,
-    model:    modelTitle,
+    comment: b.comment ?? booking.comment ?? "",
+    brand: brandTitle,
+    model: modelTitle,
     model_id: b.model_id ?? sel.model?.id ?? 0,
-    repairs:  b.repairs ?? sel.repairs ?? [],
+    repairs: b.repairs ?? sel.repairs ?? [],
     totals: {
       total_price_before,
       total_price,
@@ -214,23 +277,23 @@ export async function createRepairFromBooking(booking) {
   }
 
   // 2) opret repair-ordre
-  const repairTitles = (b.repairs || []).map(r => r?.name).filter(Boolean);
-  const repairTitle  = repairTitles[0] || "Reparation";
-  const title        = `${b.model || "Enhed"} – ${repairTitle}`;
-  const deviceLabel  = [b.brand, b.model].filter(Boolean).join(" ");
+  const repairTitles = (b.repairs || []).map((r) => r?.name).filter(Boolean);
+  const repairTitle = repairTitles[0] || "Reparation";
+  const title = `${b.model || "Enhed"} – ${repairTitle}`;
+  const deviceLabel = [b.brand, b.model].filter(Boolean).join(" ");
 
   const payload = {
     title,
     model_id: b.model_id || 0,
     price: b.totals?.total_price ?? 0,
-    time:  b.totals?.total_time  ?? 0,
+    time: b.totals?.total_time ?? 0,
     device: deviceLabel,
     repair: repairTitles.join(", "),
     order_id: "",
     customer_id,
     customer: b.customer_name || "",
-    phone:    b.customer_phone || "",
-    contact:  b.customer_email || "",
+    phone: b.customer_phone || "",
+    contact: b.customer_email || "",
     status: "Ny",
     note: (b.comment || "").trim(),
   };
@@ -391,7 +454,6 @@ export const api = {
   /* -------- Brands / modeller / skabeloner -------- */
   getBrands: () => proxyFetch({ path: "/wp-json/telegiganten/v1/brands" }),
 
-  /** Opret model (telegiganten_model) */
   createModel: ({ brand, brand_id, model }) =>
     proxyFetch({
       method: "POST",
@@ -406,7 +468,6 @@ export const api = {
       body: { model_id, fields: { model: fields?.model?.trim() } },
     }),
 
-  /** Opret mange repair-skabeloner i ét hug (pris=0, tid=0, aktiv=0) */
   bulkCreateRepairTemplates: ({ model_id, titles, price = 0, time = 0, active = 0 }) =>
     proxyFetch({
       method: "POST",
@@ -415,33 +476,33 @@ export const api = {
     }),
 
   getModelsByBrand: (brandId) =>
-    proxyFetch({ path: "/wp-json/telegiganten/v1/models", query: { brand_id: brandId } }),
+    proxyFetch({
+      path: "/wp-json/telegiganten/v1/models",
+      query: { brand_id: brandId },
+    }),
 
   getRepairsForModel: (modelId) =>
-    proxyFetch({ path: "/wp-json/telegiganten/v1/repairs-by-model", query: { model_id: modelId } }),
+    proxyFetch({
+      path: "/wp-json/telegiganten/v1/repairs-by-model",
+      query: { model_id: modelId },
+    }),
 
   getTopModels: () => proxyFetch({ path: "/wp-json/telegiganten/v1/top-models" }),
 
-  // All-in-one struktur til EditRepairsPage
   getAllRepairs: () => proxyFetch({ path: "/wp-json/telegiganten/v1/all-repairs" }),
 
-  // Opret SKABELON (telegiganten_repair)
   createRepairTemplate: (data) =>
     proxyFetch({ path: "/wp-json/telegiganten/v1/create-repair-template", method: "POST", body: data }),
 
-  // Opdater (virker til både tg_repair og telegiganten_repair)
   updateRepair: (data) =>
     proxyFetch({ path: "/wp-json/telegiganten/v1/update-repair", method: "POST", body: data }),
 
-  // Global apply (skabeloner)
   applyRepairChanges: (data) =>
     proxyFetch({ path: "/wp-json/telegiganten/v1/apply-repair-changes", method: "POST", body: data }),
 
-  // Slet SKABELON (telegiganten_repair)
   deleteRepairTemplate: (repair_id) =>
     proxyFetch({ path: "/wp-json/telegiganten/v1/delete-repair", method: "POST", body: { repair_id } }),
 
-  // Bump popularitet på model
   incrementModelUsage: (modelId) =>
     proxyFetch({ path: "/wp-json/telegiganten/v1/increment-model-usage", method: "POST", body: { model_id: modelId } }),
 
@@ -463,13 +524,9 @@ export const api = {
   /* ---------------------- Ordrer (tg_repair) ---------------------- */
   getRepairOrders: () => proxyFetch({ path: "/wp-json/telegiganten/v1/repair-orders" }),
 
-  // Opret ORDRE (ikke skabelon)
-  createRepair: (data) =>
-    proxyFetch({ path: "/wp-json/telegiganten/v1/create-repair", method: "POST", body: data }),
+  createRepair: (data) => proxyFetch({ path: "/wp-json/telegiganten/v1/create-repair", method: "POST", body: data }),
 
-  // Alias til bagudkompatibilitet
-  createRepairOrder: (data) =>
-    proxyFetch({ path: "/wp-json/telegiganten/v1/create-repair", method: "POST", body: data }),
+  createRepairOrder: (data) => proxyFetch({ path: "/wp-json/telegiganten/v1/create-repair", method: "POST", body: data }),
 
   updateRepairWithHistory: (data) =>
     proxyFetch({ path: "/wp-json/telegiganten/v1/update-repair-with-history", method: "POST", body: data }),
@@ -498,14 +555,11 @@ export const api = {
   },
 
   /* ---------------------- CSV Import / Export ---------------------- */
-
-  /** Returnerer direkte download-URL til CSV-eksport (relative → rewrite) */
   getExportUrl(type) {
     const t = encodeURIComponent(type || "");
     return `${WP_API_BASE}/export?type=${t}`;
   },
 
-  /** Multipart upload direkte til WP (relative → rewrite) */
   async importCSV(type, file) {
     if (!type) throw new Error("Mangler type");
     if (!file) throw new Error("Mangler fil");
@@ -519,7 +573,10 @@ export const api = {
     });
     if (!res.ok) {
       let msg = `Serverfejl (${res.status})`;
-      try { const j = await res.json(); if (j?.message) msg = j.message; } catch {}
+      try {
+        const j = await res.json();
+        if (j?.message) msg = j.message;
+      } catch {}
       throw new Error(msg);
     }
     return res.json();
@@ -527,5 +584,9 @@ export const api = {
 
   /* ---------------------- SMS ---------------------- */
   sendSMS: ({ to, body, repair_id }) =>
-    proxyFetch({ path: "/wp-json/telegiganten/v1/send-sms", method: "POST", body: { to, body, repair_id } }),
+    proxyFetch({
+      path: "/wp-json/telegiganten/v1/send-sms",
+      method: "POST",
+      body: { to, body, repair_id },
+    }),
 };
