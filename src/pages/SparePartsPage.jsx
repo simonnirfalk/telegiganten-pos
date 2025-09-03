@@ -6,9 +6,27 @@ import { useNavigate } from "react-router-dom";
 /** URLs:
  *  - LIST (WP endpoint med cache/pagination): /wp-json/telegiganten/v1/spareparts
  *  - EXEC (GAS – create/update/delete):       https://script.google.com/.../exec
+ *
+ *  Robust fallback: hvis VITE_SPAREPARTS_LIST mangler, prøv VITE_GAS_URL (back-compat),
+ *  og som sidste udvej antag WP-route på samme origin.
  */
-const LIST_URL = import.meta.env.VITE_SPAREPARTS_LIST;  // <-- BRUG WP-ENDPOINT HER
-const EXEC_URL = import.meta.env.VITE_GAS_EXEC;         // <-- GAS EXEC (uændret)
+const LIST_URL =
+  import.meta.env.VITE_SPAREPARTS_LIST ||
+  import.meta.env.VITE_GAS_URL || // sidst kendte variabel hos dig
+  "/wp-json/telegiganten/v1/spareparts";
+
+const EXEC_URL =
+  import.meta.env.VITE_GAS_EXEC ||
+  import.meta.env.VITE_GAS_URL || // hvis du tidligere brugte samme til POST
+  "";
+
+if (!import.meta.env.VITE_SPAREPARTS_LIST) {
+  // Én gang pr. load – hjælper med at opdage misconfig i dev tools
+  console.warn(
+    "[SparePartsPage] VITE_SPAREPARTS_LIST er ikke sat. Bruger fallback:",
+    LIST_URL
+  );
+}
 
 /** Felter vi viser/redigerer (matcher Code.gs -> _apiList kortnøgler) */
 const FIELDS = ["model", "price", "stock", "location", "category", "cost_price", "repair"];
@@ -61,10 +79,13 @@ function useDebouncedValue(value, delay = 500) {
 }
 
 /* -------------------- HTTP -------------------- */
-// GET -> WP endpoint (server-cacher og filtrerer)
 async function httpGet(paramsObj, signal) {
+  const base = String(LIST_URL || "").trim();
+  if (!base) throw new Error("LIST_URL mangler – sæt VITE_SPAREPARTS_LIST i .env");
   const qs = new URLSearchParams(paramsObj).toString();
-  const res = await fetch(`${LIST_URL}?${qs}`, { method: "GET", signal });
+  const url = base.includes("?") ? `${base}&${qs}` : `${base}?${qs}`;
+
+  const res = await fetch(url, { method: "GET", signal });
   const text = await res.text();
   let data;
   try {
@@ -73,15 +94,17 @@ async function httpGet(paramsObj, signal) {
     data = { ok: res.ok, raw: text };
   }
   if (!res.ok || data?.error) {
-    const err = new Error(data?.error || "Request failed");
+    const err = new Error(data?.error || `Request failed (${res.status})`);
     err.status = res.status;
     throw err;
   }
   return data;
 }
-// POST/PUT/DELETE -> direkte til GAS EXEC (text/plain for at undgå preflight)
+
 async function httpPost(body) {
-  const res = await fetch(EXEC_URL, {
+  const base = String(EXEC_URL || "").trim();
+  if (!base) throw new Error("EXEC_URL mangler – sæt VITE_GAS_EXEC i .env");
+  const res = await fetch(base, {
     method: "POST",
     headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify(body),
@@ -110,7 +133,6 @@ async function httpPost(body) {
 
 /* -------------------- API wrapper -------------------- */
 async function apiList({ offset = 0, limit = 200, search = "", lokation = "" } = {}, signal) {
-  // WP endpoint forventer kun disse 4 parametre
   return httpGet({ offset: String(offset), limit: String(limit), search, lokation }, signal);
 }
 async function apiCreate(rowShort) {
@@ -129,7 +151,7 @@ async function apiDelete(id) {
   return httpPost({ action: "delete", id });
 }
 
-/* -------------------- Simple page cache (hurtigere tilbage/videre) -------------------- */
+/* -------------------- Simple page cache -------------------- */
 function makeKey({ query, limit, page }) {
   return `${query}::${limit}::${page}`;
 }
@@ -146,37 +168,32 @@ export default function SparePartsPage() {
   const [loading, setLoading] = useState(false);
   const [problem, setProblem] = useState(null);
 
-  // adaptiv paging
   const LIMITS = [200, 100, 50, 25];
-  const [pageSize, setPageSize] = useState(100); // start lidt højere; falder ned hvis serveren fejler
+  const [pageSize, setPageSize] = useState(100);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
-  const [unknownTotal, setUnknownTotal] = useState(false); // hvis backend ikke sender total
+  const [unknownTotal, setUnknownTotal] = useState(false);
 
   const totalPages = useMemo(() => {
-    if (unknownTotal) return page + (parts.length >= pageSize ? 1 : 0); // grov estimering for UI
+    if (unknownTotal) return page + (parts.length >= pageSize ? 1 : 0);
     return Math.max(1, Math.ceil(total / pageSize));
   }, [unknownTotal, total, pageSize, page, parts.length]);
 
   const [activeQuery, setActiveQuery] = useState("");
 
-  // anti-stale guards
   const listAbortRef = useRef(null);
   const listReqIdRef = useRef(0);
 
-  // simpel in-memory cache
-  const pageCacheRef = useRef(new Map()); // key -> { items, total, ts }
-
+  const pageCacheRef = useRef(new Map());
   const [newPart, setNewPart] = useState(FIELDS.reduce((acc, k) => ((acc[k] = ""), acc), {}));
 
   const navigate = useNavigate();
   const debounceRow = useRowDebouncers();
   const enqueue = useUpdateQueue();
 
-  /** Hent side (med stale guards + adaptiv fallback + cache) */
   const fetchPage = async ({ pageArg = page, query = activeQuery } = {}) => {
-    // 1) prøv cache først
-    const cached = pageCacheRef.current.get(makeKey({ query, limit: pageSize, page: pageArg }));
+    const cacheKey = makeKey({ query, limit: pageSize, page: pageArg });
+    const cached = pageCacheRef.current.get(cacheKey);
     if (cached) {
       setParts(cached.items);
       setTotal(cached.total ?? 0);
@@ -195,7 +212,6 @@ export default function SparePartsPage() {
     setLoading(true);
     setProblem(null);
 
-    // forsøg med nuværende limit, og ved 500/502/504 prøv lavere
     const currentIdx = Math.max(0, LIMITS.indexOf(pageSize));
     const tryLimits = [pageSize, ...LIMITS.slice(currentIdx + 1)];
 
@@ -213,18 +229,16 @@ export default function SparePartsPage() {
         setUnknownTotal(srvTotal == null);
         setActiveQuery(query);
 
-        // hold den brugte limit hvis den lykkedes
         if (lim !== pageSize) setPageSize(lim);
 
-        // cache
-        pageCacheRef.current.set(makeKey({ query, limit: lim, page: pageArg }), { items, total: srvTotal, ts: Date.now() });
+        pageCacheRef.current.set(cacheKey, { items, total: srvTotal, ts: Date.now() });
 
         setLoading(false);
-        return; // success
+        return;
       } catch (e) {
         if (e.name === "AbortError") return;
         const s = e.status || 0;
-        const serverErr = s === 500 || s === 502 || s === 504;
+        const serverErr = s === 500 || s === 502 || s === 504 || s === 0;
         const isLastAttempt = lim === tryLimits[tryLimits.length - 1];
         if (!serverErr || isLastAttempt) {
           setProblem(e.message || "Kunne ikke hente data");
@@ -237,7 +251,6 @@ export default function SparePartsPage() {
     if (myId === listReqIdRef.current) setLoading(false);
   };
 
-  // Første load
   useEffect(() => {
     setPage(1);
     pageCacheRef.current.clear();
@@ -245,7 +258,6 @@ export default function SparePartsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Debounced søgning -> side 1 (ryd cache)
   useEffect(() => {
     setPage(1);
     pageCacheRef.current.clear();
@@ -253,13 +265,11 @@ export default function SparePartsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedSearch]);
 
-  // Side skifter -> hent
   useEffect(() => {
     fetchPage({ pageArg: page, query: activeQuery });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
 
-  /** Gem ændring (optimistic + debounce + kø) */
   const saveChange = (id, field, value) => {
     if (id == null) {
       alert("Denne række mangler ID – opdaterer visningen.");
@@ -281,7 +291,6 @@ export default function SparePartsPage() {
           try {
             const current = parts.find((p) => p.id === id) || {};
             await apiUpdate(id, { [field]: value }, current.updatedAt);
-            // invalider cache for den aktuelle side og refetch
             pageCacheRef.current.delete(makeKey({ query: activeQuery, limit: pageSize, page }));
             await fetchPage({ pageArg: page, query: activeQuery });
           } catch (e) {
@@ -299,7 +308,6 @@ export default function SparePartsPage() {
     );
   };
 
-  /** Undo sidste ændring */
   const undoLast = () => {
     const last = history[0];
     if (!last) return;
@@ -307,12 +315,9 @@ export default function SparePartsPage() {
     setHistory((prev) => prev.slice(1));
   };
 
-  /** Opret */
   const addPart = async () => {
     try {
-      await enqueue(async () => {
-        await apiCreate(newPart);
-      });
+      await enqueue(async () => { await apiCreate(newPart); });
       setNewPart(FIELDS.reduce((acc, k) => ((acc[k] = ""), acc), {}));
       pageCacheRef.current.clear();
       await fetchPage({ pageArg: 1, query: activeQuery });
@@ -322,13 +327,10 @@ export default function SparePartsPage() {
     }
   };
 
-  /** Slet */
   const deletePart = async (id) => {
     if (!window.confirm("Er du sikker på at du vil slette?")) return;
     try {
-      await enqueue(async () => {
-        await apiDelete(id);
-      });
+      await enqueue(async () => { await apiDelete(id); });
       pageCacheRef.current.clear();
       const newTotal = Math.max(0, total - 1);
       const maxPage = Math.max(1, Math.ceil(newTotal / pageSize));
@@ -340,7 +342,6 @@ export default function SparePartsPage() {
     }
   };
 
-  // hjælpetekst for totals
   const totalInfo = unknownTotal ? (
     <span>Viser {parts.length} rækker (ukendt total)</span>
   ) : (
@@ -349,7 +350,6 @@ export default function SparePartsPage() {
 
   return (
     <div style={{ padding: "2rem" }}>
-      {/* Top-knap */}
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1.5rem" }}>
         <button onClick={() => navigate("/")} style={btnPrimary}>
           <FaHome style={{ marginRight: 6 }} /> Dashboard
@@ -360,20 +360,11 @@ export default function SparePartsPage() {
         Reservedele
       </h2>
 
-      {/* Sticky værktøjsbar */}
       <div
         style={{
-          position: "sticky",
-          top: 0,
-          zIndex: 10,
-          background: "#f9f9f9",
-          padding: "1rem 0",
-          display: "flex",
-          flexWrap: "wrap",
-          gap: "1rem",
-          alignItems: "center",
-          marginBottom: "1.5rem",
-          borderBottom: "1px solid #ddd",
+          position: "sticky", top: 0, zIndex: 10, background: "#f9f9f9",
+          padding: "1rem 0", display: "flex", flexWrap: "wrap", gap: "1rem",
+          alignItems: "center", marginBottom: "1.5rem", borderBottom: "1px solid #ddd",
         }}
       >
         <button onClick={undoLast} style={btnGhost} title="Fortryd sidste ændring">
@@ -398,10 +389,16 @@ export default function SparePartsPage() {
           <label style={{ fontSize: 12, color: "#334155" }}>pr. side:</label>
           <select
             value={pageSize}
-            onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); pageCacheRef.current.clear(); fetchPage({ pageArg: 1, query: activeQuery }); }}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              setPageSize(n);
+              setPage(1);
+              pageCacheRef.current.clear();
+              fetchPage({ pageArg: 1, query: activeQuery });
+            }}
             style={{ ...inputStyle, padding: "6px 8px" }}
           >
-            {[25,50,100,200].map(n => <option key={n} value={n}>{n}</option>)}
+            {[25, 50, 100, 200].map(n => <option key={n} value={n}>{n}</option>)}
           </select>
 
           <button
@@ -417,7 +414,6 @@ export default function SparePartsPage() {
         </div>
       </div>
 
-      {/* Info / fejl */}
       <div style={{ marginBottom: "0.75rem", fontSize: "0.95rem" }}>
         {problem ? (
           <span style={{ color: "#cc0000" }}>{problem}</span>
@@ -431,20 +427,11 @@ export default function SparePartsPage() {
         )}
       </div>
 
-      {/* Opret ny række (inline form) */}
       {editingIndex === -1 && (
         <div
-          style={{
-            marginBottom: "1rem",
-            border: "1px solid #ddd",
-            padding: "1rem",
-            borderRadius: "6px",
-            background: "#fff",
-          }}
+          style={{ marginBottom: "1rem", border: "1px solid #ddd", padding: "1rem", borderRadius: 6, background: "#fff" }}
         >
-          <h4 style={{ marginBottom: "0.75rem", fontSize: "1.05rem", fontWeight: "bold" }}>
-            Opret ny reservedel
-          </h4>
+          <h4 style={{ marginBottom: "0.75rem", fontSize: "1.05rem", fontWeight: "bold" }}>Opret ny reservedel</h4>
           <div style={{ display: "grid", gridTemplateColumns: "1.6fr 0.6fr 0.6fr 1fr 1fr 1fr 1.2fr auto", gap: "0.5rem" }}>
             {FIELDS.map((field) => (
               <input
@@ -455,14 +442,11 @@ export default function SparePartsPage() {
                 style={inputStyle}
               />
             ))}
-            <button onClick={addPart} style={btnPrimary}>
-              Tilføj
-            </button>
+            <button onClick={addPart} style={btnPrimary}>Tilføj</button>
           </div>
         </div>
       )}
 
-      {/* Tabel */}
       <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden" }}>
         <table className="w-full text-sm">
           <thead style={{ background: "#f8fafc", borderBottom: "1px solid #e5e7eb" }}>
@@ -515,46 +499,32 @@ export default function SparePartsPage() {
         </table>
       </div>
 
-      {/* Pagination controls */}
       <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "1rem",
-          marginTop: "1.25rem",
-          flexWrap: "wrap",
-        }}
+        style={{ display: "flex", alignItems: "center", gap: "1rem", marginTop: "1.25rem", flexWrap: "wrap" }}
       >
         <button
           onClick={() => setPage((p) => Math.max(1, p - 1))}
           disabled={page <= 1 || loading}
           style={{
             ...(page <= 1 || loading ? { backgroundColor: "#ccc", cursor: "not-allowed" } : { backgroundColor: BLUE, cursor: "pointer" }),
-            color: "white",
-            padding: "6px 14px",
-            borderRadius: "6px",
-            border: "none",
+            color: "white", padding: "6px 14px", borderRadius: 6, border: "none",
           }}
         >
           Forrige
         </button>
 
         <span style={{ fontSize: "0.95rem" }}>
-          Side {page} af {totalPages}{" "}
-          {!unknownTotal && <span style={chip}>({total} rækker)</span>}
+          Side {page} af {totalPages} { !unknownTotal && <span style={chip}>({total} rækker)</span> }
         </span>
 
         <button
           onClick={() => setPage((p) => p + 1)}
-          disabled={( !unknownTotal && page >= totalPages ) || loading || (unknownTotal && parts.length < pageSize)}
+          disabled={(!unknownTotal && page >= totalPages) || loading || (unknownTotal && parts.length < pageSize)}
           style={{
             ...( (!unknownTotal && page >= totalPages) || loading || (unknownTotal && parts.length < pageSize)
               ? { backgroundColor: "#ccc", cursor: "not-allowed" }
               : { backgroundColor: BLUE, cursor: "pointer" } ),
-            color: "white",
-            padding: "6px 14px",
-            borderRadius: "6px",
-            border: "none",
+            color: "white", padding: "6px 14px", borderRadius: 6, border: "none",
           }}
         >
           Næste
