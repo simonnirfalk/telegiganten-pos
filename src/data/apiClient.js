@@ -5,19 +5,27 @@ const WP_ORIGIN =
   (typeof import.meta !== "undefined" && import.meta.env?.VITE_WP_ORIGIN) ||
   "https://telegiganten.dk";
 
-// Vercel-proxyet ligger på samme origin som appen; brug RELATIV sti
+// Normaliser for sammenligning (fjern trailing slash)
+const WP_ORIGIN_NORM = (WP_ORIGIN || "").replace(/\/+$/, "");
+
+// Vercel-proxy ligger på samme origin som appen; brug RELATIV sti
 const PROXY_URL =
   (typeof import.meta !== "undefined" && import.meta.env?.VITE_PROXY_URL) ||
   "/wp-json/tg/v1/proxy";
 
 const WP_API_BASE =
   (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE) ||
-  `${WP_ORIGIN}/wp-json/telegiganten/v1`;
+  `${WP_ORIGIN_NORM}/wp-json/telegiganten/v1`;
 
 // Valgfrit: bypass-token hvis Deployment Protection er slået til
 const VERCEL_BYPASS =
   (typeof import.meta !== "undefined" && import.meta.env?.VITE_VERCEL_BYPASS_TOKEN) ||
   (typeof window !== "undefined" && window.__VERCEL_BYPASS) ||
+  "";
+
+// *** VIGTIG ***: brugt i Spareparts-konfigurationen
+const GAS_BASE_URL_ENV =
+  (typeof import.meta !== "undefined" && import.meta.env?.VITE_GAS_URL) ||
   "";
 
 // ================================
@@ -39,25 +47,29 @@ function toWpRelative(p) {
   if (!p) throw new Error("toWpRelative: path mangler");
   if (/^https?:\/\//i.test(p)) {
     const u = new URL(p);
-    if (u.origin !== WP_ORIGIN) {
+    if (u.origin.replace(/\/+$/, "") !== WP_ORIGIN_NORM) {
       throw new Error(`Ekstern URL er ikke tilladt af WP-proxy: ${u.origin}`);
     }
-    // behold eventuel query i path’en
     return u.pathname + (u.search || "");
   }
   return p.startsWith("/") ? p : `/${p}`;
 }
 
-// Tilføj bypass-token som query (også header – nogle beskyttere kræver begge dele)
+// Tilføj bypass-token, men bevar RELATIV sti
 function withBypass(url) {
   if (!VERCEL_BYPASS) return url;
-  try {
-    const u = new URL(url, typeof window !== "undefined" ? window.location.origin : "https://x");
-    u.searchParams.set("x-vercel-protection-bypass", VERCEL_BYPASS);
-    return u.toString();
-  } catch {
-    return url;
+
+  if (typeof window !== "undefined") {
+    try {
+      const u = new URL(url, window.location.origin);
+      u.searchParams.set("x-vercel-protection-bypass", VERCEL_BYPASS);
+      return u.pathname + u.search; // behold relativ
+    } catch {
+      // falder igennem til string-mode
+    }
   }
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}x-vercel-protection-bypass=${encodeURIComponent(VERCEL_BYPASS)}`;
 }
 
 // Simpel fetch til eksterne endpoints (GAS m.m.)
@@ -80,7 +92,7 @@ async function httpJson(url, options = {}) {
 export async function proxyFetch({ path, method = "GET", query, body, headers = {} } = {}) {
   if (!path || typeof path !== "string") throw new Error("proxyFetch: 'path' er påkrævet");
 
-  // *** VIGTIGT: Gør path WP-relative, ellers svarer plugin’et med 400 bad_target
+  // Relativ sti til WP (plugin’et afviser absolutte eksterne URLs)
   const relPath = toWpRelative(path);
   const finalPath = withQuery(relPath, query);
 
@@ -88,7 +100,7 @@ export async function proxyFetch({ path, method = "GET", query, body, headers = 
     destination: "telegiganten-wp",
     data: {
       method,
-      path: finalPath,          // <-- RELATIV sti, ikke absolut origin
+      path: finalPath, // RELATIV sti
       as_json: true,
       body: body ?? null,
       headers: { "Content-Type": "application/json", ...(headers || {}) },
@@ -108,7 +120,11 @@ export async function proxyFetch({ path, method = "GET", query, body, headers = 
   const ct = res.headers.get("content-type") || "";
   if (!res.ok) {
     let errText;
-    try { errText = await res.text(); } catch { errText = `HTTP ${res.status}`; }
+    try {
+      errText = await res.text();
+    } catch {
+      errText = `HTTP ${res.status}`;
+    }
     throw new Error(`Proxy fejl: ${res.status} - ${errText}`);
   }
   return ct.includes("application/json") ? res.json() : res.text();
@@ -138,8 +154,6 @@ export async function bulkCreateRepairTemplates({
 }
 
 // --- BOOKING API HELPERS ---
-
-/** Gør bookings ensartede uanset om API'et returnerer fladt eller nested. */
 function normalizeBooking(b = {}) {
   const customer = b.customer || {};
   const booking = b.booking || {};
@@ -149,7 +163,6 @@ function normalizeBooking(b = {}) {
   const brandTitle = b.brand ?? sel.brand?.title ?? "";
   const modelTitle = b.model ?? sel.model?.title ?? sel.device?.title ?? "";
 
-  // Ensartede totals
   const total_price_before = totals.total_price_before ?? totals.price_before ?? 0;
   const total_price = totals.total_price ?? totals.price ?? 0;
   const total_time = totals.total_time ?? totals.time ?? 0;
@@ -168,12 +181,7 @@ function normalizeBooking(b = {}) {
     model: modelTitle,
     model_id: b.model_id ?? sel.model?.id ?? 0,
     repairs: b.repairs ?? sel.repairs ?? [],
-    totals: {
-      total_price_before,
-      total_price,
-      total_time,
-      discount,
-    },
+    totals: { total_price_before, total_price, total_time, discount },
   };
 }
 
