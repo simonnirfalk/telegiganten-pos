@@ -118,7 +118,6 @@ export default function Step1_AddRepairToOrder({
     }
   }, [prefillFromBooking]);
 
-
   /* ---------- UI styles ---------- */
   const buttonStyle = {
     backgroundColor: "#2166AC",
@@ -395,7 +394,7 @@ export default function Step1_AddRepairToOrder({
           width: "400px",
           backgroundColor: "#fff",
           borderLeft: "1px solid #ddd",
-          padding: "2rem 1rem",
+          padding: "0",                    // vi styrer padding i sektioner
           display: "flex",
           flexDirection: "column",
           height: "100vh",
@@ -404,7 +403,8 @@ export default function Step1_AddRepairToOrder({
           overflow: "hidden",
         }}
       >
-        <div style={{ flexGrow: 1, overflowY: "auto" }}>
+        {/* Scrollbart indhold */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "2rem 1rem 1rem", paddingBottom: 96 }}>
           {/* Reparationer – kompakt visning */}
           <OrderSidebarCompact
             order={order}
@@ -464,7 +464,7 @@ export default function Step1_AddRepairToOrder({
             </div>
           ) : (
             <>
-              <button style={buttonStyle} onClick={() => setOpenCreateCustomer(true)}>
+              <button style={{ ...buttonStyle, marginTop: 0 }} onClick={() => setOpenCreateCustomer(true)}>
                 <FaUserPlus /> Opret kunde
               </button>
               <button style={buttonStyle} onClick={() => setOpenSelectCustomer(true)}>
@@ -516,13 +516,37 @@ export default function Step1_AddRepairToOrder({
             value={order.note || ""}
             onChange={(e) => setOrder({ ...order, note: e.target.value })}
           />
+        </div>
 
-          {/* Fortsæt */}
-          <div style={{ paddingTop: "1rem" }}>
-            <button style={buttonStyle} onClick={handleNext} disabled={order.repairs.length === 0}>
-              <FaPlus /> Fortsæt
-            </button>
-          </div>
+        {/* Fast footer med Fortsæt */}
+        <div
+          style={{
+            padding: "0.9rem 1rem",
+            borderTop: "1px solid #e5e7eb",
+            boxShadow: "0 -6px 12px rgba(0,0,0,0.04)",
+            background: "#fff",
+          }}
+        >
+          <button
+            style={{ 
+              backgroundColor: "#2166AC",
+              color: "white",
+              padding: "0.8rem 1rem",
+              borderRadius: "8px",
+              border: "none",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem",
+              width: "100%",
+              justifyContent: "center"
+            }}
+            onClick={handleNext}
+            disabled={order.repairs.length === 0}
+            aria-disabled={order.repairs.length === 0}
+          >
+            <FaPlus /> Fortsæt
+          </button>
         </div>
       </div>
 
