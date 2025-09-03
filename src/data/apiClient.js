@@ -101,7 +101,6 @@ async function httpJson(url, options = {}) {
 export async function proxyFetch({ path, method = "GET", query, body, headers = {} } = {}) {
   if (!path || typeof path !== "string") throw new Error("proxyFetch: 'path' er påkrævet");
 
-  // Sørg for at path er ABSOLUT mod WP (så vi undgår fejl på Vercel-origin)
   const absolutePath = path.startsWith("http")
     ? path
     : `${WP_ORIGIN}${path.startsWith("/") ? "" : "/"}${path.replace(/^\//, "")}`;
@@ -112,21 +111,29 @@ export async function proxyFetch({ path, method = "GET", query, body, headers = 
     destination: "telegiganten-wp",
     data: {
       method,
-      path: finalPath, // absolut URL til WP REST
+      path: finalPath,
       as_json: true,
       body: body ?? null,
       headers: { "Content-Type": "application/json", ...(headers || {}) },
     },
   };
 
+  // --- build same-origin proxy URL with bypass token in QUERY (in addition to header) ---
   const sameOrigin = isSameOrigin(PROXY_URL);
+  let proxyUrl = PROXY_URL;
+  if (sameOrigin && VERCEL_BYPASS_TOKEN && typeof window !== "undefined") {
+    const u = new URL(PROXY_URL, window.location.origin);
+    u.searchParams.set("x-vercel-protection-bypass", VERCEL_BYPASS_TOKEN);
+    proxyUrl = u.toString();
+  }
+
   const baseHeaders = { "Content-Type": "application/json" };
   if (sameOrigin && VERCEL_BYPASS_TOKEN) {
     baseHeaders["x-vercel-protection-bypass"] = VERCEL_BYPASS_TOKEN;
   }
 
-  // 1. forsøg
-  let res = await fetch(PROXY_URL, {
+  // 1st try
+  let res = await fetch(proxyUrl, {
     method: "POST",
     headers: baseHeaders,
     credentials: sameOrigin ? "include" : "omit",
@@ -134,11 +141,10 @@ export async function proxyFetch({ path, method = "GET", query, body, headers = 
     body: JSON.stringify(payload),
   });
 
-  // Hvis Vercel Security Checkpoint blokerer (401/403), så sæt cookie og prøv igen
+  // If blocked, set cookie once and retry
   if ((res.status === 401 || res.status === 403) && sameOrigin && VERCEL_BYPASS_TOKEN) {
-    await ensureVercelBypassCookie();
-
-    res = await fetch(PROXY_URL, {
+    await ensureVercelBypassCookie(); // hits ?x-vercel-set-bypass-cookie=true&x-vercel-protection-bypass=...
+    res = await fetch(proxyUrl, {
       method: "POST",
       headers: baseHeaders,
       credentials: "include",
@@ -150,16 +156,12 @@ export async function proxyFetch({ path, method = "GET", query, body, headers = 
   const contentType = res.headers.get("content-type") || "";
   if (!res.ok) {
     let errText;
-    try {
-      errText = await res.text();
-    } catch {
-      errText = `HTTP ${res.status}`;
-    }
+    try { errText = await res.text(); } catch { errText = `HTTP ${res.status}`; }
     throw new Error(`Proxy fejl: ${res.status} - ${errText}`);
   }
-  if (contentType.includes("application/json")) return res.json();
-  return res.text();
+  return contentType.includes("application/json") ? res.json() : res.text();
 }
+
 
 /* ===== (ALIAS) Named exports til bagudkompatibilitet ===== */
 export async function createModel({ brand, brand_id, model }) {
