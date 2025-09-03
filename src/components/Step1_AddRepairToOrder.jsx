@@ -101,15 +101,13 @@ export default function Step1_AddRepairToOrder({
           name: c.name || "",
           phone: c.phone || "",
           email: c.email || "",
-          // ekstraPhone fjernes senere i modaler/sider – vi lader den være her indtil vi refaktorerer de andre filer
+          // ekstraPhone fjernes senere
           extraPhone: c.extraPhone || "",
         }));
         setCustomers(mapped);
       })
       .catch((err) => console.error("Fejl ved hentning af kunder:", err));
-    return () => {
-      isMounted = false;
-    };
+    return () => { isMounted = false; };
   }, [setCustomers]);
 
   useEffect(() => {
@@ -149,7 +147,6 @@ export default function Step1_AddRepairToOrder({
     padding: "1rem",
     borderRadius: "10px",
     cursor: "pointer",
-    fontWeight: "regular",
     textAlign: "center",
     display: "flex",
     alignItems: "center",
@@ -307,7 +304,7 @@ export default function Step1_AddRepairToOrder({
     setOrder({ ...order, customer: null });
   };
 
-  // NYT: bekræft hvis adgangskode er tom
+  // Bekræft hvis adgangskode er tom
   const handleNext = () => {
     const pwd = (order.password || "").trim();
     if (!pwd) {
@@ -348,7 +345,7 @@ export default function Step1_AddRepairToOrder({
           </div>
 
           <div style={{ flexGrow: 1 }}>
-            <h2 style={{ textTransform: "uppercase", fontWeight: "regular" }}>
+            <h2 style={{ textTransform: "uppercase" }}>
               Vælg enhed og reparation
             </h2>
             <input
@@ -388,159 +385,135 @@ export default function Step1_AddRepairToOrder({
         </div>
       </div>
 
-      {/* Sidebar */}
+      {/* Sidebar – HELE kassen scroller, knappen ligger under Note */}
       <div
         style={{
           width: "400px",
           backgroundColor: "#fff",
           borderLeft: "1px solid #ddd",
-          padding: "0",                    // vi styrer padding i sektioner
-          display: "flex",
-          flexDirection: "column",
+          padding: "2rem 1rem",
           height: "100vh",
           position: "sticky",
           top: 0,
-          overflow: "hidden",
+          overflowY: "auto",   // <— vigtig: hele sidebaren scroller
         }}
       >
-        {/* Scrollbart indhold */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "2rem 1rem 1rem", paddingBottom: 96 }}>
-          {/* Reparationer – kompakt visning */}
-          <OrderSidebarCompact
-            order={order}
-            onEditRepair={onEditRepair}
-            onRemoveRepair={onRemoveRepair}
-          />
+        {/* Reparationer – kompakt visning */}
+        <OrderSidebarCompact
+          order={order}
+          onEditRepair={onEditRepair}
+          onRemoveRepair={onRemoveRepair}
+        />
 
-          {/* Kunde */}
-          <h4
-            style={{
-              textTransform: "uppercase",
-              borderBottom: "1px solid #ddd",
-              marginTop: "2rem",
-              marginBottom: "1rem",
-            }}
-          >
-            Kunde
-          </h4>
-          {order.customer ? (
-            <div style={{ marginBottom: "1rem" }}>
-              <strong>{order.customer.name}</strong>
-              <br />
-              <FaPhone /> {order.customer.phone}
-              <br />
-              <FaEnvelope /> {order.customer.email || "-"}
-              <div style={{ marginTop: "0.5rem", display: "flex", gap: 8 }}>
-                <button
-                  style={{
-                    background: "transparent",
-                    border: "1px solid #d1d5db",
-                    borderRadius: 6,
-                    padding: "6px 10px",
-                    fontSize: 12,
-                    cursor: "pointer",
-                    color: "#1a1a1aff",
-                  }}
-                  onClick={() => setOpenEditCustomer(true)}
-                >
-                  <FaEdit style={{ marginRight: 6 }} />
-                  Rediger
-                </button>
-                <button
-                  style={{
-                    background: "transparent",
-                    border: "1px solid #d1d5db",
-                    borderRadius: 6,
-                    padding: "6px 10px",
-                    fontSize: 12,
-                    cursor: "pointer",
-                    color: "#b91c1c",
-                  }}
-                  onClick={() => setOrder({ ...order, customer: null })}
-                >
-                  Fjern
-                </button>
-              </div>
-            </div>
-          ) : (
-            <>
-              <button style={{ ...buttonStyle, marginTop: 0 }} onClick={() => setOpenCreateCustomer(true)}>
-                <FaUserPlus /> Opret kunde
-              </button>
-              <button style={buttonStyle} onClick={() => setOpenSelectCustomer(true)}>
-                <FaUser /> Vælg kunde
-              </button>
-            </>
-          )}
-
-          {/* Adgangskode, Kontakt & Note */}
-          <h4
-            style={{
-              textTransform: "uppercase",
-              borderBottom: "1px solid #ddd",
-              marginTop: "2rem",
-              marginBottom: "1rem",
-            }}
-          >
-            Adgangskode & Note
-          </h4>
-
-          <label style={{ fontWeight: "regular", fontSize: "0.9rem" }}>
-            <FaLock /> Adgangskode
-          </label>
-          <input
-            type="text"
-            placeholder="Adgangskode"
-            style={inputStyle}
-            value={order.password || ""}
-            onChange={(e) => setOrder({ ...order, password: e.target.value })}
-          />
-
-          <label style={{ fontWeight: "regular", fontSize: "0.9rem", marginTop: "0.5rem" }}>
-            <FaPhone /> Kontakt (alternativt tlf.nr.)
-          </label>
-          <input
-            type="text"
-            placeholder="Kontakt telefonnummer"
-            style={inputStyle}
-            value={order.contact || ""}
-            onChange={(e) => setOrder({ ...order, contact: e.target.value })}
-          />
-
-          <label style={{ fontWeight: "regular", fontSize: "0.9rem", marginTop: "0.5rem" }}>
-            <FaEdit /> Note
-          </label>
-          <textarea
-            placeholder="Skriv en note her..."
-            style={{ ...inputStyle, height: "80px", resize: "vertical" }}
-            value={order.note || ""}
-            onChange={(e) => setOrder({ ...order, note: e.target.value })}
-          />
-        </div>
-
-        {/* Fast footer med Fortsæt */}
-        <div
+        {/* Kunde */}
+        <h4
           style={{
-            padding: "0.9rem 1rem",
-            borderTop: "1px solid #e5e7eb",
-            boxShadow: "0 -6px 12px rgba(0,0,0,0.04)",
-            background: "#fff",
+            textTransform: "uppercase",
+            borderBottom: "1px solid #ddd",
+            marginTop: "2rem",
+            marginBottom: "1rem",
           }}
         >
+          Kunde
+        </h4>
+        {order.customer ? (
+          <div style={{ marginBottom: "1rem" }}>
+            <strong>{order.customer.name}</strong>
+            <br />
+            <FaPhone /> {order.customer.phone}
+            <br />
+            <FaEnvelope /> {order.customer.email || "-"}
+            <div style={{ marginTop: "0.5rem", display: "flex", gap: 8 }}>
+              <button
+                style={{
+                  background: "transparent",
+                  border: "1px solid #d1d5db",
+                  borderRadius: 6,
+                  padding: "6px 10px",
+                  fontSize: 12,
+                  cursor: "pointer",
+                  color: "#1a1a1aff",
+                }}
+                onClick={() => setOpenEditCustomer(true)}
+              >
+                <FaEdit style={{ marginRight: 6 }} />
+                Rediger
+              </button>
+              <button
+                style={{
+                  background: "transparent",
+                  border: "1px solid #d1d5db",
+                  borderRadius: 6,
+                  padding: "6px 10px",
+                  fontSize: 12,
+                  cursor: "pointer",
+                  color: "#b91c1c",
+                }}
+                onClick={() => setOrder({ ...order, customer: null })}
+              >
+                Fjern
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <button style={{ ...buttonStyle, marginTop: 0 }} onClick={() => setOpenCreateCustomer(true)}>
+              <FaUserPlus /> Opret kunde
+            </button>
+            <button style={buttonStyle} onClick={() => setOpenSelectCustomer(true)}>
+              <FaUser /> Vælg kunde
+            </button>
+          </>
+        )}
+
+        {/* Adgangskode, Kontakt & Note */}
+        <h4
+          style={{
+            textTransform: "uppercase",
+            borderBottom: "1px solid #ddd",
+            marginTop: "2rem",
+            marginBottom: "1rem",
+          }}
+        >
+          Adgangskode & Note
+        </h4>
+
+        <label style={{ fontSize: "0.9rem" }}>
+          <FaLock /> Adgangskode
+        </label>
+        <input
+          type="text"
+          placeholder="Adgangskode"
+          style={inputStyle}
+          value={order.password || ""}
+          onChange={(e) => setOrder({ ...order, password: e.target.value })}
+        />
+
+        <label style={{ fontSize: "0.9rem", marginTop: "0.5rem" }}>
+          <FaPhone /> Kontakt (alternativt tlf.nr.)
+        </label>
+        <input
+          type="text"
+          placeholder="Kontakt telefonnummer"
+          style={inputStyle}
+          value={order.contact || ""}
+          onChange={(e) => setOrder({ ...order, contact: e.target.value })}
+        />
+
+        <label style={{ fontSize: "0.9rem", marginTop: "0.5rem" }}>
+          <FaEdit /> Note
+        </label>
+        <textarea
+          placeholder="Skriv en note her..."
+          style={{ ...inputStyle, height: "80px", resize: "vertical" }}
+          value={order.note || ""}
+          onChange={(e) => setOrder({ ...order, note: e.target.value })}
+        />
+
+        {/* Fortsæt – lige under note, del af scrollen */}
+        <div style={{ paddingTop: "1rem" }}>
           <button
-            style={{ 
-              backgroundColor: "#2166AC",
-              color: "white",
-              padding: "0.8rem 1rem",
-              borderRadius: "8px",
-              border: "none",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: "0.5rem",
-              width: "100%",
-              justifyContent: "center"
-            }}
+            style={buttonStyle}
             onClick={handleNext}
             disabled={order.repairs.length === 0}
             aria-disabled={order.repairs.length === 0}
