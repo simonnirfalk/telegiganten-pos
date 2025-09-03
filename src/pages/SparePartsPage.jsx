@@ -1,14 +1,14 @@
 // src/pages/SparePartsPage.jsx
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
 import { FaUndo, FaTrash, FaPlus, FaHistory, FaHome } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 
 /** URLs:
- *  - LIST (WP endpoint): /wp-json/telegiganten/v1/spareparts
- *  - EXEC (GAS):         https://script.google.com/.../exec
+ *  - LIST (WP endpoint med cache/pagination): /wp-json/telegiganten/v1/spareparts
+ *  - EXEC (GAS – create/update/delete):       https://script.google.com/.../exec
  */
-const LIST_URL = import.meta.env.VITE_GAS_URL;   // fx "/wp-json/telegiganten/v1/spareparts"
-const EXEC_URL = import.meta.env.VITE_GAS_EXEC;  // din fulde GAS EXEC-URL
+const LIST_URL = import.meta.env.VITE_SPAREPARTS_LIST;  // <-- BRUG WP-ENDPOINT HER
+const EXEC_URL = import.meta.env.VITE_GAS_EXEC;         // <-- GAS EXEC (uændret)
 
 /** Felter vi viser/redigerer (matcher Code.gs -> _apiList kortnøgler) */
 const FIELDS = ["model", "price", "stock", "location", "category", "cost_price", "repair"];
@@ -25,37 +25,12 @@ const TO_SHEET_HEADER = {
   repair: "Reparation",
 };
 
-/* -------------------- UI styles (matcher EditRepairsPage) -------------------- */
+/* -------------------- UI styles -------------------- */
 const BLUE = "#2166AC";
-const btnPrimary = {
-  backgroundColor: BLUE,
-  color: "white",
-  padding: "10px 16px",
-  border: "none",
-  borderRadius: "6px",
-  cursor: "pointer",
-};
-const btnGhost = {
-  background: "white",
-  color: BLUE,
-  border: `1px solid ${BLUE}33`,
-  padding: "8px 12px",
-  borderRadius: "6px",
-  cursor: "pointer",
-};
-const btnDanger = {
-  backgroundColor: "#cc0000",
-  color: "white",
-  padding: "6px 10px",
-  border: "none",
-  borderRadius: "6px",
-  cursor: "pointer",
-};
-const inputStyle = {
-  padding: "8px",
-  borderRadius: "6px",
-  border: "1px solid #ccc",
-};
+const btnPrimary = { backgroundColor: BLUE, color: "white", padding: "10px 16px", border: "none", borderRadius: 6, cursor: "pointer" };
+const btnGhost   = { background: "white", color: BLUE, border: `1px solid ${BLUE}33`, padding: "8px 12px", borderRadius: 6, cursor: "pointer" };
+const btnDanger  = { backgroundColor: "#cc0000", color: "white", padding: "6px 10px", border: "none", borderRadius: 6, cursor: "pointer" };
+const inputStyle = { padding: 8, borderRadius: 6, border: "1px solid #ccc" };
 const chip = { fontSize: 12, color: "#64748b" };
 
 /* -------------------- små helpers -------------------- */
@@ -134,15 +109,9 @@ async function httpPost(body) {
 }
 
 /* -------------------- API wrapper -------------------- */
-async function apiList(
-  { offset = 0, limit = 200, search = "", lokation = "" } = {},
-  signal
-) {
+async function apiList({ offset = 0, limit = 200, search = "", lokation = "" } = {}, signal) {
   // WP endpoint forventer kun disse 4 parametre
-  return httpGet(
-    { offset: String(offset), limit: String(limit), search, lokation },
-    signal
-  );
+  return httpGet({ offset: String(offset), limit: String(limit), search, lokation }, signal);
 }
 async function apiCreate(rowShort) {
   const rowHeaders = {};
@@ -154,15 +123,15 @@ async function apiCreate(rowShort) {
   return httpPost({ action: "create", row: rowHeaders });
 }
 async function apiUpdate(id, patchShort, expectedUpdatedAt) {
-  return httpPost({
-    action: "update",
-    id,
-    patch: patchShort,
-    expectedUpdatedAt: expectedUpdatedAt || null,
-  });
+  return httpPost({ action: "update", id, patch: patchShort, expectedUpdatedAt: expectedUpdatedAt || null });
 }
 async function apiDelete(id) {
   return httpPost({ action: "delete", id });
+}
+
+/* -------------------- Simple page cache (hurtigere tilbage/videre) -------------------- */
+function makeKey({ query, limit, page }) {
+  return `${query}::${limit}::${page}`;
 }
 
 /* -------------------- Komponent -------------------- */
@@ -178,10 +147,16 @@ export default function SparePartsPage() {
   const [problem, setProblem] = useState(null);
 
   // adaptiv paging
-  const LIMITS = [200, 100, 50, 25];          // stigende "aggressiv"
-  const [pageSize, setPageSize] = useState(50); // start konservativt
+  const LIMITS = [200, 100, 50, 25];
+  const [pageSize, setPageSize] = useState(100); // start lidt højere; falder ned hvis serveren fejler
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [unknownTotal, setUnknownTotal] = useState(false); // hvis backend ikke sender total
+
+  const totalPages = useMemo(() => {
+    if (unknownTotal) return page + (parts.length >= pageSize ? 1 : 0); // grov estimering for UI
+    return Math.max(1, Math.ceil(total / pageSize));
+  }, [unknownTotal, total, pageSize, page, parts.length]);
 
   const [activeQuery, setActiveQuery] = useState("");
 
@@ -189,16 +164,28 @@ export default function SparePartsPage() {
   const listAbortRef = useRef(null);
   const listReqIdRef = useRef(0);
 
-  const [newPart, setNewPart] = useState(
-    FIELDS.reduce((acc, k) => ((acc[k] = ""), acc), {})
-  );
+  // simpel in-memory cache
+  const pageCacheRef = useRef(new Map()); // key -> { items, total, ts }
+
+  const [newPart, setNewPart] = useState(FIELDS.reduce((acc, k) => ((acc[k] = ""), acc), {}));
 
   const navigate = useNavigate();
   const debounceRow = useRowDebouncers();
   const enqueue = useUpdateQueue();
 
-  /** Hent side (med stale guards + adaptiv fallback) */
+  /** Hent side (med stale guards + adaptiv fallback + cache) */
   const fetchPage = async ({ pageArg = page, query = activeQuery } = {}) => {
+    // 1) prøv cache først
+    const cached = pageCacheRef.current.get(makeKey({ query, limit: pageSize, page: pageArg }));
+    if (cached) {
+      setParts(cached.items);
+      setTotal(cached.total ?? 0);
+      setUnknownTotal(cached.total == null);
+      setActiveQuery(query);
+      setProblem(null);
+      return;
+    }
+
     if (listAbortRef.current) listAbortRef.current.abort();
     const controller = new AbortController();
     listAbortRef.current = controller;
@@ -208,38 +195,42 @@ export default function SparePartsPage() {
     setLoading(true);
     setProblem(null);
 
-    // forsøg med nuværende limit, og ved 500/502 prøv lavere
+    // forsøg med nuværende limit, og ved 500/502/504 prøv lavere
     const currentIdx = Math.max(0, LIMITS.indexOf(pageSize));
     const tryLimits = [pageSize, ...LIMITS.slice(currentIdx + 1)];
 
     for (const lim of tryLimits) {
       try {
         const offset = (pageArg - 1) * lim;
-        const data = await apiList(
-          { offset, limit: lim, search: query, lokation: "" },
-          controller.signal
-        );
+        const data = await apiList({ offset, limit: lim, search: query, lokation: "" }, controller.signal);
         if (myId !== listReqIdRef.current) return;
 
         const items = data?.items || [];
+        const srvTotal = typeof data?.total === "number" ? data.total : null;
+
         setParts(items);
-        setTotal(Number(data?.total || 0));
+        setTotal(srvTotal ?? 0);
+        setUnknownTotal(srvTotal == null);
         setActiveQuery(query);
 
-        // hvis vi lykkes med en lavere limit end før, fasthold den fremadrettet
+        // hold den brugte limit hvis den lykkedes
         if (lim !== pageSize) setPageSize(lim);
+
+        // cache
+        pageCacheRef.current.set(makeKey({ query, limit: lim, page: pageArg }), { items, total: srvTotal, ts: Date.now() });
+
+        setLoading(false);
         return; // success
       } catch (e) {
         if (e.name === "AbortError") return;
         const s = e.status || 0;
         const serverErr = s === 500 || s === 502 || s === 504;
-        // hvis ikke serverfejl eller vi er nået sidste limit, så vis problemet
         const isLastAttempt = lim === tryLimits[tryLimits.length - 1];
         if (!serverErr || isLastAttempt) {
           setProblem(e.message || "Kunne ikke hente data");
           break;
         }
-        // ellers loop videre og prøv med mindre limit
+        // ellers prøv næste lavere limit
       }
     }
 
@@ -248,13 +239,16 @@ export default function SparePartsPage() {
 
   // Første load
   useEffect(() => {
+    setPage(1);
+    pageCacheRef.current.clear();
     fetchPage({ pageArg: 1, query: "" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Debounced søgning -> side 1
+  // Debounced søgning -> side 1 (ryd cache)
   useEffect(() => {
     setPage(1);
+    pageCacheRef.current.clear();
     fetchPage({ pageArg: 1, query: debouncedSearch });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedSearch]);
@@ -269,15 +263,14 @@ export default function SparePartsPage() {
   const saveChange = (id, field, value) => {
     if (id == null) {
       alert("Denne række mangler ID – opdaterer visningen.");
+      pageCacheRef.current.clear();
       fetchPage({ pageArg: page, query: activeQuery });
       return;
     }
     const prevRow = parts.find((p) => p.id === id);
     const old = prevRow ? prevRow[field] : undefined;
 
-    setParts((prev) =>
-      prev.map((p) => (p.id != null && p.id === id ? { ...p, [field]: value } : p))
-    );
+    setParts((prev) => prev.map((p) => (p.id != null && p.id === id ? { ...p, [field]: value } : p)));
     setHistory((prev) => [{ id, field, old, newVal: value }, ...prev.slice(0, 9)]);
 
     const debKey = `${id}:${field}`;
@@ -288,15 +281,16 @@ export default function SparePartsPage() {
           try {
             const current = parts.find((p) => p.id === id) || {};
             await apiUpdate(id, { [field]: value }, current.updatedAt);
+            // invalider cache for den aktuelle side og refetch
+            pageCacheRef.current.delete(makeKey({ query: activeQuery, limit: pageSize, page }));
             await fetchPage({ pageArg: page, query: activeQuery });
           } catch (e) {
             if (e.status === 409) {
+              pageCacheRef.current.clear();
               await fetchPage({ pageArg: page, query: activeQuery });
               alert("Rækken blev ændret et andet sted. Se opdaterede værdier og prøv igen.");
             } else {
-              setParts((prev) =>
-                prev.map((p) => (p.id != null && p.id === id ? { ...p, [field]: old } : p))
-              );
+              setParts((prev) => prev.map((p) => (p.id != null && p.id === id ? { ...p, [field]: old } : p)));
               alert(e.message || "Fejl ved opdatering");
             }
           }
@@ -320,6 +314,7 @@ export default function SparePartsPage() {
         await apiCreate(newPart);
       });
       setNewPart(FIELDS.reduce((acc, k) => ((acc[k] = ""), acc), {}));
+      pageCacheRef.current.clear();
       await fetchPage({ pageArg: 1, query: activeQuery });
       setPage(1);
     } catch (e) {
@@ -334,6 +329,7 @@ export default function SparePartsPage() {
       await enqueue(async () => {
         await apiDelete(id);
       });
+      pageCacheRef.current.clear();
       const newTotal = Math.max(0, total - 1);
       const maxPage = Math.max(1, Math.ceil(newTotal / pageSize));
       const nextPage = Math.min(page, maxPage);
@@ -344,11 +340,16 @@ export default function SparePartsPage() {
     }
   };
 
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  // hjælpetekst for totals
+  const totalInfo = unknownTotal ? (
+    <span>Viser {parts.length} rækker (ukendt total)</span>
+  ) : (
+    <span>Viser {parts.length} af {total} match</span>
+  );
 
   return (
     <div style={{ padding: "2rem" }}>
-      {/* Top-knap (samme som EditRepairsPage) */}
+      {/* Top-knap */}
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1.5rem" }}>
         <button onClick={() => navigate("/")} style={btnPrimary}>
           <FaHome style={{ marginRight: 6 }} /> Dashboard
@@ -359,7 +360,7 @@ export default function SparePartsPage() {
         Reservedele
       </h2>
 
-      {/* Sticky værktøjsbar (matcher EditRepairsPage) */}
+      {/* Sticky værktøjsbar */}
       <div
         style={{
           position: "sticky",
@@ -393,7 +394,16 @@ export default function SparePartsPage() {
           title="Server-side søgning (hele arket)"
         />
 
-        <div style={{ marginLeft: "auto", display: "flex", gap: 12 }}>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 12, alignItems: "center" }}>
+          <label style={{ fontSize: 12, color: "#334155" }}>pr. side:</label>
+          <select
+            value={pageSize}
+            onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); pageCacheRef.current.clear(); fetchPage({ pageArg: 1, query: activeQuery }); }}
+            style={{ ...inputStyle, padding: "6px 8px" }}
+          >
+            {[25,50,100,200].map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+
           <button
             onClick={() => setEditingIndex(editingIndex === -1 ? null : -1)}
             style={btnPrimary}
@@ -413,7 +423,7 @@ export default function SparePartsPage() {
           <span style={{ color: "#cc0000" }}>{problem}</span>
         ) : (
           <>
-            <span>Viser {parts.length} af {total} match</span>
+            {totalInfo}
             <span> · Side {page} af {totalPages}</span>
             {activeQuery && <span style={chip}> · Søg: “{activeQuery}”</span>}
             <span style={chip}> · pr. side: {pageSize}</span>
@@ -505,7 +515,7 @@ export default function SparePartsPage() {
         </table>
       </div>
 
-      {/* Pagination controls (samme look & feel) */}
+      {/* Pagination controls */}
       <div
         style={{
           display: "flex",
@@ -531,14 +541,16 @@ export default function SparePartsPage() {
 
         <span style={{ fontSize: "0.95rem" }}>
           Side {page} af {totalPages}{" "}
-          <span style={chip}>({total} rækker)</span>
+          {!unknownTotal && <span style={chip}>({total} rækker)</span>}
         </span>
 
         <button
-          onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-          disabled={page >= totalPages || loading}
+          onClick={() => setPage((p) => p + 1)}
+          disabled={( !unknownTotal && page >= totalPages ) || loading || (unknownTotal && parts.length < pageSize)}
           style={{
-            ...(page >= totalPages || loading ? { backgroundColor: "#ccc", cursor: "not-allowed" } : { backgroundColor: BLUE, cursor: "pointer" }),
+            ...( (!unknownTotal && page >= totalPages) || loading || (unknownTotal && parts.length < pageSize)
+              ? { backgroundColor: "#ccc", cursor: "not-allowed" }
+              : { backgroundColor: BLUE, cursor: "pointer" } ),
             color: "white",
             padding: "6px 14px",
             borderRadius: "6px",

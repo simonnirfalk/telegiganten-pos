@@ -56,7 +56,7 @@ export default function NewRepair() {
 
   const handleFinish = () => {
     console.log("Reparation oprettet:", order);
-    alert("Reparation oprettet!<br>فلسطين حرة");
+    alert("Reparation oprettet! فلسطين حرة");
     setStep(1);
     setOrder({
       repairs: [],
