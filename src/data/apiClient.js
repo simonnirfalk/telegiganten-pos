@@ -1,52 +1,30 @@
 // src/data/apiClient.js
 
-// ===== Konfiguration (Vercel-friendly) =====
+// ===== Konfiguration =====
 const WP_ORIGIN =
-  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_WP_ORIGIN) ||
+  (typeof import.meta !== "undefined" && import.meta.env?.VITE_WP_ORIGIN) ||
   "https://telegiganten.dk";
 
+// Vercel-proxyet ligger på samme origin som appen; brug RELATIV sti
 const PROXY_URL =
-  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_PROXY_URL) ||
-  `${WP_ORIGIN}/wp-json/tg/v1/proxy`;
+  (typeof import.meta !== "undefined" && import.meta.env?.VITE_PROXY_URL) ||
+  "/wp-json/tg/v1/proxy";
 
 const WP_API_BASE =
-  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_API_BASE) ||
+  (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE) ||
   `${WP_ORIGIN}/wp-json/telegiganten/v1`;
 
-const GAS_BASE_URL_ENV =
-  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_GAS_URL) ||
+// Valgfrit: bypass-token hvis Deployment Protection er slået til
+const VERCEL_BYPASS =
+  (typeof import.meta !== "undefined" && import.meta.env?.VITE_VERCEL_BYPASS_TOKEN) ||
+  (typeof window !== "undefined" && window.__VERCEL_BYPASS) ||
   "";
 
-// Vercel Security Checkpoint bypass token (læses fra Vite env eller window)
-const VERCEL_BYPASS_TOKEN =
-  (typeof import.meta !== "undefined" &&
-    import.meta.env &&
-    import.meta.env.VITE_VERCEL_BYPASS_TOKEN) ||
-  (typeof window !== "undefined" && window.__VERCEL_BYPASS_TOKEN) ||
-  "";
-
-/* ================================
- * Hjælpere
- * ================================ */
-
-/** Er en URL (string) same-origin ift. den kørende app? */
-function isSameOrigin(url) {
-  if (typeof window === "undefined") return false;
-  if (!url) return false;
-  if (url.startsWith("/")) return true;
-  try {
-    const u = new URL(url, window.location.href);
-    return u.origin === window.location.origin;
-  } catch {
-    return false;
-  }
-}
-
-/** Bygger en URL-sti med query params. */
+// ================================
+// Hjælpere
+// ================================
 function withQuery(path, query) {
-  if (!query || typeof query !== "object" || Object.keys(query).length === 0) {
-    return path;
-  }
+  if (!query || typeof query !== "object" || Object.keys(query).length === 0) return path;
   const usp = new URLSearchParams();
   for (const [k, v] of Object.entries(query)) {
     if (v === undefined || v === null) continue;
@@ -56,112 +34,85 @@ function withQuery(path, query) {
   return `${path}${sep}${usp.toString()}`;
 }
 
-/** Sæt Vercel bypass-cookie, hvis muligt. */
-async function ensureVercelBypassCookie() {
-  if (typeof window === "undefined") return false;
-  if (!VERCEL_BYPASS_TOKEN) return false;
+// Gør alle paths WP-relative. Afvis fremmede origins.
+function toWpRelative(p) {
+  if (!p) throw new Error("toWpRelative: path mangler");
+  if (/^https?:\/\//i.test(p)) {
+    const u = new URL(p);
+    if (u.origin !== WP_ORIGIN) {
+      throw new Error(`Ekstern URL er ikke tilladt af WP-proxy: ${u.origin}`);
+    }
+    // behold eventuel query i path’en
+    return u.pathname + (u.search || "");
+  }
+  return p.startsWith("/") ? p : `/${p}`;
+}
 
+// Tilføj bypass-token som query (også header – nogle beskyttere kræver begge dele)
+function withBypass(url) {
+  if (!VERCEL_BYPASS) return url;
   try {
-    const u = new URL(window.location.href);
-    u.searchParams.set("x-vercel-set-bypass-cookie", "true");
-    u.searchParams.set("x-vercel-protection-bypass", VERCEL_BYPASS_TOKEN);
-    // Same-origin: send cookies med så Vercel kan sætte den nye.
-    await fetch(u.toString(), { credentials: "include" });
-    return true;
-  } catch (err) {
-    console.warn("[vercel-bypass] Kunne ikke sætte cookie:", err);
-    return false;
+    const u = new URL(url, typeof window !== "undefined" ? window.location.origin : "https://x");
+    u.searchParams.set("x-vercel-protection-bypass", VERCEL_BYPASS);
+    return u.toString();
+  } catch {
+    return url;
   }
 }
 
-/** Simpel fetch der forventer JSON (bruges til eksterne endpoints – f.eks. GAS). */
+// Simpel fetch til eksterne endpoints (GAS m.m.)
 async function httpJson(url, options = {}) {
   const res = await fetch(url, {
-    credentials: "omit", // eksternt
+    credentials: "omit",
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
     ...options,
   });
   const ct = res.headers.get("content-type") || "";
   const payload = ct.includes("application/json") ? await res.json() : await res.text();
-  if (!res.ok) {
-    throw new Error(
-      `HTTP ${res.status} - ${typeof payload === "string" ? payload : JSON.stringify(payload)}`
-    );
-  }
+  if (!res.ok) throw new Error(`HTTP ${res.status} - ${typeof payload === "string" ? payload : JSON.stringify(payload)}`);
   return payload;
 }
 
 /**
- * Sender en request gennem WP-proxyen (til WordPress på telegiganten.dk).
- *  - path: mål-endpoint (fx "/wp-json/telegiganten/v1/customers")
- *  - method: GET/POST/PATCH/DELETE
- *  - query: object med query params
- *  - body: JSON-serialiseres
+ * Sender en request gennem WP-proxyen.
+ * - path: fx "/wp-json/telegiganten/v1/customers" (kan være absolut til WP_ORIGIN – konverteres)
  */
 export async function proxyFetch({ path, method = "GET", query, body, headers = {} } = {}) {
   if (!path || typeof path !== "string") throw new Error("proxyFetch: 'path' er påkrævet");
 
-  const absolutePath = path.startsWith("http")
-    ? path
-    : `${WP_ORIGIN}${path.startsWith("/") ? "" : "/"}${path.replace(/^\//, "")}`;
-
-  const finalPath = withQuery(absolutePath, query);
+  // *** VIGTIGT: Gør path WP-relative, ellers svarer plugin’et med 400 bad_target
+  const relPath = toWpRelative(path);
+  const finalPath = withQuery(relPath, query);
 
   const payload = {
     destination: "telegiganten-wp",
     data: {
       method,
-      path: finalPath,
+      path: finalPath,          // <-- RELATIV sti, ikke absolut origin
       as_json: true,
       body: body ?? null,
       headers: { "Content-Type": "application/json", ...(headers || {}) },
     },
   };
 
-  // --- build same-origin proxy URL with bypass token in QUERY (in addition to header) ---
-  const sameOrigin = isSameOrigin(PROXY_URL);
-  let proxyUrl = PROXY_URL;
-  if (sameOrigin && VERCEL_BYPASS_TOKEN && typeof window !== "undefined") {
-    const u = new URL(PROXY_URL, window.location.origin);
-    u.searchParams.set("x-vercel-protection-bypass", VERCEL_BYPASS_TOKEN);
-    proxyUrl = u.toString();
-  }
-
-  const baseHeaders = { "Content-Type": "application/json" };
-  if (sameOrigin && VERCEL_BYPASS_TOKEN) {
-    baseHeaders["x-vercel-protection-bypass"] = VERCEL_BYPASS_TOKEN;
-  }
-
-  // 1st try
-  let res = await fetch(proxyUrl, {
+  const res = await fetch(withBypass(PROXY_URL), {
     method: "POST",
-    headers: baseHeaders,
-    credentials: sameOrigin ? "include" : "omit",
-    cache: "no-store",
+    credentials: "omit",
+    headers: {
+      "Content-Type": "application/json",
+      ...(VERCEL_BYPASS ? { "x-vercel-protection-bypass": VERCEL_BYPASS } : {}),
+    },
     body: JSON.stringify(payload),
   });
 
-  // If blocked, set cookie once and retry
-  if ((res.status === 401 || res.status === 403) && sameOrigin && VERCEL_BYPASS_TOKEN) {
-    await ensureVercelBypassCookie(); // hits ?x-vercel-set-bypass-cookie=true&x-vercel-protection-bypass=...
-    res = await fetch(proxyUrl, {
-      method: "POST",
-      headers: baseHeaders,
-      credentials: "include",
-      cache: "no-store",
-      body: JSON.stringify(payload),
-    });
-  }
-
-  const contentType = res.headers.get("content-type") || "";
+  const ct = res.headers.get("content-type") || "";
   if (!res.ok) {
     let errText;
     try { errText = await res.text(); } catch { errText = `HTTP ${res.status}`; }
     throw new Error(`Proxy fejl: ${res.status} - ${errText}`);
   }
-  return contentType.includes("application/json") ? res.json() : res.text();
+  return ct.includes("application/json") ? res.json() : res.text();
 }
-
 
 /* ===== (ALIAS) Named exports til bagudkompatibilitet ===== */
 export async function createModel({ brand, brand_id, model }) {
