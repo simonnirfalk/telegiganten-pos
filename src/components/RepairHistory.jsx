@@ -239,19 +239,17 @@ export default function RepairHistory({ repair, onClose, onSave }) {
     }
   };
 
-  const handlePrintSlip = () => {
-    // tag evt. nyligt redigerede værdier med i slippen
-    const merged = { ...repair, ...edited };
-    const order = buildPrintOrderFromRepair(merged);
+const handlePrintSlip = () => {
+  // tag evt. nyligt redigerede værdier med i slippen
+  const merged = { ...repair, ...edited };
+  const order = buildPrintOrderFromRepair(merged);
 
-    try { localStorage.setItem("tg_last_order", JSON.stringify(order)); } catch {}
+  try { localStorage.setItem("tg_last_order", JSON.stringify(order)); } catch {}
 
-    const path = `/print-slip/${order.id || ""}`;
-    // Åbn i ny fane for at bevare modalen åbent
-    window.open(path, "_blank", "noopener,noreferrer");
-    // Alternativt: navigér i samme fane:
-    // navigate(path, { state: { order } });
-  };
+  const path = `/print-slip/${order.id || ""}`;
+  // Navigér i samme fane (ingen 404, fordi SPA-router håndterer ruten)
+  navigate(path, { state: { order } });
+};
 
   // SMS UI state
   const [smsOpen, setSmsOpen] = useState(false);
