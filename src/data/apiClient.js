@@ -494,15 +494,18 @@ export const api = {
 
   // Eneste officielle: henter fortløbende id fra WP og returnerer tallet
   getNextOrderId: async () => {
+    // Nyt atomart endpoint (returnerer { id })
     const res = await proxyFetch({
-      path: "/wp-json/telegiganten/v1/next-order-id",
-      method: "GET",
+      path: "/wp-json/telegiganten/v1/order-id/reserve",
+      method: "POST",
+      body: {}, // body må gerne være tom
     });
-    if (!res || typeof res.next_id === "undefined") {
-      throw new Error("Ugyldigt svar fra next-order-id");
+    if (!res || typeof res.id === "undefined") {
+      throw new Error("Ugyldigt svar fra order-id/reserve");
     }
-    return res.next_id;
+    return res.id;
   },
+
 
   /* ---------------------- Spareparts (dual-source) ---------------------- */
   getSpareParts: (params = {}) => {
