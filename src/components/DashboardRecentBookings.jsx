@@ -5,6 +5,18 @@ import { fetchBookings } from "../data/apiClient";
 
 const cap = (s = "", n = 80) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
+function isCancelledStatus(s) {
+  const t = String(s || "").toLowerCase().trim();
+  return (
+    t === "booking_canceled" ||
+    t === "booking_cancelled" ||
+    t === "canceled" ||
+    t === "cancelled" ||
+    t.includes("annull") ||
+    t.includes("cancel")
+  );
+}
+
 function getView(item) {
   const customer_name  = item.customer_name  ?? item?.customer?.name  ?? "";
   const customer_email = item.customer_email ?? item?.customer?.email ?? "";
@@ -73,15 +85,18 @@ export default function DashboardRecentBookings() {
         const raw = Array.isArray(res) ? res : (res?.items ?? []);
         const views = raw.map(getView);
 
+        // filtrér annullerede væk
+        const active = views.filter((v) => !isCancelledStatus(v.status));
+
         // sortér efter dato+tid nyeste først (fallback: id)
-        views.sort((a, b) => {
+        active.sort((a, b) => {
           const ta = new Date(`${a.date} ${a.time}`.trim()).getTime() || 0;
           const tb = new Date(`${b.date} ${b.time}`.trim()).getTime() || 0;
           if (tb !== ta) return tb - ta;
           return (b.id || 0) - (a.id || 0);
         });
 
-        if (!cancel) setItems(views.slice(0, 6)); // Simon har ændret til 6 seneste
+        if (!cancel) setItems(active.slice(0, 6)); // 6 seneste, uden annullerede
       } finally {
         if (!cancel) setLoading(false);
       }
@@ -138,7 +153,7 @@ export default function DashboardRecentBookings() {
           </div>
           <div style={{ color: "#374151" }}>{b.customer_name || "Uden navn"}</div>
           <div style={{ color: "#6b7280", fontSize: 13, marginTop: 2 }}>
-            { [b.customer_phone, b.customer_email].filter(Boolean).join(" · ") || "—" }
+            {[b.customer_phone, b.customer_email].filter(Boolean).join(" · ") || "—"}
           </div>
           <div style={{ marginTop: 8 }}>{statusPill(b.status)}</div>
           <div style={{ color: "#6b7280", fontSize: 13, marginTop: 8 }}>

@@ -5,6 +5,19 @@ import DashboardRecentBookings from "../components/DashboardRecentBookings"; // 
 import { useNavigate } from "react-router-dom";
 import { api } from "../data/apiClient";
 
+// ---------------- Helpers ----------------
+function isCancelledStatus(s) {
+  const t = String(s || "").toLowerCase().trim();
+  // dækker både dk/en varianter og “annulleret …”
+  return (
+    t === "annulleret" ||
+    t === "canceled" ||
+    t === "cancelled" ||
+    t.includes("annull") ||  // fx "annulleret af kunde"
+    t.includes("cancel")
+  );
+}
+
 // ---------------- Styles ----------------
 const navBoxStyle = {
   backgroundColor: "white",
@@ -66,7 +79,7 @@ function statusColor(status) {
   if (s === "under reparation") return "#2166AC";        // blå
   if (s === "klar til afhentning") return "#f59e0b";     // orange
   if (s === "afsluttet") return "#1f9d55";               // grøn
-  if (s === "annulleret") return "#861212ff"
+  if (s === "annulleret") return "#861212ff";
   return "#6b7280"; // fallback grå
 }
 
@@ -116,9 +129,11 @@ export default function Dashboard() {
     return () => { cancelled = true; };
   }, []);
 
-  // Nyeste først, top 6 med robust sortering (updated_at > created_at > date > createdAt)
+  // Nyeste først, top 6 – filtrér annullerede fra
   const latestRepairs = useMemo(() => {
-    const list = Array.isArray(repairs) ? repairs.slice() : [];
+    const list = (Array.isArray(repairs) ? repairs : []).filter(
+      (r) => !isCancelledStatus(r?.status)
+    );
     list.sort((a, b) => {
       const ta = new Date(a?.updated_at || a?.created_at || a?.date || a?.createdAt || 0).getTime();
       const tb = new Date(b?.updated_at || b?.created_at || b?.date || b?.createdAt || 0).getTime();
@@ -131,7 +146,6 @@ export default function Dashboard() {
   const hasData = latestRepairs.length > 0;
 
   const openRepair = (repair) => {
-    // Navigér til RepairsPage og send posten med, så den kan åbne direkte
     navigate("/repairs", { state: { openRepair: repair } });
   };
 
@@ -247,17 +261,13 @@ export default function Dashboard() {
                   onMouseEnter={(e) => cardHover(e, true)}
                   onMouseLeave={(e) => cardHover(e, false)}
                 >
-                  {/* Model + reparation */}
                   <p style={{ margin: 0, fontWeight: "bold" }}>
                     {model}{repairTitle ? ` — ${repairTitle}` : ""}
                   </p>
-                  {/* Kunde */}
                   <p style={{ margin: 0, color: "#333" }}>{customer}</p>
-                  {/* Status badge */}
                   <span style={{ ...badgeBase, backgroundColor: statusColor(status) }}>
                     {String(status)}
                   </span>
-                  {/* Dato + tid og pris */}
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
                     <p style={{ fontSize: "0.8rem", color: "#999", margin: 0 }}>
                       {formatDkDateTime(createdAt)}
