@@ -93,7 +93,7 @@ export default function RepairSlipPrint() {
       ${(order.repairs || []).map((r) => `
         <div class="repairItem">
           <div class="repRow1">${r.device || ""} — ${r.repair || ""}</div>
-          <div class="repRow2">Pris: ${Number(r.price||0)} kr · Tid: ${Number(r.time||0)} min</div>
+          <div class="repRow2">Pris: ${Number(r.price||0)} kr · Forventet tid: ${Number(r.time||0)} min</div>
         </div>
       `).join("")}
 
