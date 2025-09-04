@@ -138,7 +138,6 @@ export default function RepairSlipPrint() {
       `).join("")}
 
       <div class="hr"></div>
-      <div class="totalLine"><span>Total</span><span>${total} kr</span></div>
       <div class="paymentLine">Betaling: ${paymentText}</div>
       <div class="hr"></div>
 

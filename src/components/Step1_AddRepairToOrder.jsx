@@ -9,12 +9,22 @@ import EditCustomerModal from "../components/EditCustomerModal";
 import OrderSidebarCompact from "../components/OrderSidebarCompact";
 import { useRepairContext } from "../context/RepairContext";
 import { api } from "../data/apiClient";
+import { getNextOrderId } from "../data/orderId";
 
-function generateOrderId() {
-  const last = Number(localStorage.getItem("lastOrderId") || 0) + 1;
-  localStorage.setItem("lastOrderId", last);
-  return `40${String(last).padStart(3, "0")}`;
-}
+useEffect(() => {
+  async function initOrderId() {
+    if (!order?.orderId) {
+      try {
+        const id = await getNextOrderId();
+        setOrder((prev) => ({ ...prev, orderId: id }));
+      } catch (err) {
+        console.error("Kunne ikke hente næste order_id", err);
+      }
+    }
+  }
+  initOrderId();
+}, []);
+
 
 /* ----------------- Søgehelpers (fleksibel match) ----------------- */
 function norm(str = "") {

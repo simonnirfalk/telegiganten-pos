@@ -65,7 +65,7 @@ function buildPrintOrderFromRepair(r) {
       id: r.customer_id || 0,
       name: r.customer || "",
       phone: r.phone || "",
-      email: r.contact?.includes("@") ? r.contact : "", // bedste bud
+      email: r.contact?.includes("@") ? r.contact : "",
     },
     repairs: [
       {
