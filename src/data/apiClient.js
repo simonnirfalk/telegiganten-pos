@@ -462,6 +462,12 @@ export const api = {
       query: { model_id: modelId },
     }),
 
+  getNextOrderId: () =>
+    proxyFetch({
+      path: "/wp-json/telegiganten/v1/next-order-id",
+      method: "GET",
+  }),
+
   getTopModels: () => proxyFetch({ path: "/wp-json/telegiganten/v1/top-models" }),
 
   getAllRepairs: () => proxyFetch({ path: "/wp-json/telegiganten/v1/all-repairs" }),
@@ -505,6 +511,18 @@ export const api = {
 
   updateRepairWithHistory: (data) =>
     proxyFetch({ path: "/wp-json/telegiganten/v1/update-repair-with-history", method: "POST", body: data }),
+
+  // 👇 NY: Hent næste fortløbende ordre-id via WP-endpointet og returnér tallet
+  getNextOrderId: async () => {
+    const res = await proxyFetch({
+      path: "/wp-json/telegiganten/v1/next-order-id",
+      method: "GET",
+    });
+    if (!res || typeof res.next_id === "undefined") {
+      throw new Error("Ugyldigt svar fra next-order-id");
+    }
+    return res.next_id;
+  },
 
   /* ---------------------- Spareparts (dual-source) ---------------------- */
   getSpareParts: (params = {}) => {
@@ -565,3 +583,4 @@ export const api = {
       body: { to, body, repair_id },
     }),
 };
+
