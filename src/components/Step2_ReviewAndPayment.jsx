@@ -1,5 +1,5 @@
 // src/components/Step2_ReviewAndPayment.jsx
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaHome, FaPhone, FaEnvelope, FaLock, FaStickyNote } from "react-icons/fa";
 import { api } from "../data/apiClient";
@@ -7,289 +7,349 @@ import { api } from "../data/apiClient";
 export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrder }) {
   const navigate = useNavigate();
 
-  // Betaling
   const [paymentType, setPaymentType] = useState(order.paymentType || "efter"); // "efter" | "betalt" | "depositum" | "garanti"
   const [depositAmount, setDepositAmount] = useState(order.depositAmount || "");
-
-  // UI state
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [okMsg, setOkMsg] = useState("");
 
-  // Manuelt ordre-id (midlertidig løsning)
-  const [manualIdEnabled, setManualIdEnabled] = useState(false);
-  const [manualIdInput, setManualIdInput] = useState(
-    (order?.id ?? "").toString()
-  );
-
-  // Samlet total
   const total = useMemo(
     () => (order?.repairs || []).reduce((sum, r) => sum + (Number(r.price) || 0), 0),
     [order?.repairs]
   );
+  const totalFormatted = useMemo(() => Number(total).toLocaleString("da-DK"), [total]);
+  const today = useMemo(() => new Date().toLocaleDateString("da-DK"), []);
+  const createdAtISO = useMemo(() => new Date().toISOString(), []);
 
-  // Sørg for at payment state følger med order hvis siden reloades
-  useEffect(() => {
-    setPaymentType(order.paymentType || "efter");
-    setDepositAmount(order.depositAmount || "");
-  }, [order?.paymentType, order?.depositAmount]);
+  const numericDeposit = Number(depositAmount || 0);
+  const remaining = Math.max(total - (isNaN(numericDeposit) ? 0 : numericDeposit), 0);
 
-  const button = {
-    backgroundColor: "#2166AC",
-    color: "white",
-    padding: "0.7rem 1.1rem",
-    borderRadius: "8px",
-    border: "1px solid #2166AC",
-    cursor: "pointer",
-    fontWeight: 600,
-  };
+  const canSubmit =
+    !saving &&
+    (order?.repairs?.length || 0) > 0 &&
+    !!order?.customer?.id &&
+    !!order?.id;
 
-  const ghost = {
-    backgroundColor: "white",
-    color: "#2166AC",
-    padding: "0.7rem 1.1rem",
-    borderRadius: "8px",
-    border: "1px solid #2166AC",
-    cursor: "pointer",
-    fontWeight: 600,
-  };
-
-  const input = {
-    width: "100%",
-    padding: "0.6rem 0.7rem",
-    border: "1px solid #d1d5db",
-    borderRadius: "8px",
-    fontSize: "0.95rem",
-  };
-
-  const canSubmit = useMemo(() => {
-    if (!order?.id) return false;
-    if (!Array.isArray(order?.repairs) || order.repairs.length === 0) return false;
-    return true;
-  }, [order?.id, order?.repairs]);
-
-  // ---------- Manuel ordre-ID: gem indtastningen i order.id ----------
-  function applyManualOrderId() {
-    const raw = (manualIdInput || "").trim();
-    if (!raw) {
-      setError("Ordre-ID må ikke være tomt.");
-      return;
+  function paymentText() {
+    if (paymentType === "garanti") return "Garanti (ingen betaling)";
+    if (paymentType === "betalt") return `Betalt: ${totalFormatted} kr`;
+    if (paymentType === "depositum") {
+      return `Depositum: ${numericDeposit} kr — Mangler: ${remaining} kr`;
     }
-    const num = Number(raw);
-    if (!Number.isFinite(num) || num <= 0) {
-      setError("Ordre-ID skal være et positivt tal.");
-      return;
-    }
-    // Opdater order.id og gem i localStorage for print-siden
-    setOrder((prev) => ({ ...prev, id: num }));
-    try {
-      const last = JSON.parse(localStorage.getItem("tg_last_order") || "{}");
-      localStorage.setItem("tg_last_order", JSON.stringify({ ...last, id: num }));
-    } catch {}
-    setError("");
-    setOkMsg(`Ordre-ID sat til #${num}`);
-    setTimeout(() => setOkMsg(""), 2000);
+    return `Betaling efter reparation: ${totalFormatted} kr`;
   }
 
-  // ---------- Submit handler (opret reparation) ----------
-  async function handleConfirm() {
-    if (!canSubmit) return;
+  async function saveRepairsToWordPress() {
+    const updatedRepairs = [];
 
-    setSaving(true);
-    setError("");
-    try {
-      const payloads = (order.repairs || []).map((r) => ({
-        title: `${order?.device || r.device || "Enhed"} – ${r.repair || "Reparation"}`,
-        model_id: r.model_id || 0,
+    for (const r of order.repairs) {
+      const title = `${order.id} • ${order.customer?.name || ""} • ${r.device} • ${r.repair}`;
+
+      const part = r.part || null;
+      const partFields = part
+        ? {
+            spare_part_id: part.id || null,
+            spare_part_model: part.model || "",
+            spare_part_stock: Number(part.stock ?? 0),
+            spare_part_location: part.location || "",
+          }
+        : {
+            spare_part_id: null,
+            spare_part_model: "",
+            spare_part_stock: null,
+            spare_part_location: "",
+          };
+
+      // 1) Opret ordrelinjen i WP (inkl. kontakt)
+      const createRes = await api.createRepair({
+        title,
+        repair: r.repair,
+        device: r.device,
         price: Number(r.price) || 0,
         time: Number(r.time) || 0,
-        device: order?.device || r.device || "",
-        repair: r.repair || "",
-        order_id: order.id, // ← VIGTIG: bruger (evt. manuelt) id
-        customer_id: order?.customer?.id || 0,
-        customer: order?.customer?.name || "",
-        phone: order?.customer?.phone || "",
-        contact: order?.contact || "",
-        status: "Ny",
-        note: (order?.note || "").trim(),
-        payment: paymentType === "betalt" ? "Betalt" :
-                 paymentType === "depositum" ? `Depositum ${depositAmount || 0}` :
-                 paymentType === "garanti" ? "Garanti" : "Efter reparation",
-        created_at: new Date().toISOString(),
-      }));
+        model_id: r.model_id || 0,
+        order_id: order.id,
+        customer_id: order.customer?.id || 0,
 
-      // Kald backend for hver reparation (simpelt; kan batches hvis du har et endpoint til flere ad gangen)
-      for (const body of payloads) {
-        await api.createRepair(body);
+        status: "under reparation",
+        payment_type: paymentType,
+        payment_total: Number(total) || 0,
+        deposit_amount: paymentType === "depositum" ? (Number(depositAmount) || 0) : 0,
+        remaining_amount: paymentType === "depositum" ? remaining : 0,
+        payment: paymentText(),
+        password: order.password || "",
+        note: order.note || "",
+        contact: order.contact || "",            // <-- Kontakt
+        customer: order.customer?.name || "",
+        phone: order.customer?.phone || "",
+
+        meta: part ? partFields : {},
+      });
+
+      if (!createRes || createRes.status !== "created" || !createRes.repair_id) {
+        throw new Error("Opret reparation fejlede.");
       }
 
-      // Gem til print
-      try {
-        localStorage.setItem("tg_last_order", JSON.stringify(order));
-        localStorage.setItem("tg_last_order_id", String(order.id));
-      } catch {}
+      const repairId = createRes.repair_id;
 
-      setSaving(false);
-      setOkMsg("Reparation oprettet");
-      onSubmit?.();
+      // 2) Opdater + historik (inkl. kontakt)
+      const fields = {
+        status: "under reparation",
+        payment_type: paymentType,
+        payment_total: Number(total) || 0,
+        deposit_amount: paymentType === "depositum" ? (Number(depositAmount) || 0) : 0,
+        remaining_amount: paymentType === "depositum" ? remaining : 0,
+        payment: paymentText(),
+        created_at: createdAtISO,
+        password: order.password || "",
+        note: order.note || "",
+        contact: order.contact || "",            // <-- Kontakt
+        customer: order.customer?.name || "",
+        phone: order.customer?.phone || "",
+      };
 
-      // Videre til print
-      navigate(`/print/${order.id}`, { state: { order } });
+      await api.updateRepairWithHistory({
+        repair_id: repairId,
+        fields,
+        meta: part ? partFields : {}
+      });
+
+      updatedRepairs.push({ ...r, id: repairId });
+    }
+
+    setOrder(prev => ({
+      ...prev,
+      paymentType,
+      depositAmount,
+      repairs: updatedRepairs
+    }));
+
+    return updatedRepairs;
+  }
+
+  async function handleConfirm() {
+    if (!canSubmit) return;
+    setSaving(true);
+    setError("");
+
+    try {
+      const updatedRepairs = await saveRepairsToWordPress();
+
+      const cleanOrder = {
+        id: order.id,
+        today,
+        created_at: createdAtISO,
+        customer: order.customer,
+        repairs: updatedRepairs,
+        password: order.password || "",
+        note: order.note || "",
+        contact: order.contact || "",        // følger med til print
+        total,
+        payment: { method: paymentType, upfront: Number(depositAmount) || 0 }
+      };
+
+      try { localStorage.setItem("tg_last_order", JSON.stringify(cleanOrder)); } catch {}
+
+      navigate(`/print-slip/${order.id}`, { state: { order: cleanOrder }, replace: true });
+
+      if (typeof onSubmit === "function") onSubmit();
     } catch (e) {
+      setError("Der opstod en fejl under gem af reparationerne.");
+    } finally {
       setSaving(false);
-      setError(e?.message || "Der gik noget galt ved oprettelse af reparationen.");
     }
   }
 
+  const cardStyle = (active) => ({
+    border: active ? "2px solid #2166AC" : "1px solid #ddd",
+    backgroundColor: active ? "#2166AC" : "#fff",
+    color: active ? "#fff" : "#000",
+    padding: "1.5rem",
+    borderRadius: "12px",
+    marginBottom: "1rem",
+    cursor: "pointer",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
+    transition: "all 0.2s ease"
+  });
+
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2rem", padding: "2rem" }}>
-      {/* Venstre: Oversigt / kvittering */}
-      <div>
-        <button onClick={() => navigate("/")} style={{ ...ghost, marginBottom: "1rem" }}>
-          <FaHome style={{ marginRight: 8 }} /> Dashboard
-        </button>
+    <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
+      {/* Venstre: oversigt */}
+      <div style={{ flex: 1, padding: "2rem", backgroundColor: "#f5f5f5", overflowY: "auto" }}>
+        <div style={{ display: "flex", gap: "0.75rem", marginBottom: "2rem" }}>
+          <button
+            onClick={() => (onBack ? onBack() : navigate(-1))}
+            style={{
+              backgroundColor: "#f0f0f0",
+              color: "#333",
+              padding: "0.4rem 1rem",
+              borderRadius: "6px",
+              border: "none",
+              cursor: "pointer"
+            }}
+            disabled={saving}
+          >
+            ← Tilbage
+          </button>
 
-        <h2 style={{ marginTop: 0 }}>Oversigt</h2>
-
-        {/* Manuelt ordre-ID (midlertidigt værktøj) */}
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: "1rem", marginBottom: "1rem" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-              <input
-                type="checkbox"
-                checked={manualIdEnabled}
-                onChange={(e) => setManualIdEnabled(e.target.checked)}
-              />
-              <strong>Manuelt ordre-ID</strong>
-            </label>
-            <span style={{ color: "#6b7280" }}>(midlertidigt – til at sætte startværdien)</span>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
-            <input
-              style={{ ...input, opacity: manualIdEnabled ? 1 : 0.6 }}
-              type="text"
-              inputMode="numeric"
-              placeholder="fx 42015"
-              disabled={!manualIdEnabled}
-              value={manualIdInput}
-              onChange={(e) => setManualIdInput(e.target.value.replace(/[^\d]/g, ""))}
-            />
-            <button
-              style={{ ...button, opacity: manualIdEnabled ? 1 : 0.6 }}
-              disabled={!manualIdEnabled}
-              onClick={applyManualOrderId}
-            >
-              Gem ordre-ID
-            </button>
-          </div>
-
-          <div style={{ marginTop: 8, fontSize: 14 }}>
-            Aktuelt ordre-ID: <strong>#{order?.id || "—"}</strong>
-          </div>
+          <button
+            onClick={() => navigate("/")}
+            style={{
+              backgroundColor: "#2166AC",
+              color: "white",
+              padding: "0.4rem 1rem",
+              borderRadius: "6px",
+              border: "none",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem"
+            }}
+          >
+            <FaHome /> Dashboard
+          </button>
         </div>
 
-        {/* Reparationslinjer */}
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: "1rem" }}>
-          {(order?.repairs || []).map((r, idx) => (
-            <div key={idx} style={{ padding: "0.6rem 0", borderBottom: idx < order.repairs.length - 1 ? "1px solid #eee" : "none" }}>
-              <div style={{ fontWeight: 700, fontSize: 16 }}>{order?.device || r.device || "Enhed"}</div>
-              <div style={{ color: "#374151", marginTop: 2 }}>{r.repair}</div>
-              <div style={{ display: "flex", gap: 16, marginTop: 6, color: "#111827" }}>
-                <div><strong>Pris:</strong> {Number(r.price) || 0} kr</div>
-                <div><strong>Tid:</strong> {Number(r.time) || 0} min</div>
-              </div>
+        <div style={{ backgroundColor: "#fff", borderRadius: "12px", padding: "2rem", boxShadow: "0 2px 10px rgba(0,0,0,0.05)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1.5rem" }}>
+            <div>
+              <h4 style={{ margin: 0, fontWeight: "bold" }}>👤 Kunde</h4>
+              <p style={{ margin: 0 }}>{order.customer?.name || "-"}</p>
+              <p style={{ margin: 0 }}><FaPhone style={{ marginRight: "0.5rem" }} />{order.customer?.phone || "-"}</p>
+              <p style={{ margin: 0 }}><FaEnvelope style={{ marginRight: "0.5rem" }} />{order.customer?.email || "-"}</p>
             </div>
-          ))}
-
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: "0.8rem", fontSize: 18 }}>
-            <strong>Total</strong>
-            <strong>{total} kr</strong>
+            <div style={{ textAlign: "right", fontSize: "0.9rem", color: "#555" }}>
+              <p style={{ margin: 0 }}>Dato: {today}</p>
+              <p style={{ margin: 0 }}>Ordre-ID: #{order.id || "–"}</p>
+            </div>
           </div>
-        </div>
 
-        {/* Kunde & noter */}
-        <div style={{ marginTop: "1rem", border: "1px solid #e5e7eb", borderRadius: 12, padding: "1rem" }}>
-          <div style={{ fontWeight: 700, marginBottom: 8 }}>Kunde</div>
-          {order?.customer ? (
-            <>
-              <div><FaPhone /> {order.customer.phone || "—"}</div>
-              <div><FaEnvelope /> {order.customer.email || "—"}</div>
-            </>
-          ) : (
-            <div style={{ color: "#6b7280" }}>Ingen kunde valgt</div>
+          <hr style={{ margin: "1.5rem 0" }} />
+
+          <div>
+            <h4 style={{ fontWeight: "bold" }}>🔧 Reparation</h4>
+
+            {(order.repairs || []).map((r, i) => {
+              const part = r.part || null;
+              return (
+                <div key={i} style={{ padding: "0.75rem 0", borderBottom: "1px solid #eee" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", alignItems: "flex-start" }}>
+                    <div>
+                      <strong>{r.device}</strong><br />
+                      <span style={{ color: "#555" }}>{r.repair} • {r.price} kr • {r.time} min</span>
+
+                      <div style={{ marginTop: 6, fontSize: 13, color: "#223" }}>
+                        {part ? (
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                            <span style={{ fontWeight: 600 }}>{part.model}</span>
+                            <span style={{ padding: "2px 6px", background: "#eef6ff" }}>
+                              Lager: {part.stock ?? "—"}
+                            </span>
+                            {part.location && (
+                              <span style={{ padding: "2px 6px", background: "#f1f5f9" }}>
+                                {part.location}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span style={{ color: "#6b7280" }}>(ingen reservedel valgt)</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+
+            <div style={{ marginTop: "1rem", fontWeight: "bold" }}>
+              Samlet: {totalFormatted} kr
+            </div>
+          </div>
+
+          <hr style={{ margin: "1.5rem 0" }} />
+
+          {/* Kontakt sammen med Adgangskode & Note */}
+          <div>
+            <h4 style={{ fontWeight: "bold" }}><FaLock style={{ marginRight: "0.5rem" }} />Adgangskode & Note</h4>
+            <p><strong>Adgangskode:</strong> {order.password || "-"}</p>
+            <p><strong>Kontakt:</strong> {order.contact || "-"}</p>
+            <p><strong>Note:</strong> {order.note || "-"}</p>
+          </div>
+
+          {error && (
+            <div style={{ marginTop: "1rem", color: "#b00020", fontWeight: 600 }}>
+              {error}
+            </div>
           )}
-          <div style={{ marginTop: 10 }}><FaLock /> Adgangskode: <strong>{order?.password || "—"}</strong></div>
-          <div style={{ marginTop: 6 }}><FaStickyNote /> Note: {order?.note || "—"}</div>
         </div>
       </div>
 
-      {/* Højre: Betaling & handlinger */}
-      <div>
-        <h2 style={{ marginTop: 0 }}>Betaling</h2>
+      {/* Højre: betaling + opret/print */}
+      <div
+        style={{
+          flex: 1,
+          padding: "2rem",
+          backgroundColor: "#f9f9f9",
+          display: "flex",
+          flexDirection: "column",
+          gap: "1.5rem" // <— i stedet for justifyContent: "space-between"
+        }}
+      >
+        <div>
+          <h3 style={{ textTransform: "uppercase", fontWeight: "bold", marginBottom: "1.5rem" }}>Betaling</h3>
 
-        <div style={{ display: "grid", gap: 10 }}>
-          <label style={{ display: "flex", gap: 8, alignItems: "center", border: "1px solid #e5e7eb", borderRadius: 12, padding: "0.8rem" }}>
-            <input
-              type="radio"
-              name="pay"
-              checked={paymentType === "efter"}
-              onChange={() => setPaymentType("efter")}
-            />
-            Efter reparation
-          </label>
-          <label style={{ display: "flex", gap: 8, alignItems: "center", border: "1px solid #e5e7eb", borderRadius: 12, padding: "0.8rem" }}>
-            <input
-              type="radio"
-              name="pay"
-              checked={paymentType === "betalt"}
-              onChange={() => setPaymentType("betalt")}
-            />
-            Betalt
-          </label>
-          <label style={{ display: "flex", gap: 8, alignItems: "center", border: "1px solid #e5e7eb", borderRadius: 12, padding: "0.8rem" }}>
-            <input
-              type="radio"
-              name="pay"
-              checked={paymentType === "depositum"}
-              onChange={() => setPaymentType("depositum")}
-            />
-            Delvis betalt (depositum)
-          </label>
+          <div onClick={() => setPaymentType("efter")} style={cardStyle(paymentType === "efter")}>
+            Betaling efter reparation<br /><small>{totalFormatted} kr</small>
+          </div>
+          <div onClick={() => setPaymentType("betalt")} style={cardStyle(paymentType === "betalt")}>
+            Allerede betalt<br /><small>{totalFormatted} kr</small>
+          </div>
+          <div onClick={() => setPaymentType("depositum")} style={cardStyle(paymentType === "depositum")}>
+            Delvis betalt (depositum)<br /><small>Indtast forudbetalt beløb nedenfor</small>
+          </div>
+
           {paymentType === "depositum" && (
-            <input
-              style={{ ...input, marginLeft: 34, width: "calc(100% - 34px)" }}
-              placeholder="Depositum i kr."
-              value={depositAmount}
-              onChange={(e) => setDepositAmount(e.target.value.replace(/[^\d]/g, ""))}
-            />
+            <div style={{ marginTop: "1rem", marginBottom: "1.5rem" }}>
+              <label><strong>Beløb forudbetalt:</strong></label>
+              <input
+                type="number"
+                min="0"
+                value={depositAmount}
+                onChange={(e) => setDepositAmount(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "0.5rem",
+                  fontSize: "1rem",
+                  marginTop: "0.5rem",
+                  borderRadius: "6px",
+                  border: "1px solid #ccc"
+                }}
+              />
+              <p style={{ marginTop: "0.5rem" }}><strong>Mangler:</strong> {remaining} kr</p>
+            </div>
           )}
-          <label style={{ display: "flex", gap: 8, alignItems: "center", border: "1px solid #e5e7eb", borderRadius: 12, padding: "0.8rem" }}>
-            <input
-              type="radio"
-              name="pay"
-              checked={paymentType === "garanti"}
-              onChange={() => setPaymentType("garanti")}
-            />
+
+          <div onClick={() => setPaymentType("garanti")} style={cardStyle(paymentType === "garanti")}>
             Garanti (ingen betaling)
-          </label>
-        </div>
+          </div>
 
-        {error && (
-          <div style={{ marginTop: 12, color: "#b91c1c", fontWeight: 600 }}>{error}</div>
-        )}
-        {okMsg && (
-          <div style={{ marginTop: 12, color: "#047857", fontWeight: 600 }}>{okMsg}</div>
-        )}
-
-        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-          <button onClick={onBack} style={ghost}>Tilbage</button>
+          {/* Knappen står nu lige under betalingsvalg */}
           <button
             onClick={handleConfirm}
-            style={{ ...button, opacity: canSubmit ? 1 : 0.6 }}
-            disabled={!canSubmit || saving}
+            disabled={!canSubmit}
+            style={{
+              marginTop: "1rem",
+              backgroundColor: canSubmit ? "#22b783" : "#9bdac5",
+              color: "white",
+              padding: "1rem",
+              borderRadius: "8px",
+              fontSize: "1rem",
+              fontWeight: "bold",
+              border: "none",
+              width: "100%",
+              cursor: canSubmit ? "pointer" : "not-allowed"
+            }}
           >
-            {saving ? "Opretter…" : "Bekræft & print"}
+            {saving ? "Opretter..." : "Bekræft og print"}
           </button>
         </div>
       </div>
