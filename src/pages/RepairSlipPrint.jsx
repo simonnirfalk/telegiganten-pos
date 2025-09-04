@@ -74,13 +74,10 @@ export default function RepairSlipPrint() {
       <style>{`
         :root { color-scheme: light; }
         body { margin: 0; }
-        @media print {
-          .no-print { display: none !important; }
-          html, body { background: #fff !important; }
-        }
+        .no-print { display: block; }
 
         .sheet {
-          max-width: 80mm;
+          max-width: 80mm;         /* ret til jeres rullebredde */
           width: 100%;
           margin: 0 auto;
           padding: 8px 10px;
@@ -90,6 +87,10 @@ export default function RepairSlipPrint() {
           line-height: 1.35;
           font-family: Arial, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
           font-size: 11px;
+
+          /* undgå sideskift inde i et slip */
+          break-inside: avoid-page;
+          page-break-inside: avoid;
         }
         .title { text-align: center; margin: 0 0 6px 0; }
         .title .order { font-size: 14px; font-weight: 700; }
@@ -103,51 +104,36 @@ export default function RepairSlipPrint() {
         th { font-weight: 700; }
         .tr { text-align: right; }
 
-        .partRow {
-          font-size: 10px;
-          color: #334155;
-        }
-        .chip {
-          display: inline-block;
-          padding: 1px 6px;
-          border-radius: 10px;
-          background: #f1f5f9;
-          margin-left: 6px;
-        }
+        .partRow { font-size: 10px; color: #334155; }
+        .chip { display: inline-block; padding: 1px 6px; border-radius: 10px; background: #f1f5f9; margin-left: 6px; }
+        .footer { margin-top: 8px; text-align: center; color: #444; font-size: 10px; }
 
-        .footer {
-          margin-top: 8px;
-          text-align: center;
-          color: #444;
-          font-size: 10px;
-        }
+        /* Vis en skærekant på skærm – skjules ved print */
+        .cutline { max-width: 80mm; margin: 6px auto; border-top: 1px dashed #d4d4d4; }
+        @media print { .cutline { display: none; } }
 
-        .cutline {
-          max-width: 80mm;
-          margin: 6px auto;
-          border-top: 1px dashed #d4d4d4;
+        /* Sideskift-element: bliver til en ny side ved print */
+        .page-break {
+          height: 0;
         }
-
-        .btn {
-          background: #2166AC; color: #fff; border: 0; border-radius: 6px;
-          padding: 8px 14px; cursor: pointer;
-        }
-        .btn.secondary { background: #f0f0f0; color: #333; }
-
         @media print {
+          .no-print { display: none !important; }
+          html, body { background: #fff !important; }
           .sheet { box-shadow: none !important; margin: 0 !important; padding: 6px 8px !important; }
-          @page { size: auto; margin: 4mm; }
+          /* tving rigtigt sideskift mellem slips */
+          .page-break { break-after: page; page-break-after: always; }
+          /* sæt siden til label-bredde; højde automatisk pr. side */
+          @page { size: 80mm auto; margin: 4mm; }  /* ret margin hvis nødvendigt */
         }
       `}</style>
 
-      {/* ==================== KUNDE-SLIP ==================== */}
+      {/* =============== KUNDE-SLIP (side 1) =============== */}
       <div className="sheet">
         <div className="title">
           <div className="order">Ordre-ID: #{order.id}</div>
           <div className="date">{dt.date} kl. {dt.time}</div>
         </div>
 
-        {/* Kunde først */}
         <div className="section">
           <strong>Kunde</strong>
           <div>{order.customer?.name || "-"}</div>
@@ -155,7 +141,6 @@ export default function RepairSlipPrint() {
           <div className="muted">{order.customer?.email || "-"}</div>
         </div>
 
-        {/* Reparationer */}
         <div className="section">
           <strong>Reparationer</strong>
           <table>
@@ -185,7 +170,6 @@ export default function RepairSlipPrint() {
           </table>
         </div>
 
-        {/* Service-oplysninger */}
         <div className="section">
           <div><strong>Adgangskode:</strong> {order.password || "-"}</div>
           <div><strong>Kontakt:</strong> {order.contact || "-"}</div>
@@ -196,28 +180,26 @@ export default function RepairSlipPrint() {
           <strong>Betaling:</strong> {paymentText}
         </div>
 
-        {/* Sidefod (kun på kunde-slip) */}
         <div className="footer">
           Taastrup Hovedgade 66, 2630 Taastrup · Tlf: 70 70 78 56<br />
           info@telegiganten.dk · Man–Fre 10–18, Lør 10–14 <br />
-         <p><strong>Husk din kvittering når du henter din reparation!</strong></p>
+          <p><strong>Husk din kvittering når du henter din reparation!</strong></p>
         </div>
       </div>
 
-      {/* NYT: tving sideskift efter kundeslip */}
-      <div style={{ pageBreakAfter: "always" }}></div>
+      {/* Sideskift til næste label (denne div bliver til et rigtigt page break) */}
+      <div className="page-break" />
 
-      {/* Skærekant mellem slips */}
+      {/* (valgfri) skærekant på skærm for at se adskillelsen */}
       <div className="cutline" />
 
-      {/* ==================== TECH-SLIP ==================== */}
+      {/* =============== TECH-SLIP (side 2) =============== */}
       <div className="sheet">
         <div className="title">
           <div className="order">Ordre-ID: #{order.id}</div>
           <div className="date">{dt.date} kl. {dt.time}</div>
         </div>
 
-        {/* Reparation ØVERST + reservedel-infos */}
         <div className="section">
           <strong>Reparation</strong>
           <table>
@@ -240,15 +222,14 @@ export default function RepairSlipPrint() {
                       <td className="tr">{Number(r.price || 0)} kr</td>
                       <td className="tr">{Number(r.time || 0)}</td>
                     </tr>
-                    {/* Reservedel under linjen hvis valgt */}
                     {part ? (
                       <tr className="partRow">
                         <td colSpan={4}>
                           Reservedel: <strong>{part.model}</strong>
                           {part.location ? <span className="chip">{part.location}</span> : null}
-                          {part.stock !== undefined && part.stock !== null && part.stock !== "" ? (
-                            <span className="chip">Lager: {part.stock}</span>
-                          ) : null}
+                          {part.stock !== undefined && part.stock !== null && part.stock !== ""
+                            ? <span className="chip">Lager: {part.stock}</span>
+                            : null}
                         </td>
                       </tr>
                     ) : (
@@ -264,12 +245,10 @@ export default function RepairSlipPrint() {
                 <td className="tr"><strong>{total} kr</strong></td>
                 <td className="tr"></td>
               </tr>
-             <div><strong>Adgangskode:</strong> {order.password || "-"}</div>
             </tbody>
           </table>
         </div>
 
-        {/* Sekundært: kundeinfo nederst til tech */}        
         <div className="section">
           <strong>Kunde</strong>
           <div>{order.customer?.name || "-"}</div>
@@ -277,8 +256,6 @@ export default function RepairSlipPrint() {
           {order.contact ? <div>Kontakt: {order.contact}</div> : null}
           {order.note ? <div>Note: {order.note}</div> : null}
         </div>
-
-        {/* INGEN footer på tech-slip */}
       </div>
 
       {/* Skjules ved print */}
