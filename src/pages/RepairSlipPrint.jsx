@@ -5,10 +5,8 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 /** Label-bredde i mm (ret hvis rullen er anden bredde) */
 const LABEL_WIDTH_MM = 80;
 
-/** Logo til header (SVG/PNG i høj opløsning anbefales) */
-const LOGO_URL =
-  import.meta.env.VITE_PRINT_LOGO_URL ||
-  "/logo.png"; // fallback – læg en /public/logo.png ind hvis du vil vise logo
+/** Logo (SVG/PNG i høj opløsning anbefales) */
+const LOGO_URL = import.meta.env.VITE_PRINT_LOGO_URL || "/logo.png";
 
 export default function RepairSlipPrint() {
   const nav = useNavigate();
@@ -47,7 +45,7 @@ export default function RepairSlipPrint() {
     return `Betaling efter reparation: ${total} kr`;
   }, [order, total]);
 
-  // ---------- HTML builders (nyt, mere tydeligt layout) ----------
+  // ---------- Styles & renderers ----------
   const baseStyles = `
     :root { color-scheme: light; }
     html, body { margin: 0; background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -57,42 +55,28 @@ export default function RepairSlipPrint() {
       padding: 10px 10px;
       color: #0b0b0c;
       background: #fff;
-      font: 13px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; /* lidt større tekst */
+      font: 13px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
       break-inside: avoid-page; page-break-inside: avoid;
     }
 
-    /* Header med logo */
-    .header {
-      display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
-      padding-bottom: 6px; border-bottom: 2px solid #e5e7eb;
-    }
-    .logo {
-      height: 18px; /* lav men skarp – SVG anbefales */
-      image-rendering: optimizeQuality;
-    }
-    .brand {
-      font-weight: 800; letter-spacing: 0.2px;
-    }
-    .header .right { margin-left: auto; text-align: right; font-size: 12px; color: #3f3f46; }
+    /* Ny header: logo (centreret), derefter ordre-id som overskrift og dato/tid under */
+    .header { text-align: center; border-bottom: 2px solid #e5e7eb; padding-bottom: 6px; margin-bottom: 6px; }
+    .logo { height: 18px; image-rendering: optimizeQuality; display: inline-block; }
+    .orderTitle { font-size: 15px; font-weight: 800; margin: 6px 0 2px; }
+    .dateLine { font-size: 12px; color: #52525b; }
 
-    .title { text-align: center; margin: 6px 0 8px; }
-    .title .order { font-size: 15px; font-weight: 800; }
-    .title .date { font-size: 12px; color: #52525b; margin-top: 1px; }
-
-    .section { margin-top: 8px; }
-    .card {
-      border: 1.8px solid #e5e7eb; border-radius: 8px; padding: 8px;
-      background: #fff;
-    }
     .sectionTitle {
       font-weight: 800; text-transform: uppercase; font-size: 12px;
       padding: 6px 8px; border: 1.8px solid #e5e7eb; border-radius: 8px; background: #f8fafc;
       margin: 8px 0 6px;
     }
-
+    .card {
+      border: 1.8px solid #e5e7eb; border-radius: 8px; padding: 8px;
+      background: #fff;
+    }
     .muted { color: #555; }
 
-    /* Reparation-liste som blokke (mere plads til tekst) */
+    /* Reparation som blokke */
     .repairItem {
       border: 1.5px solid #e5e7eb; border-radius: 8px; padding: 8px; margin-bottom: 6px;
     }
@@ -111,25 +95,34 @@ export default function RepairSlipPrint() {
       border: 2px solid #d4d4d8; border-radius: 8px; padding: 8px; margin-top: 6px;
       background: #fafafa; font-weight: 800; display: flex; justify-content: space-between;
     }
+    .paymentBox {
+      border: 1.8px solid #e5e7eb; border-radius: 8px; padding: 6px 8px; margin-top: 6px; background: #fff;
+      font-weight: 600;
+    }
 
-    .footer {
-      margin-top: 8px; text-align: center; color: #555; font-size: 11.5px;
+    /* Særlig tydelig adgangskode på tech-slip */
+    .passwordBox {
+      border: 2px solid #94a3b8; border-radius: 8px; background: #f1f5f9; color: #0f172a;
+      padding: 8px; margin: 6px 0 6px; font-weight: 800; text-align: center;
     }
 
     @media print { @page { size: ${LABEL_WIDTH_MM}mm auto; margin: 3mm; } }
   `;
 
+  function renderHeader() {
+    return `
+      <div class="header">
+        <img class="logo" src="${LOGO_URL}" alt="" onerror="this.style.display='none'"/>
+        <div class="orderTitle">Ordre-ID: #${order.id}</div>
+        <div class="dateLine">${dt.date} kl. ${dt.time}</div>
+      </div>
+    `;
+  }
+
   function renderCustomerSlip() {
     return `
       <div class="sheet">
-        <div class="header">
-          <img class="logo" src="${LOGO_URL}" alt="" onerror="this.style.display='none'"/>
-          <div class="brand">Telegiganten</div>
-          <div class="right">
-            <div>Ordre-ID: <strong>#${order.id}</strong></div>
-            <div>${dt.date} kl. ${dt.time}</div>
-          </div>
-        </div>
+        ${renderHeader()}
 
         <div class="sectionTitle">Kunde</div>
         <div class="card">
@@ -161,22 +154,7 @@ export default function RepairSlipPrint() {
         }).join("")}
 
         <div class="totalBox"><span>Total</span><span>${total} kr</span></div>
-
-        <div class="sectionTitle">Service</div>
-        <div class="card">
-          <div><strong>Adgangskode:</strong> ${order.password || "-"}</div>
-          <div><strong>Kontakt:</strong> ${order.contact || "-"}</div>
-          <div><strong>Note:</strong> ${order.note || "-"}</div>
-        </div>
-
-        <div class="section" style="margin-top:6px">
-          <strong>Betaling:</strong> ${paymentText}
-        </div>
-
-        <div class="footer">
-          Taastrup Hovedgade 66, 2630 Taastrup · Tlf: 70 70 78 56 · info@telegiganten.dk<br/>
-          Man–Fre 10–18, Lør 10–14 — <strong>Husk din kvittering ved afhentning</strong>
-        </div>
+        <div class="paymentBox">Betaling: ${paymentText}</div>
       </div>
     `;
   }
@@ -184,16 +162,13 @@ export default function RepairSlipPrint() {
   function renderTechSlip() {
     return `
       <div class="sheet">
-        <div class="header">
-          <img class="logo" src="${LOGO_URL}" alt="" onerror="this.style.display='none'"/>
-          <div class="brand">Telegiganten</div>
-          <div class="right">
-            <div>Ordre-ID: <strong>#${order.id}</strong></div>
-            <div>${dt.date} kl. ${dt.time}</div>
-          </div>
-        </div>
+        ${renderHeader()}
 
         <div class="sectionTitle">Reparation</div>
+
+        <!-- Adgangskode meget tydeligt, lige under Reparation -->
+        <div class="passwordBox">Adgangskode: ${order.password || "—"}</div>
+
         ${(order.repairs || []).map((r) => {
           const p = r.part || null;
           return `
@@ -260,7 +235,7 @@ export default function RepairSlipPrint() {
 
   useEffect(() => { if (order) printTwoJobs(); }, []); // eslint-disable-line
 
-  // Skærmforhåndsvisning + knapper (hjælper ved test)
+  // Skærmforhåndsvisning + knapper
   return (
     <div style={{ maxWidth: 620, margin: "12px auto", padding: "0 12px" }}>
       <h3>Udskriver kvitteringer…</h3>
@@ -276,7 +251,6 @@ export default function RepairSlipPrint() {
   );
 }
 
-/* små knapper til preview */
 const btnBlue = {
   background: "#2166AC", color: "#fff", border: 0, borderRadius: 8,
   padding: "8px 14px", cursor: "pointer", fontWeight: 700
