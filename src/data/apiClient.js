@@ -503,6 +503,10 @@ export const api = {
     proxyFetch({ path: "/wp-json/telegiganten/v1/customer-by-phone", method: "GET", query: { phone } }),
 
   /* ---------------------- Ordrer (tg_repair) ---------------------- */
+
+  getNextOrderId: () =>
+    proxyFetch({ path: "/wp-json/telegiganten/v1/next-order-id" }),
+
   getRepairOrders: () => proxyFetch({ path: "/wp-json/telegiganten/v1/repair-orders" }),
 
   createRepair: (data) => proxyFetch({ path: "/wp-json/telegiganten/v1/create-repair", method: "POST", body: data }),
