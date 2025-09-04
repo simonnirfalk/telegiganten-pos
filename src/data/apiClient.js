@@ -85,6 +85,20 @@ async function httpJson(url, options = {}) {
   return payload;
 }
 
+// OrderID //
+async function getNextOrderId() {
+  // brug samme proxy som de andre kald
+  const res = await api.proxy({
+    destination: 'telegiganten-wp',
+    data: {
+      method: 'GET',
+      path: '/wp-json/telegiganten/v1/next-order-id',
+    },
+  });
+  if (!res || !res.next_id) throw new Error('Ugyldigt svar fra API');
+  return res.next_id;
+}
+
 /**
  * Sender en request gennem WP-proxyen.
  * - path: fx "/wp-json/telegiganten/v1/customers" (kan være absolut til WP_ORIGIN – konverteres)
