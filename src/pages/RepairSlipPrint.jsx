@@ -4,7 +4,9 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 /** Label-bredde i mm (tilpas til jeres rulle) */
 const LABEL_WIDTH_MM = 80;
-/** Logo til kundeslip (SVG/PNG i høj opløsning anbefales) */
+/** Logo til kundeslip. Bemærk: billeder bliver altid rasteriseret.
+ *  Hvis du vil undgå raster helt, så fjern logo ved at sætte nedenstående til "".
+ */
 const LOGO_URL = import.meta.env.VITE_PRINT_LOGO_URL || "/logo.png";
 
 export default function RepairSlipPrint() {
@@ -44,86 +46,138 @@ export default function RepairSlipPrint() {
     return `Betaling efter reparation: ${total} kr`;
   }, [order, total]);
 
-  /* ========== Styles ========== */
+  /* ======================== TERMAL-OPTIMERET STYLES ======================== */
   const baseStyles = `
     :root { color-scheme: light; }
-    html, body { margin: 0; background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    * { box-sizing: border-box; -webkit-text-size-adjust: 100%; text-rendering: optimizeLegibility; }
-    .sheet {
-      max-width: ${LABEL_WIDTH_MM}mm; width: 100%; margin: 0 auto;
-      padding: 10px 10px;
-      color: #0b0b0c;
+    html, body {
+      margin: 0;
       background: #fff;
-      font: 13px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      break-inside: avoid-page; page-break-inside: avoid;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    * {
+      box-sizing: border-box;
+      -webkit-text-size-adjust: 100%;
+      text-rendering: optimizeLegibility;
     }
 
-    /* Header – kunde */
-    .header-cus { text-align: center; border-bottom: 2px solid #e5e7eb; padding-bottom: 6px; margin-bottom: 6px; }
-    .logo { height: 18px; image-rendering: optimizeQuality; display: inline-block; }
-    .orderTitle { font-size: 15px; font-weight: 800; margin: 6px 0 2px; }
-    .dateLine   { font-size: 12px; color: #52525b; }
+    .sheet {
+      max-width: ${LABEL_WIDTH_MM}mm;
+      width: 100%;
+      margin: 0 auto;
+      padding: 8px 8px;
+      color: #000;                 /* fuld sort for skarphed */
+      background: #fff;
+      font-family: Arial, Helvetica, sans-serif; /* printer-venlig font */
+      font-size: 14px;             /* lidt større for tydelighed */
+      line-height: 1.35;
+      break-inside: avoid-page;
+      page-break-inside: avoid;
+    }
 
-    /* Header – tech */
-    .header-tech { text-align: center; border-bottom: 2px solid #e5e7eb; padding: 6px 0; margin-bottom: 6px; }
-    .techTitle { font-size: 12px; font-weight: 900; letter-spacing: .8px; text-transform: uppercase; color:#111827; }
-    .techOrder { font-size: 15px; font-weight: 800; margin-top: 2px; }
+    /* HEADER – kunde: logo (valgfrit), ordre-id, dato/tid, alt centreret */
+    .header-cus {
+      text-align: center;
+      border-bottom: 2px solid #000;   /* tydelig sort linje */
+      padding-bottom: 6px;
+      margin-bottom: 6px;
+    }
+    .logo {
+      height: 18px;
+      display: inline-block;
+    }
+    .orderTitle { font-weight: 800; font-size: 16px; margin: 6px 0 2px; }
+    .dateLine   { font-size: 12px; }
+
+    /* HEADER – tech: ingen logo, “TECH SLIP” + ordre-id */
+    .header-tech {
+      text-align: center;
+      border-bottom: 2px solid #000;
+      padding: 6px 0;
+      margin-bottom: 6px;
+    }
+    .techTitle { font-weight: 900; font-size: 12px; letter-spacing: 1px; text-transform: uppercase; }
+    .techOrder { font-weight: 800; font-size: 16px; margin-top: 2px; }
 
     .sectionTitle {
-      font-weight: 800; text-transform: uppercase; font-size: 12px;
-      padding: 6px 8px; border: 1.8px solid #e5e7eb; border-radius: 8px; background: #f8fafc;
+      font-weight: 800;
+      font-size: 12px;
+      text-transform: uppercase;
+      padding: 6px 6px;
+      border: 2px solid #000;         /* kraftig sort ramme */
       margin: 8px 0 6px;
     }
-    .card {
-      border: 1.8px solid #e5e7eb; border-radius: 8px; padding: 8px;
+
+    .box {
+      border: 2px solid #000;
+      padding: 8px;
       background: #fff;
     }
-    .muted { color: #555; }
 
+    /* Reparation pr. blok – simple linjer, ingen farver */
     .repairItem {
-      border: 1.5px solid #e5e7eb; border-radius: 8px; padding: 8px; margin-bottom: 6px;
+      border: 2px solid #000;
+      padding: 8px;
+      margin-bottom: 6px;
     }
     .repRow1 { font-weight: 700; }
-    .repRow2 { display: flex; gap: 10px; margin-top: 2px; font-size: 12px; color: #111827; }
-    .repMeta { display: inline-flex; align-items: baseline; gap: 4px; }
-    .repMeta .label { color: #6b7280; }
+    .repRow2 { display: flex; gap: 12px; margin-top: 4px; font-size: 13px; }
+    .repMeta { display: inline-flex; gap: 6px; }
+    .repLbl  { font-weight: 600; }
 
-    .partRow { margin-top: 4px; font-size: 12px; color: #334155; }
-    .chip {
-      display: inline-block; padding: 1px 6px; border-radius: 999px;
-      background: #eef2ff; color: #1e3a8a; margin-left: 6px; border: 1px solid #e0e7ff;
+    /* Reservedel vises kun på TECH-slip, som ren tekst */
+    .partRow {
+      margin-top: 4px;
+      font-size: 13px;
     }
 
     .totalBox {
-      border: 2px solid #d4d4d8; border-radius: 8px; padding: 8px; margin-top: 6px;
-      background: #fafafa; font-weight: 800; display: flex; justify-content: space-between;
+      border: 2px solid #000;
+      padding: 8px;
+      margin-top: 6px;
+      font-weight: 800;
+      display: flex;
+      justify-content: space-between;
     }
     .paymentBox {
-      border: 1.8px solid #e5e7eb; border-radius: 8px; padding: 6px 8px; margin-top: 6px; background: #fff;
-      font-weight: 600;
+      border: 2px solid #000;
+      padding: 6px 8px;
+      margin-top: 6px;
+      font-weight: 700;
     }
 
+    /* Info (kundeslip): adgangskode, kontakt, note */
     .infoBox {
-      border: 1.5px solid #e5e7eb; border-radius: 8px; padding: 8px; margin-top: 6px;
-      background:#fff; font-size:12.5px;
+      border: 2px solid #000;
+      padding: 8px;
+      margin-top: 6px;
+      font-size: 13px;
     }
 
+    /* Adgangskode tydeligt (tech) */
     .passwordBox {
-      border: 2px solid #94a3b8; border-radius: 8px; background: #f1f5f9; color: #0f172a;
-      padding: 8px; margin: 6px 0 6px; font-weight: 800; text-align: center;
+      border: 2px solid #000;
+      padding: 8px;
+      margin: 6px 0 6px;
+      font-weight: 800;
+      text-align: center;
     }
 
     .footer {
-      margin-top: 8px; text-align: center; color: #555; font-size: 11.5px;
+      margin-top: 8px;
+      text-align: center;
+      font-size: 12px;
     }
 
-    @media print { @page { size: ${LABEL_WIDTH_MM}mm auto; margin: 3mm; } }
+    @media print {
+      @page { size: ${LABEL_WIDTH_MM}mm auto; margin: 3mm; } /* ingen skalering */
+    }
   `;
 
-  /* -------- Header-renderers -------- */
+  /* ---------------- Header-renderers ---------------- */
   const renderHeaderCustomer = () => `
     <div class="header-cus">
-      <img class="logo" src="${LOGO_URL}" alt="" onerror="this.style.display='none'"/>
+      ${LOGO_URL ? `<img class="logo" src="${LOGO_URL}" alt="" onerror="this.style.display='none'"/>` : ""}
       <div class="orderTitle">Ordre-ID: #${order.id}</div>
       <div class="dateLine">${dt.date} kl. ${dt.time}</div>
     </div>
@@ -137,17 +191,17 @@ export default function RepairSlipPrint() {
     </div>
   `;
 
-  /* -------- Slips -------- */
+  /* ---------------- Slips ---------------- */
   function renderCustomerSlip() {
     return `
       <div class="sheet">
         ${renderHeaderCustomer()}
 
         <div class="sectionTitle">Kunde</div>
-        <div class="card">
+        <div class="box">
           <div>${order.customer?.name || "-"}</div>
           <div>${order.customer?.phone || "-"}</div>
-          <div class="muted">${order.customer?.email || "-"}</div>
+          <div>${order.customer?.email || "-"}</div>
         </div>
 
         <div class="sectionTitle">Reparationer</div>
@@ -155,17 +209,16 @@ export default function RepairSlipPrint() {
           <div class="repairItem">
             <div class="repRow1">${r.device || ""} — ${r.repair || ""}</div>
             <div class="repRow2">
-              <span class="repMeta"><span class="label">Pris</span><strong>${Number(r.price||0)} kr</strong></span>
-              <span class="repMeta"><span class="label">Tid</span><strong>${Number(r.time||0)} min</strong></span>
+              <span class="repMeta"><span class="repLbl">Pris</span><span><strong>${Number(r.price||0)} kr</strong></span></span>
+              <span class="repMeta"><span class="repLbl">Tid</span><span><strong>${Number(r.time||0)} min</strong></span></span>
             </div>
-            <!-- ingen reservedel på kundeslip -->
+            <!-- Kundeslip: INGEN reservedel -->
           </div>
         `).join("")}
 
         <div class="totalBox"><span>Total</span><span>${total} kr</span></div>
         <div class="paymentBox">Betaling: ${paymentText}</div>
 
-        <!-- Oplysninger: adgangskode, kontakt, note -->
         <div class="infoBox">
           <div><strong>Adgangskode:</strong> ${order.password || "—"}</div>
           <div><strong>Kontakt:</strong> ${order.contact || "—"}</div>
@@ -194,16 +247,13 @@ export default function RepairSlipPrint() {
             <div class="repairItem">
               <div class="repRow1">${r.device || ""} — ${r.repair || ""}</div>
               <div class="repRow2">
-                <span class="repMeta"><span class="label">Pris</span><strong>${Number(r.price||0)} kr</strong></span>
-                <span class="repMeta"><span class="label">Tid</span><strong>${Number(r.time||0)} min</strong></span>
+                <span class="repMeta"><span class="repLbl">Pris</span><span><strong>${Number(r.price||0)} kr</strong></span></span>
+                <span class="repMeta"><span class="repLbl">Tid</span><span><strong>${Number(r.time||0)} min</strong></span></span>
               </div>
               ${
                 p
-                  ? `<div class="partRow">Reservedel: <strong>${p.model || "-"}</strong>
-                       ${p.location ? `<span class="chip">${p.location}</span>` : ""}
-                       ${(p.stock ?? "") !== "" ? `<span class="chip">Lager: ${p.stock}</span>` : ""}
-                     </div>`
-                  : `<div class="partRow muted">(ingen reservedel valgt)</div>`
+                  ? `<div class="partRow">Reservedel: ${p.model || "-"}${p.location ? " · " + p.location : ""}${(p.stock ?? "") !== "" ? " · Lager: " + p.stock : ""}</div>`
+                  : `<div class="partRow">(ingen reservedel valgt)</div>`
               }
             </div>
           `;
@@ -212,7 +262,7 @@ export default function RepairSlipPrint() {
         <div class="totalBox"><span>Total</span><span>${total} kr</span></div>
 
         <div class="sectionTitle">Kunde</div>
-        <div class="card">
+        <div class="box">
           <div>${order.customer?.name || "-"}</div>
           <div>${order.customer?.phone || "-"}</div>
           ${order.contact ? `<div>Kontakt: ${order.contact}</div>` : ""}
@@ -222,7 +272,7 @@ export default function RepairSlipPrint() {
     `;
   }
 
-  /* ========== Print: to jobs i samme popup ========== */
+  /* ======================== Print: to jobs i samme popup ======================== */
   const printTwoJobs = async () => {
     const w = window.open("", "tg-print", "width=460,height=700");
     if (!w) { alert("Popup blokeret – tillad popups for at printe."); return; }
@@ -253,7 +303,7 @@ export default function RepairSlipPrint() {
 
   useEffect(() => { if (order) printTwoJobs(); }, []); // eslint-disable-line
 
-  /* Preview/knapper på skærm */
+  /* Preview/knapper på skærm (til test) */
   return (
     <div style={{ maxWidth: 620, margin: "12px auto", padding: "0 12px" }}>
       <h3>Udskriver kvitteringer…</h3>
@@ -263,17 +313,17 @@ export default function RepairSlipPrint() {
       </div>
       <div dangerouslySetInnerHTML={{ __html: `<style>${baseStyles}</style>` }} />
       <div dangerouslySetInnerHTML={{ __html: renderCustomerSlip() }} />
-      <div style={{ borderTop: "1px dashed #d4d4d4", margin: "10px 0" }} />
+      <div style={{ borderTop: "2px solid #000", margin: "10px 0" }} />
       <div dangerouslySetInnerHTML={{ __html: renderTechSlip() }} />
     </div>
   );
 }
 
 const btnBlue = {
-  background: "#2166AC", color: "#fff", border: 0, borderRadius: 8,
+  background: "#2166AC", color: "#fff", border: 0, borderRadius: 6,
   padding: "8px 14px", cursor: "pointer", fontWeight: 700
 };
 const btnGrey = {
-  background: "#f0f0f0", color: "#111", border: 0, borderRadius: 8,
+  background: "#f0f0f0", color: "#111", border: 0, borderRadius: 6,
   padding: "8px 14px", cursor: "pointer", fontWeight: 600
 };
