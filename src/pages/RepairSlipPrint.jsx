@@ -2,10 +2,9 @@
 import React, { useMemo, useEffect } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
-/** Label-bredde i mm (ret hvis rullen er anden bredde) */
+/** Label-bredde i mm (tilpas til jeres rulle) */
 const LABEL_WIDTH_MM = 80;
-
-/** Logo (SVG/PNG i høj opløsning anbefales) */
+/** Logo til kundeslip (SVG/PNG i høj opløsning anbefales) */
 const LOGO_URL = import.meta.env.VITE_PRINT_LOGO_URL || "/logo.png";
 
 export default function RepairSlipPrint() {
@@ -45,7 +44,7 @@ export default function RepairSlipPrint() {
     return `Betaling efter reparation: ${total} kr`;
   }, [order, total]);
 
-  // ---------- Styles & renderers ----------
+  /* ========== Styles ========== */
   const baseStyles = `
     :root { color-scheme: light; }
     html, body { margin: 0; background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -59,11 +58,16 @@ export default function RepairSlipPrint() {
       break-inside: avoid-page; page-break-inside: avoid;
     }
 
-    /* Ny header: logo (centreret), derefter ordre-id som overskrift og dato/tid under */
-    .header { text-align: center; border-bottom: 2px solid #e5e7eb; padding-bottom: 6px; margin-bottom: 6px; }
+    /* Header – kunde */
+    .header-cus { text-align: center; border-bottom: 2px solid #e5e7eb; padding-bottom: 6px; margin-bottom: 6px; }
     .logo { height: 18px; image-rendering: optimizeQuality; display: inline-block; }
     .orderTitle { font-size: 15px; font-weight: 800; margin: 6px 0 2px; }
-    .dateLine { font-size: 12px; color: #52525b; }
+    .dateLine   { font-size: 12px; color: #52525b; }
+
+    /* Header – tech */
+    .header-tech { text-align: center; border-bottom: 2px solid #e5e7eb; padding: 6px 0; margin-bottom: 6px; }
+    .techTitle { font-size: 12px; font-weight: 900; letter-spacing: .8px; text-transform: uppercase; color:#111827; }
+    .techOrder { font-size: 15px; font-weight: 800; margin-top: 2px; }
 
     .sectionTitle {
       font-weight: 800; text-transform: uppercase; font-size: 12px;
@@ -76,7 +80,6 @@ export default function RepairSlipPrint() {
     }
     .muted { color: #555; }
 
-    /* Reparation som blokke */
     .repairItem {
       border: 1.5px solid #e5e7eb; border-radius: 8px; padding: 8px; margin-bottom: 6px;
     }
@@ -100,29 +103,45 @@ export default function RepairSlipPrint() {
       font-weight: 600;
     }
 
-    /* Særlig tydelig adgangskode på tech-slip */
+    .infoBox {
+      border: 1.5px solid #e5e7eb; border-radius: 8px; padding: 8px; margin-top: 6px;
+      background:#fff; font-size:12.5px;
+    }
+
     .passwordBox {
       border: 2px solid #94a3b8; border-radius: 8px; background: #f1f5f9; color: #0f172a;
       padding: 8px; margin: 6px 0 6px; font-weight: 800; text-align: center;
     }
 
+    .footer {
+      margin-top: 8px; text-align: center; color: #555; font-size: 11.5px;
+    }
+
     @media print { @page { size: ${LABEL_WIDTH_MM}mm auto; margin: 3mm; } }
   `;
 
-  function renderHeader() {
-    return `
-      <div class="header">
-        <img class="logo" src="${LOGO_URL}" alt="" onerror="this.style.display='none'"/>
-        <div class="orderTitle">Ordre-ID: #${order.id}</div>
-        <div class="dateLine">${dt.date} kl. ${dt.time}</div>
-      </div>
-    `;
-  }
+  /* -------- Header-renderers -------- */
+  const renderHeaderCustomer = () => `
+    <div class="header-cus">
+      <img class="logo" src="${LOGO_URL}" alt="" onerror="this.style.display='none'"/>
+      <div class="orderTitle">Ordre-ID: #${order.id}</div>
+      <div class="dateLine">${dt.date} kl. ${dt.time}</div>
+    </div>
+  `;
 
+  const renderHeaderTech = () => `
+    <div class="header-tech">
+      <div class="techTitle">TECH SLIP</div>
+      <div class="techOrder">Ordre-ID: #${order.id}</div>
+      <div class="dateLine">${dt.date} kl. ${dt.time}</div>
+    </div>
+  `;
+
+  /* -------- Slips -------- */
   function renderCustomerSlip() {
     return `
       <div class="sheet">
-        ${renderHeader()}
+        ${renderHeaderCustomer()}
 
         <div class="sectionTitle">Kunde</div>
         <div class="card">
@@ -132,29 +151,31 @@ export default function RepairSlipPrint() {
         </div>
 
         <div class="sectionTitle">Reparationer</div>
-        ${(order.repairs || []).map((r) => {
-          const p = r.part || null;
-          return `
-            <div class="repairItem">
-              <div class="repRow1">${r.device || ""} — ${r.repair || ""}</div>
-              <div class="repRow2">
-                <span class="repMeta"><span class="label">Pris</span><strong>${Number(r.price||0)} kr</strong></span>
-                <span class="repMeta"><span class="label">Tid</span><strong>${Number(r.time||0)} min</strong></span>
-              </div>
-              ${
-                p
-                  ? `<div class="partRow">Reservedel: <strong>${p.model || "-"}</strong>
-                       ${p.location ? `<span class="chip">${p.location}</span>` : ""}
-                       ${(p.stock ?? "") !== "" ? `<span class="chip">Lager: ${p.stock}</span>` : ""}
-                     </div>`
-                  : ""
-              }
+        ${(order.repairs || []).map((r) => `
+          <div class="repairItem">
+            <div class="repRow1">${r.device || ""} — ${r.repair || ""}</div>
+            <div class="repRow2">
+              <span class="repMeta"><span class="label">Pris</span><strong>${Number(r.price||0)} kr</strong></span>
+              <span class="repMeta"><span class="label">Tid</span><strong>${Number(r.time||0)} min</strong></span>
             </div>
-          `;
-        }).join("")}
+            <!-- ingen reservedel på kundeslip -->
+          </div>
+        `).join("")}
 
         <div class="totalBox"><span>Total</span><span>${total} kr</span></div>
         <div class="paymentBox">Betaling: ${paymentText}</div>
+
+        <!-- Oplysninger: adgangskode, kontakt, note -->
+        <div class="infoBox">
+          <div><strong>Adgangskode:</strong> ${order.password || "—"}</div>
+          <div><strong>Kontakt:</strong> ${order.contact || "—"}</div>
+          <div><strong>Note:</strong> ${order.note || "—"}</div>
+        </div>
+
+        <div class="footer">
+          Taastrup Hovedgade 66, 2630 Taastrup · Tlf: 70 70 78 56 · info@telegiganten.dk<br/>
+          Man–Fre 10–18, Lør 10–14 — <strong>Husk din kvittering når du henter din reparation!</strong>
+        </div>
       </div>
     `;
   }
@@ -162,11 +183,9 @@ export default function RepairSlipPrint() {
   function renderTechSlip() {
     return `
       <div class="sheet">
-        ${renderHeader()}
+        ${renderHeaderTech()}
 
         <div class="sectionTitle">Reparation</div>
-
-        <!-- Adgangskode meget tydeligt, lige under Reparation -->
         <div class="passwordBox">Adgangskode: ${order.password || "—"}</div>
 
         ${(order.repairs || []).map((r) => {
@@ -203,7 +222,7 @@ export default function RepairSlipPrint() {
     `;
   }
 
-  // ---------- Print-control: to jobs i samme popup ----------
+  /* ========== Print: to jobs i samme popup ========== */
   const printTwoJobs = async () => {
     const w = window.open("", "tg-print", "width=460,height=700");
     if (!w) { alert("Popup blokeret – tillad popups for at printe."); return; }
@@ -217,7 +236,6 @@ export default function RepairSlipPrint() {
             <style>${baseStyles}</style>
           </head><body>${innerHTML}</body></html>`);
         w.document.close();
-
         setTimeout(() => {
           const onAfter = () => { w.removeEventListener("afterprint", onAfter); resolve(); };
           w.addEventListener("afterprint", onAfter);
@@ -235,7 +253,7 @@ export default function RepairSlipPrint() {
 
   useEffect(() => { if (order) printTwoJobs(); }, []); // eslint-disable-line
 
-  // Skærmforhåndsvisning + knapper
+  /* Preview/knapper på skærm */
   return (
     <div style={{ maxWidth: 620, margin: "12px auto", padding: "0 12px" }}>
       <h3>Udskriver kvitteringer…</h3>
