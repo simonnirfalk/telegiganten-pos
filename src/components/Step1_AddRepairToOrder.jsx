@@ -11,7 +11,6 @@ import { useRepairContext } from "../context/RepairContext";
 import { api } from "../data/apiClient";
 import { getNextOrderId } from "../data/orderId";
 
-
 /* ----------------- Søgehelpers (fleksibel match) ----------------- */
 function norm(str = "") {
   return (str + "")
@@ -73,19 +72,24 @@ export default function Step1_AddRepairToOrder({
 
   const { data: repairStructure = [], loading } = useRepairContext();
 
-useEffect(() => {
-  async function initOrderId() {
-    if (!order?.orderId) {
-      try {
-        const id = await getNextOrderId();
-        setOrder((prev) => ({ ...prev, orderId: id }));
-      } catch (err) {
-        console.error("Kunne ikke hente næste order_id", err);
+  // HENT NÆSTE ORDRE-ID OG SÆT DET PÅ FELTET `id` (← VIGTIGT)
+  useEffect(() => {
+    let cancelled = false;
+    async function initOrderId() {
+      if (!order?.id) {
+        try {
+          const id = await getNextOrderId();
+          if (!cancelled) {
+            setOrder((prev) => ({ ...prev, id }));
+          }
+        } catch (err) {
+          console.error("Kunne ikke hente næste order_id", err);
+        }
       }
     }
-  }
-  initOrderId();
-}, []);
+    initOrderId();
+    return () => { cancelled = true; };
+  }, [order?.id, setOrder]);
 
   // Hent kunder via proxy
   useEffect(() => {

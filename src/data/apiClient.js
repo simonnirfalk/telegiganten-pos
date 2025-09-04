@@ -85,20 +85,6 @@ async function httpJson(url, options = {}) {
   return payload;
 }
 
-// OrderID //
-async function getNextOrderId() {
-  // brug samme proxy som de andre kald
-  const res = await api.proxy({
-    destination: 'telegiganten-wp',
-    data: {
-      method: 'GET',
-      path: '/wp-json/telegiganten/v1/next-order-id',
-    },
-  });
-  if (!res || !res.next_id) throw new Error('Ugyldigt svar fra API');
-  return res.next_id;
-}
-
 /**
  * Sender en request gennem WP-proxyen.
  * - path: fx "/wp-json/telegiganten/v1/customers" (kan være absolut til WP_ORIGIN – konverteres)
@@ -462,12 +448,6 @@ export const api = {
       query: { model_id: modelId },
     }),
 
-  getNextOrderId: () =>
-    proxyFetch({
-      path: "/wp-json/telegiganten/v1/next-order-id",
-      method: "GET",
-  }),
-
   getTopModels: () => proxyFetch({ path: "/wp-json/telegiganten/v1/top-models" }),
 
   getAllRepairs: () => proxyFetch({ path: "/wp-json/telegiganten/v1/all-repairs" }),
@@ -503,10 +483,6 @@ export const api = {
     proxyFetch({ path: "/wp-json/telegiganten/v1/customer-by-phone", method: "GET", query: { phone } }),
 
   /* ---------------------- Ordrer (tg_repair) ---------------------- */
-
-  getNextOrderId: () =>
-    proxyFetch({ path: "/wp-json/telegiganten/v1/next-order-id" }),
-
   getRepairOrders: () => proxyFetch({ path: "/wp-json/telegiganten/v1/repair-orders" }),
 
   createRepair: (data) => proxyFetch({ path: "/wp-json/telegiganten/v1/create-repair", method: "POST", body: data }),
@@ -516,7 +492,7 @@ export const api = {
   updateRepairWithHistory: (data) =>
     proxyFetch({ path: "/wp-json/telegiganten/v1/update-repair-with-history", method: "POST", body: data }),
 
-  // 👇 NY: Hent næste fortløbende ordre-id via WP-endpointet og returnér tallet
+  // Eneste officielle: henter fortløbende id fra WP og returnerer tallet
   getNextOrderId: async () => {
     const res = await proxyFetch({
       path: "/wp-json/telegiganten/v1/next-order-id",
@@ -587,4 +563,3 @@ export const api = {
       body: { to, body, repair_id },
     }),
 };
-
