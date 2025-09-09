@@ -1,7 +1,9 @@
-// src/components/Step1_AddRepairToOrder.jsx
+// src/pages/Step1_AddRepairToOrder.jsx
 import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { FaPlus, FaUserPlus, FaUser, FaHome, FaLock, FaPhone, FaEnvelope, FaEdit } from "react-icons/fa";
+import {
+  FaPlus, FaUserPlus, FaUser, FaHome, FaLock, FaPhone, FaEnvelope, FaEdit
+} from "react-icons/fa";
 import RepairModal from "../components/RepairModal";
 import CreateCustomerModal from "../components/CreateCustomerModal";
 import SelectCustomerModal from "../components/SelectCustomerModal";
@@ -10,6 +12,14 @@ import OrderSidebarCompact from "../components/OrderSidebarCompact";
 import { useRepairContext } from "../context/RepairContext";
 import { api } from "../data/apiClient";
 import { getNextOrderId } from "../data/orderId";
+
+// ⬅️ NY: fælles sorter
+import {
+  sortBrands,
+  makeModelSorter,
+  sortRepairs,
+  brandOrder as BrandPriorityOrder, // bruger vi til per-brand prioritet ved søgning
+} from "../helpers/sorting";
 
 /* ----------------- Søgehelpers (fleksibel match) ----------------- */
 function norm(str = "") {
@@ -70,18 +80,17 @@ export default function Step1_AddRepairToOrder({
   const [openSelectCustomer, setOpenSelectCustomer] = useState(false);
   const [openEditCustomer, setOpenEditCustomer] = useState(false);
 
-  const { data: repairStructure = [], loading } = useRepairContext();
+  const { data: repairStructureRaw = [], loading } = useRepairContext();
+  const repairStructure = Array.isArray(repairStructureRaw) ? repairStructureRaw : [];
 
-  // HENT NÆSTE ORDRE-ID OG SÆT DET PÅ FELTET `id` (← VIGTIGT)
+  // HENT NÆSTE ORDRE-ID OG SÆT DET PÅ FELTET `id`
   useEffect(() => {
     let cancelled = false;
     async function initOrderId() {
       if (!order?.id) {
         try {
           const id = await getNextOrderId();
-          if (!cancelled) {
-            setOrder((prev) => ({ ...prev, id }));
-          }
+          if (!cancelled) setOrder((prev) => ({ ...prev, id }));
         } catch (err) {
           console.error("Kunne ikke hente næste order_id", err);
         }
@@ -94,8 +103,7 @@ export default function Step1_AddRepairToOrder({
   // Hent kunder via proxy
   useEffect(() => {
     let isMounted = true;
-    api
-      .getCustomers()
+    api.getCustomers()
       .then((data) => {
         if (!isMounted) return;
         const mapped = (Array.isArray(data) ? data : []).map((c) => ({
@@ -180,42 +188,78 @@ export default function Step1_AddRepairToOrder({
   const normalizedSearch = useMemo(() => searchTerm.trim(), [searchTerm]);
   const searchTokens = useMemo(() => tokenize(normalizedSearch), [normalizedSearch]);
 
+  // Brands (filtreret + sorteret)
   const brandsFiltered = useMemo(() => {
-    if (selectedCategory !== "Alle") {
-      return repairStructure.filter((b) => b.title === selectedCategory);
+    let list;
+    if (selectedCategory !== "Alle" && repairStructure.some((b) => b.title === selectedCategory)) {
+      list = repairStructure.filter((b) => b.title === selectedCategory);
+    } else if (searchTokens.length > 0) {
+      list = repairStructure; // global søgning på tværs af brands
+    } else {
+      // “Alle” uden søgning → kun brands med populære modeller
+      list = repairStructure.filter((b) =>
+        (b.models || []).some((m) => popularModelNames.includes(m.title))
+      );
     }
-    if (searchTokens.length > 0) {
-      return repairStructure; // global søgning
-    }
-    return repairStructure.filter((b) =>
-      (b.models || []).some((m) => popularModelNames.includes(m.title))
-    );
+    return [...list].sort(sortBrands);
   }, [repairStructure, selectedCategory, searchTokens, popularModelNames]);
 
+  // Hjælp: brand-prioritet tal (til søgning hvor flere brands blandes)
+  const brandPriorityIndex = useMemo(() => {
+    const map = new Map();
+    BrandPriorityOrder.forEach((name, idx) => map.set(name, idx));
+    return (brandTitle) => {
+      const i = map.get(String(brandTitle || ""));
+      return typeof i === "number" ? i : 999;
+    };
+  }, []);
+
+  // Modeller (filtreret + sorteret pr brand)
   const filteredModels = useMemo(() => {
     const modelsWithBrand = brandsFiltered.flatMap((b) =>
-      (b.models || []).map((m) => ({ ...m, __brand: b.title }))
+      (Array.isArray(b.models) ? b.models : []).map((m) => ({ ...m, __brand: b.title }))
     );
 
-    if (searchTokens.length === 0) {
-      if (selectedCategory === "Alle") {
-        return modelsWithBrand
-          .filter((m) => popularModelNames.includes(m.title))
-          .sort(
-            (a, b) =>
-              popularModelNames.indexOf(a.title) -
-              popularModelNames.indexOf(b.title)
-          );
-      }
-      return modelsWithBrand;
+    if (modelsWithBrand.length === 0) return [];
+
+    // “Alle” uden søgning → vis populære modeller i fast rækkefølge
+    if (searchTokens.length === 0 && selectedCategory === "Alle") {
+      return modelsWithBrand
+        .filter((m) => popularModelNames.includes(m.title))
+        .sort(
+          (a, b) => popularModelNames.indexOf(a.title) - popularModelNames.indexOf(b.title)
+        );
     }
 
-    // Fleksibel søgning (AND over tokens)
-    return modelsWithBrand.filter((m) => {
-      const hay = buildHaystack(m, m.__brand);
-      return searchTokens.every((t) => hay.includes(norm(t)));
+    // Hvis der søges → AND-match pr. model
+    const matched = searchTokens.length
+      ? modelsWithBrand.filter((m) => {
+          const hay = buildHaystack(m, m.__brand);
+          return searchTokens.every((t) => hay.includes(norm(t)));
+        })
+      : modelsWithBrand;
+
+    if (matched.length === 0) return [];
+
+    // Sorter:
+    // 1) brand-prioritet
+    // 2) brand-specifik model-sorter
+    return [...matched].sort((a, b) => {
+      const ba = a.__brand || "";
+      const bb = b.__brand || "";
+      const pA = brandPriorityIndex(ba);
+      const pB = brandPriorityIndex(bb);
+      if (pA !== pB) return pA - pB;
+
+      // pr-brand modelsorter
+      const modelSorter = makeModelSorter(ba);
+      const res = modelSorter(a, b);
+      if (res !== 0) return res;
+
+      // stabil tie-break (dansk alfabetisk)
+      return String(a.title || "").localeCompare(String(b.title || ""), "da");
     });
-  }, [brandsFiltered, selectedCategory, searchTokens, popularModelNames]);
+  }, [brandsFiltered, selectedCategory, searchTokens, popularModelNames, brandPriorityIndex]);
 
   /* ---------- Handlers ---------- */
   const handleAddRepair = (deviceName, repair) => {
@@ -250,7 +294,7 @@ export default function Step1_AddRepairToOrder({
     }));
   };
 
-  // NY: opdater KUN pris/tid for en specifik linje
+  // Opdater KUN pris/tid for en specifik linje
   const onUpdateRepair = (idx, patch) => {
     setOrder((prev) => {
       const next = [...prev.repairs];
@@ -351,6 +395,11 @@ export default function Step1_AddRepairToOrder({
                     {model.title}
                   </div>
                 ))}
+                {filteredModels.length === 0 && (
+                  <div style={{ gridColumn: "1 / -1", opacity: 0.7 }}>
+                    Ingen modeller fundet.
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -369,7 +418,7 @@ export default function Step1_AddRepairToOrder({
         <OrderSidebarCompact
           order={order}
           onRemoveRepair={onRemoveRepair}
-          onUpdateRepair={onUpdateRepair}  /* <— NY prop */
+          onUpdateRepair={onUpdateRepair}
         />
 
         {/* Kunde */}
@@ -490,15 +539,14 @@ export default function Step1_AddRepairToOrder({
         </div>
       </div>
 
-      {/* Modals (kun til at TILFØJE reparationer) */}
+      {/* Modals (til at TILFØJE reparationer) */}
       <RepairModal
         device={modalDevice}
         repairs={
-          (
-            repairStructure.flatMap((brand) => brand.models || []).find(
-              (m) => m.id === modalDevice?.id
-            ) || {}
-          ).repairs || []
+          (repairStructure
+            .flatMap((brand) => Array.isArray(brand.models) ? brand.models : [])
+            .find((m) => m.id === (modalDevice?.id ?? null)) || {}
+          ).repairs?.slice()?.sort(sortRepairs) || [] // ⬅️ NY: sortér reparationer
         }
         onAdd={handleAddRepair}
         onClose={() => setModalDevice(null)}
