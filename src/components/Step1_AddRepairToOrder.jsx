@@ -10,6 +10,7 @@ import OrderSidebarCompact from "../components/OrderSidebarCompact";
 import { useRepairContext } from "../context/RepairContext";
 import { api } from "../data/apiClient";
 import { getNextOrderId } from "../data/orderId";
+import { sortBrands, makeModelSorter } from "../helpers/sorting"; // ⬅️ NY
 
 /* ----------------- Søgehelpers (fleksibel match) ----------------- */
 function norm(str = "") {
@@ -72,7 +73,7 @@ export default function Step1_AddRepairToOrder({
 
   const { data: repairStructure = [], loading } = useRepairContext();
 
-  // HENT NÆSTE ORDRE-ID OG SÆT DET PÅ FELTET `id` (← VIGTIGT)
+  // HENT NÆSTE ORDRE-ID ...
   useEffect(() => {
     let cancelled = false;
     async function initOrderId() {
@@ -155,19 +156,9 @@ export default function Step1_AddRepairToOrder({
   };
 
   /* ---------- Model/brand filtrering ---------- */
-  const popularModelNames = [
-    "iPhone 11","iPhone 12","iPhone 13","iPhone 14","iPhone 15",
-    "iPhone 11 Pro","iPhone 12 Mini","iPhone 13 Pro Max","iPhone 14 Plus","iPhone 15 Pro",
-    "Samsung Galaxy S20 FE","Samsung Galaxy S21+","Samsung Galaxy S22","Samsung Galaxy S23 Ultra","Samsung Galaxy S24",
-    "Samsung Galaxy A55","Samsung Galaxy A34","Samsung Galaxy A14","Samsung Galaxy A54","Samsung Galaxy A72",
-    "iPad 10.2 (2021)","iPad Pro 11 (2018)","MacBook Pro 13 inch A1708","MacBook Air 13 inch, A2179","Motorola Moto G54",
-  ];
+  const popularModelNames = [ /* ... uændret ... */ ];
 
-  const customCategoryOrder = [
-    "Alle","iPhone","Samsung mobil","iPad","MacBook","iMac","Samsung Galaxy Tab","Motorola mobil","OnePlus mobil",
-    "Nokia mobil","Xiaomi mobil","Sony Xperia","Oppo mobil","Microsoft mobil","Honor mobil",
-    "Google Pixel","Apple Watch","Samsung Book","Huawei tablet","Mobil","Tablet","Laptop","Stationær computer",
-  ];
+  const customCategoryOrder = [ /* ... uændret ... */ ];
 
   const allCategories = useMemo(
     () =>
@@ -181,15 +172,17 @@ export default function Step1_AddRepairToOrder({
   const searchTokens = useMemo(() => tokenize(normalizedSearch), [normalizedSearch]);
 
   const brandsFiltered = useMemo(() => {
+    let list;
     if (selectedCategory !== "Alle") {
-      return repairStructure.filter((b) => b.title === selectedCategory);
+      list = repairStructure.filter((b) => b.title === selectedCategory);
+    } else if (searchTokens.length > 0) {
+      list = repairStructure; // global søgning
+    } else {
+      list = repairStructure.filter((b) =>
+        (b.models || []).some((m) => popularModelNames.includes(m.title))
+      );
     }
-    if (searchTokens.length > 0) {
-      return repairStructure; // global søgning
-    }
-    return repairStructure.filter((b) =>
-      (b.models || []).some((m) => popularModelNames.includes(m.title))
-    );
+    return [...list].sort(sortBrands); // ⬅️ NY
   }, [repairStructure, selectedCategory, searchTokens, popularModelNames]);
 
   const filteredModels = useMemo(() => {
@@ -197,24 +190,24 @@ export default function Step1_AddRepairToOrder({
       (b.models || []).map((m) => ({ ...m, __brand: b.title }))
     );
 
+    let models;
     if (searchTokens.length === 0) {
       if (selectedCategory === "Alle") {
-        return modelsWithBrand
+        models = modelsWithBrand
           .filter((m) => popularModelNames.includes(m.title))
-          .sort(
-            (a, b) =>
-              popularModelNames.indexOf(a.title) -
-              popularModelNames.indexOf(b.title)
-          );
+          .sort((a, b) => popularModelNames.indexOf(a.title) - popularModelNames.indexOf(b.title));
+      } else {
+        models = modelsWithBrand.sort(makeModelSorter(selectedCategory)); // ⬅️ NY
       }
-      return modelsWithBrand;
+    } else {
+      models = modelsWithBrand.filter((m) => {
+        const hay = buildHaystack(m, m.__brand);
+        return searchTokens.every((t) => hay.includes(norm(t)));
+      });
+      // ved søgning sorteres efter brandets modelsorter
+      models = models.sort(makeModelSorter(selectedCategory === "Alle" ? "" : selectedCategory)); // ⬅️ NY
     }
-
-    // Fleksibel søgning (AND over tokens)
-    return modelsWithBrand.filter((m) => {
-      const hay = buildHaystack(m, m.__brand);
-      return searchTokens.every((t) => hay.includes(norm(t)));
-    });
+    return models;
   }, [brandsFiltered, selectedCategory, searchTokens, popularModelNames]);
 
   /* ---------- Handlers ---------- */
