@@ -57,6 +57,7 @@ export const repairTitleOrder = [
   "Bagcover (inkl. ramme)",
   "Bagkamera",
   "Frontkamera",
+  "Kamera lens (Glas)",
   "Højtaler",
   "Ørehøjtaler",
   "Tænd/sluk",
