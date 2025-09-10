@@ -67,6 +67,7 @@ export const repairTitleOrder = [
   "WiFi-antenne",
   "Vandskade",
   "Software",
+  "fjern Google konto",
   "Overfør data til ny enhed",
   "Diagnose",
 ];
