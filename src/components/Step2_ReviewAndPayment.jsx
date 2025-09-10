@@ -38,92 +38,121 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
     return `Betaling efter reparation: ${totalFormatted} kr`;
   }
 
+  /**
+   * NY IMPLEMENTATION:
+   * Opret ÉN reparationspost (master) med alle linjer i meta,
+   * i stedet for én post pr. linje.
+   */
   async function saveRepairsToWordPress() {
-    const updatedRepairs = [];
-
-    for (const r of order.repairs) {
-      const title = `${order.id} • ${order.customer?.name || ""} • ${r.device} • ${r.repair}`;
-
+    const lines = (order.repairs || []).map((r) => {
       const part = r.part || null;
-      const partFields = part
-        ? {
-            spare_part_id: part.id || null,
-            spare_part_model: part.model || "",
-            spare_part_stock: Number(part.stock ?? 0),
-            spare_part_location: part.location || "",
-          }
-        : {
-            spare_part_id: null,
-            spare_part_model: "",
-            spare_part_stock: null,
-            spare_part_location: "",
-          };
-
-      // 1) Opret ordrelinjen i WP (inkl. kontakt)
-      const createRes = await api.createRepair({
-        title,
-        repair: r.repair,
+      return {
         device: r.device,
+        repair: r.repair,
         price: Number(r.price) || 0,
         time: Number(r.time) || 0,
         model_id: r.model_id || 0,
-        order_id: order.id,
-        customer_id: order.customer?.id || 0,
-
-        status: "under reparation",
-        payment_type: paymentType,
-        payment_total: Number(total) || 0,
-        deposit_amount: paymentType === "depositum" ? (Number(depositAmount) || 0) : 0,
-        remaining_amount: paymentType === "depositum" ? remaining : 0,
-        payment: paymentText(),
-        password: order.password || "",
-        note: order.note || "",
-        contact: order.contact || "",            // <-- Kontakt
-        customer: order.customer?.name || "",
-        phone: order.customer?.phone || "",
-
-        meta: part ? partFields : {},
-      });
-
-      if (!createRes || createRes.status !== "created" || !createRes.repair_id) {
-        throw new Error("Opret reparation fejlede.");
-      }
-
-      const repairId = createRes.repair_id;
-
-      // 2) Opdater + historik (inkl. kontakt)
-      const fields = {
-        status: "under reparation",
-        payment_type: paymentType,
-        payment_total: Number(total) || 0,
-        deposit_amount: paymentType === "depositum" ? (Number(depositAmount) || 0) : 0,
-        remaining_amount: paymentType === "depositum" ? remaining : 0,
-        payment: paymentText(),
-        created_at: createdAtISO,
-        password: order.password || "",
-        note: order.note || "",
-        contact: order.contact || "",            // <-- Kontakt
-        customer: order.customer?.name || "",
-        phone: order.customer?.phone || "",
+        part: part
+          ? {
+              id: part.id ?? part.ID ?? null,
+              model: part.model ?? "",
+              stock: Number(part.stock ?? 0),
+              location: part.location ?? "",
+              category: part.category ?? "",
+              repair: part.repair ?? "",
+            }
+          : null,
       };
+    });
 
-      await api.updateRepairWithHistory({
-        repair_id: repairId,
-        fields,
-        meta: part ? partFields : {}
-      });
+    const totalPrice = lines.reduce((s, l) => s + (Number(l.price) || 0), 0);
+    const totalTime  = lines.reduce((s, l) => s + (Number(l.time)  || 0), 0);
+    const firstDevice = lines[0]?.device || "";
+    const repairSummary = lines.map((l) => l.repair).filter(Boolean).join(", ");
 
-      updatedRepairs.push({ ...r, id: repairId });
+    const metaPayload = {
+      lines_count: lines.length,
+      // to be safe on WP side, send both object and JSON string:
+      lines,                          // hvis backend kan gemme arrays
+      lines_json: JSON.stringify(lines), // hvis backend forventer strenge
+    };
+
+    const title = `${order.id} • ${order.customer?.name || ""} • ${firstDevice}${repairSummary ? " — " + repairSummary : ""}`;
+
+    // 1) Opret master-reparation
+    const createRes = await api.createRepair({
+      title,
+      // aggregeret “hoved”-reparation
+      repair: repairSummary || "Flere reparationer",
+      device: firstDevice,
+      price: Number(totalPrice) || 0,
+      time: Number(totalTime) || 0,
+      model_id: lines[0]?.model_id || 0,
+
+      order_id: order.id,
+      customer_id: order.customer?.id || 0,
+
+      status: "under reparation",
+      payment_type: paymentType,
+      payment_total: Number(total) || 0,
+      deposit_amount: paymentType === "depositum" ? (Number(depositAmount) || 0) : 0,
+      remaining_amount: paymentType === "depositum" ? remaining : 0,
+      payment: paymentText(),
+
+      password: order.password || "",
+      note: order.note || "",
+      contact: order.contact || "",
+      customer: order.customer?.name || "",
+      phone: order.customer?.phone || "",
+
+      meta: metaPayload,
+    });
+
+    if (!createRes || createRes.status !== "created" || !createRes.repair_id) {
+      throw new Error("Opret reparation fejlede.");
     }
 
-    setOrder(prev => ({
+    const masterRepairId = createRes.repair_id;
+
+    // 2) Opdater + historik (aggregerede felter + gem meta igen for en sikkerheds skyld)
+    const fields = {
+      status: "under reparation",
+      payment_type: paymentType,
+      payment_total: Number(total) || 0,
+      deposit_amount: paymentType === "depositum" ? (Number(depositAmount) || 0) : 0,
+      remaining_amount: paymentType === "depositum" ? remaining : 0,
+      payment: paymentText(),
+      created_at: createdAtISO,
+
+      // aggregeret “hoved”-reparation
+      repair: repairSummary || "Flere reparationer",
+      device: firstDevice,
+      price: Number(totalPrice) || 0,
+      time: Number(totalTime) || 0,
+
+      password: order.password || "",
+      note: order.note || "",
+      contact: order.contact || "",
+      customer: order.customer?.name || "",
+      phone: order.customer?.phone || "",
+    };
+
+    await api.updateRepairWithHistory({
+      repair_id: masterRepairId,
+      fields,
+      meta: metaPayload,
+    });
+
+    // Gem master id i state (vi beholder dine linjer uændret til print osv.)
+    setOrder((prev) => ({
       ...prev,
       paymentType,
       depositAmount,
-      repairs: updatedRepairs
+      masterRepairId,
+      // behold prev.repairs som er linjerne
     }));
 
-    return updatedRepairs;
+    return masterRepairId;
   }
 
   async function handleConfirm() {
@@ -132,19 +161,20 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
     setError("");
 
     try {
-      const updatedRepairs = await saveRepairsToWordPress();
+      const masterRepairId = await saveRepairsToWordPress();
 
       const cleanOrder = {
         id: order.id,
         today,
         created_at: createdAtISO,
         customer: order.customer,
-        repairs: updatedRepairs,
+        repairs: order.repairs,               // behold alle linjer til slip
         password: order.password || "",
         note: order.note || "",
-        contact: order.contact || "",        // følger med til print
+        contact: order.contact || "",
         total,
-        payment: { method: paymentType, upfront: Number(depositAmount) || 0 }
+        payment: { method: paymentType, upfront: Number(depositAmount) || 0 },
+        masterRepairId,                       // nyttigt hvis man skal slå ordren op igen
       };
 
       try { localStorage.setItem("tg_last_order", JSON.stringify(cleanOrder)); } catch {}
@@ -153,7 +183,8 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
 
       if (typeof onSubmit === "function") onSubmit();
     } catch (e) {
-      setError("Der opstod en fejl under gem af reparationerne.");
+      console.error(e);
+      setError("Der opstod en fejl under gem af reparationen.");
     } finally {
       setSaving(false);
     }
@@ -217,7 +248,7 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
               <p style={{ margin: 0 }}><FaPhone style={{ marginRight: "0.5rem" }} />{order.customer?.phone || "-"}</p>
               <p style={{ margin: 0 }}><FaEnvelope style={{ marginRight: "0.5rem" }} />{order.customer?.email || "-"}</p>
             </div>
-            <div style={{ textAlign: "right", fontSize: "0.9rem", color: "#555" }}>
+            <div style={{ textAlign: "right", fontSize: "0.9rem", color: "rgb(85,85,85)" }}>
               <p style={{ margin: 0 }}>Dato: {today}</p>
               <p style={{ margin: 0 }}>Ordre-ID: #{order.id || "–"}</p>
             </div>
@@ -291,7 +322,7 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
           backgroundColor: "#f9f9f9",
           display: "flex",
           flexDirection: "column",
-          gap: "1.5rem" // <— i stedet for justifyContent: "space-between"
+          gap: "1.5rem"
         }}
       >
         <div>
