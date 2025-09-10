@@ -11,6 +11,22 @@ const dkMonths = [
   "juli","august","september","oktober","november","december"
 ];
 
+// Map “pæne” felter til WP meta-nøgler
+function remapFieldsForWp(fields = {}) {
+  const f = { ...fields };
+  if (Object.prototype.hasOwnProperty.call(f, "model")) {
+    f.device = f.model; delete f.model;
+  }
+  if (Object.prototype.hasOwnProperty.call(f, "price")) {
+    f._telegiganten_repair_repair_price = Number(f.price); delete f.price;
+  }
+  if (Object.prototype.hasOwnProperty.call(f, "time")) {
+    f._telegiganten_repair_repair_time = Number(f.time); delete f.time;
+  }
+  return f;
+}
+
+
 function formatDkDateTime(value) {
   if (!value) return "—";
   const d = new Date(value);
@@ -106,6 +122,7 @@ export default function RepairsPage() {
 
   /** Gem ændringer m. historik (accepter både {repair_id, fields} og fladt objekt) */
   const handleSaveRepair = async (payloadFromModal) => {
+    // Pak payload ud til { repair_id, fields }
     let payload = { repair_id: 0, fields: {} };
 
     if (payloadFromModal && typeof payloadFromModal === "object") {
@@ -118,7 +135,7 @@ export default function RepairsPage() {
         const { id, ...rest } = payloadFromModal;
         payload = {
           repair_id: Number(id || 0),
-          fields: rest,
+          fields: rest || {},
         };
       }
     }
@@ -129,10 +146,43 @@ export default function RepairsPage() {
       return;
     }
 
-    try {
-      await api.updateRepairWithHistory(payload);
+    // Map UI-felter -> WP meta-nøgler
+    const wpFields = { ...payload.fields };
 
-      // Optimistisk UI-opdatering af tabellen:
+    // model -> device (så 'Model' vises rigtigt efter reload)
+    if (Object.prototype.hasOwnProperty.call(wpFields, "model")) {
+      wpFields.device = wpFields.model;
+      delete wpFields.model;
+    }
+
+    // price -> _telegiganten_repair_repair_price (tal)
+    if (Object.prototype.hasOwnProperty.call(wpFields, "price")) {
+      wpFields._telegiganten_repair_repair_price = Number(wpFields.price);
+      delete wpFields.price;
+    }
+
+    // time -> _telegiganten_repair_repair_time (tal)
+    if (Object.prototype.hasOwnProperty.call(wpFields, "time")) {
+      wpFields._telegiganten_repair_repair_time = Number(wpFields.time);
+      delete wpFields.time;
+    }
+
+    // Normalisér andre numeriske felter hvis de er med
+    ["payment_total", "deposit_amount", "remaining_amount"].forEach((k) => {
+      if (Object.prototype.hasOwnProperty.call(wpFields, k)) {
+        const n = Number(wpFields[k]);
+        if (!Number.isNaN(n)) wpFields[k] = n;
+      }
+    });
+
+    try {
+      // Gem i WP med de rigtige nøgler
+      await api.updateRepairWithHistory({
+        repair_id: payload.repair_id,
+        fields: wpFields,
+      });
+
+      // Optimistisk UI-opdatering — behold de “pæne” felter i tabellen
       setRepairs((prev) =>
         prev.map((r) =>
           r.id === payload.repair_id ? { ...r, ...payload.fields } : r
