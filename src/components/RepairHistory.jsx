@@ -313,8 +313,18 @@ export default function RepairHistory({ repair, onClose, onSave }) {
     return `Kære ${name}. Din reparation #${id} er klar til afhentning. ${info}`;
   }, [repair.customer, repair.order_id, repair.id]);
   const [smsText, setSmsText] = useState(defaultSmsText);
-  const [smsTo, setSmsTo] = useState(repair.phone || "");
-  useEffect(() => { setSmsText(defaultSmsText); setSmsTo(repair.phone || ""); }, [defaultSmsText, repair.phone]);
+
+  // >>> NYT: vælg SMS-modtager = Kontakt (alternativ) hvis udfyldt, ellers kundens telefon
+  const pickSmsRecipient = (r, e) => {
+    const alt = (e?.contact ?? r?.contact ?? "").toString().trim();
+    const primary = (r?.phone ?? "").toString().trim();
+    return alt || primary;
+  };
+  const [smsTo, setSmsTo] = useState(pickSmsRecipient(repair, edited));
+  useEffect(() => {
+    setSmsText(defaultSmsText);
+    setSmsTo(pickSmsRecipient(repair, edited));
+  }, [defaultSmsText, repair.phone, repair.contact, edited.contact]);
 
   async function handleSendSMS() {
     if (!smsTo || !smsText.trim()) return;
