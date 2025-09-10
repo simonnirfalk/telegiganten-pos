@@ -125,7 +125,7 @@ const m = {
   modal: { width: "min(520px, 92vw)", background: "#fff", borderRadius: 12, padding: 16, boxShadow: "0 8px 32px rgba(0,0,0,.2)" },
   label: { display: "block", fontSize: 12, margin: "6px 0 4px", color: "#374151" },
   input: { width: "100%", padding: "10px 12px", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 14 },
-  btnGhost: { background: "transparent", border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 12px", cursor: "pointer" },
+  btnGhost: { background: "transparent", border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 12px", cursor: "pointer", color: "#111" },
   btnPrimary: { background: "#2166AC", color: "#fff", border: "none", borderRadius: 8, padding: "10px 16px", fontWeight: 700 },
 };
 
