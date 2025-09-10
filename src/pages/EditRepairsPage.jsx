@@ -118,6 +118,31 @@ export default function EditRepairsPage() {
     return null;
   };
 
+  // ⇩⇩ NYT: status for kørende sync
+  const [syncingBrand, setSyncingBrand] = useState(null);
+
+  // ⇩⇩ NYT: skabelon-map for et brand: title -> { price, duration, active }
+  const getBrandTemplateMap = (brandName) => {
+    const b = data.find((x) => x.brand === brandName);
+    if (!b) return new Map();
+    const map = new Map();
+    (b.models || []).forEach((m) =>
+      (m.options || []).forEach((o) => {
+        const title = (o?.title || "").trim();
+        if (!title) return;
+        if (!map.has(title)) {
+          map.set(title, {
+            price: Number(o.price) || 0,
+            duration: Number(o.duration) || 0,
+            active: String(o.repair_option_active ?? "1") === "1" ? 1 : 0,
+          });
+        }
+      })
+    );
+    return map;
+  };
+
+
   /* ---------- Toggle aktiv / slet / gem ---------- */
   const toggleRepairActive = async (repairId, isActive) => {
     try {
@@ -275,6 +300,95 @@ export default function EditRepairsPage() {
       alert("Kunne ikke gemme modelnavn.");
     } finally {
       setSavingModelName(false);
+    }
+  };
+
+  // ⇩⇩ NYT: Synkronisér skabelonens reparationer til alle modeller under et brand
+  const handleSyncBrandMissingRepairs = async (brandName) => {
+    const brandObj = data.find((b) => b.brand === brandName);
+    if (!brandObj) { alert("Enheden blev ikke fundet."); return; }
+
+    const tpl = getBrandTemplateMap(brandName); // Map<title, {price, duration, active}>
+    const allTitles = Array.from(tpl.keys());
+    if (allTitles.length === 0) { alert("Ingen skabelontitler fundet for denne enhed."); return; }
+
+    setSyncingBrand(brandName);
+    try {
+      // title -> model_ids der mangler den titel (til efterfølgende pris/tid-opdatering)
+      const perTitleMissing = new Map();
+
+      // 1) Opret manglende titler på hver model (pris/tid sættes til 0 ved oprettelse)
+      for (const m of brandObj.models || []) {
+        const model_id = m.options?.[0]?.model_id;
+        if (!model_id) continue;
+
+        const have = new Set((m.options || []).map((o) => (o.title || "").trim()).filter(Boolean));
+        const missing = allTitles.filter((t) => !have.has(t));
+        if (missing.length === 0) continue;
+
+        // Opret alle manglende titler på én gang (0/0/inaktiv)
+        // eslint-disable-next-line no-await-in-loop
+        const bulkRes = await api.bulkCreateRepairTemplates({
+          model_id,
+          titles: missing,
+          price: 0,
+          time: 0,
+          active: 0,
+        });
+        const createdIds = Array.isArray(bulkRes?.repair_ids) ? bulkRes.repair_ids : [];
+
+        // Husk hvilke modeller der mangler hvilke titler
+        missing.forEach((title) => {
+          const arr = perTitleMissing.get(title) || [];
+          arr.push(model_id);
+          perTitleMissing.set(title, arr);
+        });
+
+        // Optimistisk UI: læg dem ind i state med skabelonens pris/tid (bliver også skubbet til server lige efter)
+        setData((prev) =>
+          prev.map((b) => {
+            if (b.brand !== brandName) return b;
+            return {
+              ...b,
+              models: b.models.map((mm) => {
+                if (mm.model !== m.model) return mm;
+                const additions = missing.map((title, idx) => {
+                  const spec = tpl.get(title) || { price: 0, duration: 0, active: 0 };
+                  return {
+                    id: createdIds[idx] ?? `${model_id}_${title}`,
+                    title,
+                    price: spec.price,
+                    duration: spec.duration,
+                    model_id,
+                    repair_option_active: 0,
+                  };
+                });
+                return { ...mm, options: [...(mm.options || []), ...additions].sort(sortRepairs) };
+              }),
+            };
+          })
+        );
+      }
+
+      // 2) Sæt pris/tid på de nyoprettede titler ift. skabelonen (gøres pr. titel for alle modeller)
+      for (const [title, modelIdsRaw] of perTitleMissing.entries()) {
+        const spec = tpl.get(title) || { price: 0, duration: 0 };
+        const modelIds = Array.from(new Set(modelIdsRaw));
+        const fields = {};
+        if (Number.isFinite(Number(spec.price)))   fields["_telegiganten_repair_repair_price"] = Number(spec.price);
+        if (Number.isFinite(Number(spec.duration))) fields["_telegiganten_repair_repair_time"]  = Number(spec.duration);
+        if (Object.keys(fields).length === 0 || modelIds.length === 0) continue;
+
+        // eslint-disable-next-line no-await-in-loop
+        await api.applyRepairChanges({ title, fields, models: modelIds });
+      }
+
+      alert(`Synkroniseret skabelon til alle modeller under “${brandName}”.`);
+    } catch (err) {
+      console.error("Synkronisering fejlede:", err);
+      alert("Kunne ikke synkronisere skabelonen. Se konsollen for detaljer.");
+    } finally {
+      setSyncingBrand(null);
     }
   };
 
@@ -773,8 +887,38 @@ export default function EditRepairsPage() {
         ) : (
           paginatedBrands.map((brand) => (
             <div key={brand.brand} style={{ marginBottom: "1.25rem" }}>
-              <div style={{ fontWeight: 700, fontSize: "1.05rem", margin: "0.5rem 0" }}>
-                {brand.brand}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 8,
+                  fontWeight: 700,
+                  fontSize: "1.05rem",
+                  margin: "0.5rem 0",
+                }}
+              >
+                <span>{brand.brand}</span>
+
+                <button
+                  type="button"
+                  onClick={() => handleSyncBrandMissingRepairs(brand.brand)}
+                  disabled={syncingBrand === brand.brand}
+                  style={{
+                    backgroundColor: syncingBrand === brand.brand ? "#9bb8d4" : "#2166AC",
+                    color: "white",
+                    padding: "6px 10px",
+                    border: "none",
+                    borderRadius: "6px",
+                    cursor: syncingBrand === brand.brand ? "wait" : "pointer",
+                    fontWeight: 600,
+                    fontSize: "0.9rem",
+                    whiteSpace: "nowrap",
+                  }}
+                  title="Tilføj manglende skabelon-reparationer på alle modeller under denne enhed"
+                >
+                  {syncingBrand === brand.brand ? "Synkroniserer…" : "Tilføj manglende reparationer"}
+                </button>
               </div>
 
               {brand.models.map((m) => {
