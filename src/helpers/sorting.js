@@ -55,6 +55,7 @@ export const repairTitleOrder = [
   "Bundstik",
   "Bagcover (glas)",
   "Bagcover (inkl. ramme)",
+  "Bagcover",
   "Bagkamera",
   "Frontkamera",
   "Kamera lens (Glas)",
