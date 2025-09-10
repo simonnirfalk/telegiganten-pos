@@ -31,6 +31,17 @@ if (!import.meta.env.VITE_SPAREPARTS_LIST) {
 /** Felter vi viser/redigerer (matcher Code.gs -> _apiList kortnøgler) */
 const FIELDS = ["model", "price", "stock", "location", "category", "cost_price", "repair"];
 
+// Viste titler (UI) – rører ikke ved kolonne-mapping
+const FIELD_LABELS = {
+  model: "Model",
+  price: "Pris",
+  stock: "Lager",
+  location: "Lokation",
+  category: "Kategori",
+  cost_price: "Kostpris",
+  repair: "Reparation",
+};
+
 /** Map til create-kald (kortnøgle -> header i arket) */
 const TO_SHEET_HEADER = {
   model: "Model",
@@ -379,7 +390,7 @@ export default function SparePartsPage() {
 
         <input
           style={{ ...inputStyle, width: 320 }}
-          placeholder="Søg… (server, debounce)"
+          placeholder="Søg…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           title="Server-side søgning (hele arket)"
@@ -407,7 +418,7 @@ export default function SparePartsPage() {
             title="Tilføj ny række"
           >
             <FaPlus style={{ marginRight: 6 }} />
-            Tilføj reservedel
+            Tilføj reservedel, Samer
           </button>
 
           {loading && <span style={chip} aria-live="polite">Indlæser…</span>}
@@ -436,7 +447,8 @@ export default function SparePartsPage() {
             {FIELDS.map((field) => (
               <input
                 key={`new-${field}`}
-                placeholder={field}
+                placeholder={FIELD_LABELS[field] || field}
+                aria-label={FIELD_LABELS[field] || field}
                 value={newPart[field]}
                 onChange={(e) => setNewPart((prev) => ({ ...prev, [field]: e.target.value }))}
                 style={inputStyle}
