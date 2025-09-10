@@ -21,7 +21,7 @@ import {
   brandOrder as BrandPriorityOrder, // bruger vi til per-brand prioritet ved søgning
 } from "../helpers/sorting";
 
-/* ----------------- Søgehelpers (fleksibel match) ----------------- */
+/* ----------------- Små helpers til søgning ----------------- */
 function norm(str = "") {
   return (str + "")
     .normalize("NFD")
@@ -62,6 +62,74 @@ function tokenize(q = "") {
   return n.split("").every((c) => c === " ") ? [] : n.split(" ").filter(Boolean);
 }
 
+/* ----------------- NY: Modal for brugerdefineret enhed ----------------- */
+function CustomRepairModal({ open, onClose, onAdd }) {
+  const [device, setDevice] = useState("");
+  const [repair, setRepair] = useState("");
+  const [price, setPrice]   = useState("");
+  const [time, setTime]     = useState("");
+
+  useEffect(() => {
+    if (open) {
+      setDevice(""); setRepair(""); setPrice(""); setTime("");
+    }
+  }, [open]);
+
+  if (!open) return null;
+
+  const priceNum = Number(price);
+  const timeNum  = Number(time);
+  const canSave  = device.trim() && repair.trim() && Number.isFinite(priceNum) && Number.isFinite(timeNum);
+
+  const handleSave = () => {
+    if (!canSave) return;
+    onAdd({
+      device: device.trim(),
+      repair: repair.trim(),
+      price: Number(price) || 0,
+      time: Number(time) || 0,
+      model_id: 0,
+      part: null,
+    });
+    onClose();
+  };
+
+  return (
+    <div style={m.overlay} onClick={onClose}>
+      <div style={m.modal} onClick={(e) => e.stopPropagation()}>
+        <h3 style={{ marginTop: 0 }}>➕ Brugerdefineret enhed</h3>
+        <label style={m.label}>Model / Enhed</label>
+        <input value={device} onChange={(e)=>setDevice(e.target.value)} placeholder="fx iPhone 13 Pro" style={m.input}/>
+        <label style={m.label}>Reparation</label>
+        <input value={repair} onChange={(e)=>setRepair(e.target.value)} placeholder="fx Skærm (A+)" style={m.input}/>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div>
+            <label style={m.label}>Pris (kr)</label>
+            <input type="number" value={price} onChange={(e)=>setPrice(e.target.value)} placeholder="0" style={m.input}/>
+          </div>
+          <div>
+            <label style={m.label}>Tid (min)</label>
+            <input type="number" value={time} onChange={(e)=>setTime(e.target.value)} placeholder="0" style={m.input}/>
+          </div>
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+          <button onClick={onClose} style={m.btnGhost}>Annuller</button>
+          <button onClick={handleSave} disabled={!canSave} style={{ ...m.btnPrimary, opacity: canSave ? 1 : 0.6, cursor: canSave ? "pointer" : "not-allowed" }}>Tilføj</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+const m = {
+  overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", display: "grid", placeItems: "center", zIndex: 1000 },
+  modal: { width: "min(520px, 92vw)", background: "#fff", borderRadius: 12, padding: 16, boxShadow: "0 8px 32px rgba(0,0,0,.2)" },
+  label: { display: "block", fontSize: 12, margin: "6px 0 4px", color: "#374151" },
+  input: { width: "100%", padding: "10px 12px", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 14 },
+  btnGhost: { background: "transparent", border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 12px", cursor: "pointer" },
+  btnPrimary: { background: "#2166AC", color: "#fff", border: "none", borderRadius: 8, padding: "10px 16px", fontWeight: 700 },
+};
+
+/* ----------------- Hovedkomponent ----------------- */
 export default function Step1_AddRepairToOrder({
   order,
   setOrder,
@@ -75,6 +143,9 @@ export default function Step1_AddRepairToOrder({
   const [searchTerm, setSearchTerm] = useState("");
   const [modalDevice, setModalDevice] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState("Alle");
+
+  // NY: åbne/lukke “brugerdefineret enhed”
+  const [openCustom, setOpenCustom] = useState(false);
 
   const [openCreateCustomer, setOpenCreateCustomer] = useState(false);
   const [openSelectCustomer, setOpenSelectCustomer] = useState(false);
@@ -303,6 +374,11 @@ export default function Step1_AddRepairToOrder({
     });
   };
 
+  // NY: tilføj brugerdefineret linje
+  const addCustomLine = (line) => {
+    setOrder((prev) => ({ ...prev, repairs: [...prev.repairs, line] }));
+  };
+
   const handleCreateCustomer = (newCustomer) => {
     setCustomers((prev) => [...prev, newCustomer]);
     setOrder((prev) => ({ ...prev, customer: newCustomer }));
@@ -364,13 +440,26 @@ export default function Step1_AddRepairToOrder({
 
           <div style={{ flexGrow: 1, minWidth: 0 }}>
             <h2 style={{ textTransform: "uppercase" }}>Vælg enhed og reparation</h2>
-            <input
-              type="text"
-              placeholder="Søg efter model..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              style={inputStyle}
-            />
+
+            {/* Søg + NY “Brugerdefineret enhed”-knap */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="text"
+                placeholder="Søg efter model..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={{ ...inputStyle, marginBottom: 0, flex: 1 }}
+              />
+              <button
+                type="button"
+                onClick={() => setOpenCustom(true)}
+                style={{ ...buttonStyle, width: "auto", marginBottom: 0, whiteSpace: "nowrap", display: "inline-flex" }}
+                title="Tilføj brugerdefineret enhed"
+              >
+                <FaPlus /> Brugerdefineret enhed
+              </button>
+            </div>
+
             {loading ? (
               <p>Indlæser modeller...</p>
             ) : (
@@ -550,6 +639,13 @@ export default function Step1_AddRepairToOrder({
         }
         onAdd={handleAddRepair}
         onClose={() => setModalDevice(null)}
+      />
+
+      {/* NY: Brugerdefineret enhed */}
+      <CustomRepairModal
+        open={openCustom}
+        onClose={() => setOpenCustom(false)}
+        onAdd={addCustomLine}
       />
 
       {openCreateCustomer && (

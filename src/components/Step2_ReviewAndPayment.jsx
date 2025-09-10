@@ -23,11 +23,12 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
   const numericDeposit = Number(depositAmount || 0);
   const remaining = Math.max(total - (isNaN(numericDeposit) ? 0 : numericDeposit), 0);
 
-  const canSubmit =
-    !saving &&
-    (order?.repairs?.length || 0) > 0 &&
-    !!order?.customer?.id &&
-    !!order?.id;
+// Mindst 1 linje + kunden skal være udfyldt (id ELLER navn/telefon). Ordre-ID er valgfrit.
+  const hasRepairs = (order?.repairs?.length || 0) > 0;
+  const hasCustomer =
+    !!order?.customer && (!!order.customer.id || !!order.customer.name || !!order.customer.phone);
+
+  const canSubmit = !saving && hasRepairs && hasCustomer;
 
   function paymentText() {
     if (paymentType === "garanti") return "Garanti (ingen betaling)";
@@ -43,117 +44,165 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
    * Opret ÉN reparationspost (master) med alle linjer i meta,
    * i stedet for én post pr. linje.
    */
-  async function saveRepairsToWordPress() {
-    const lines = (order.repairs || []).map((r) => {
-      const part = r.part || null;
-      return {
-        device: r.device,
-        repair: r.repair,
-        price: Number(r.price) || 0,
-        time: Number(r.time) || 0,
-        model_id: r.model_id || 0,
-        part: part
+    // --- Opret reparation(er) i WP ---
+    async function saveRepairsToWordPress() {
+      setError("");
+
+      // Fallback: brug første gyldige model_id blandt linjerne, ellers en konfigurerbar default
+      const FALLBACK_MODEL_ID =
+        Number(import.meta?.env?.VITE_FALLBACK_MODEL_ID) ||
+        Number(window?.__FALLBACK_MODEL_ID) ||
+        1; // <- skift hvis I har en mere passende "dummy"-model i WP
+
+      const firstValidModelId =
+        (order?.repairs || [])
+          .map((r) => Number(r?.model_id || 0))
+          .find((id) => id > 0) || FALLBACK_MODEL_ID;
+
+      const updatedRepairs = [];
+
+      for (const r of (order?.repairs || [])) {
+        // Sørg for at vi altid har en titel
+        const deviceLabel =
+          (r.device && String(r.device).trim()) ||
+          (order?.repairs?.[0]?.device || "Enhed");
+        const title = [
+          order?.id ? `#${order.id}` : null,
+          order?.customer?.name || null,
+          deviceLabel,
+          r?.repair || "Reparation",
+        ]
+          .filter(Boolean)
+          .join(" • ");
+
+        // Reservedelsfelter (valgfri)
+        const part = r.part || null;
+        const partFields = part
           ? {
-              id: part.id ?? part.ID ?? null,
-              model: part.model ?? "",
-              stock: Number(part.stock ?? 0),
-              location: part.location ?? "",
-              category: part.category ?? "",
-              repair: part.repair ?? "",
+              spare_part_id: part.id || null,
+              spare_part_model: part.model || "",
+              spare_part_stock: Number(part.stock ?? 0),
+              spare_part_location: part.location || "",
             }
-          : null,
-      };
-    });
+          : {
+              spare_part_id: null,
+              spare_part_model: "",
+              spare_part_stock: null,
+              spare_part_location: "",
+            };
 
-    const totalPrice = lines.reduce((s, l) => s + (Number(l.price) || 0), 0);
-    const totalTime  = lines.reduce((s, l) => s + (Number(l.time)  || 0), 0);
-    const firstDevice = lines[0]?.device || "";
-    const repairSummary = lines.map((l) => l.repair).filter(Boolean).join(", ");
+        // VÆLG model_id: linjens egen, ellers firstValidModelId
+        const modelId = Number(r.model_id || 0) > 0 ? Number(r.model_id) : firstValidModelId;
 
-    const metaPayload = {
-      lines_count: lines.length,
-      // to be safe on WP side, send both object and JSON string:
-      lines,                          // hvis backend kan gemme arrays
-      lines_json: JSON.stringify(lines), // hvis backend forventer strenge
-    };
+        // 1) Opret reparationen (ordrelinjen) i WP
+        const createRes = await api.createRepair({
+          title,
+          repair: r.repair,
+          device: deviceLabel,
+          price: Number(r.price) || 0,
+          time: Number(r.time) || 0,
+          model_id: modelId,
+          order_id: order?.id,
+          customer_id: order?.customer?.id || 0,
 
-    const title = `${order.id} • ${order.customer?.name || ""} • ${firstDevice}${repairSummary ? " — " + repairSummary : ""}`;
+          status: "under reparation",
+          payment_type: paymentType,
+          payment_total: (order?.repairs || []).reduce(
+            (s, x) => s + (Number(x.price) || 0),
+            0
+          ),
+          deposit_amount: paymentType === "depositum" ? Number(depositAmount) || 0 : 0,
+          remaining_amount:
+            paymentType === "depositum"
+              ? Math.max(
+                  (order?.repairs || []).reduce((s, x) => s + (Number(x.price) || 0), 0) -
+                    (Number(depositAmount) || 0),
+                  0
+                )
+              : 0,
+          payment:
+            paymentType === "garanti"
+              ? "Garanti (ingen betaling)"
+              : paymentType === "betalt"
+              ? `Betalt: ${Number(
+                  (order?.repairs || []).reduce((s, x) => s + (Number(x.price) || 0), 0)
+                ).toLocaleString("da-DK")} kr`
+              : paymentType === "depositum"
+              ? `Depositum: ${Number(depositAmount) || 0} kr`
+              : `Betaling efter reparation: ${Number(
+                  (order?.repairs || []).reduce((s, x) => s + (Number(x.price) || 0), 0)
+                ).toLocaleString("da-DK")} kr`,
 
-    // 1) Opret master-reparation
-    const createRes = await api.createRepair({
-      title,
-      // aggregeret “hoved”-reparation
-      repair: repairSummary || "Flere reparationer",
-      device: firstDevice,
-      price: Number(totalPrice) || 0,
-      time: Number(totalTime) || 0,
-      model_id: lines[0]?.model_id || 0,
+          password: order?.password || "",
+          note: order?.note || "",
+          contact: order?.contact || "",
+          customer: order?.customer?.name || "",
+          phone: order?.customer?.phone || "",
 
-      order_id: order.id,
-      customer_id: order.customer?.id || 0,
+          meta: part ? partFields : {},
+        });
 
-      status: "under reparation",
-      payment_type: paymentType,
-      payment_total: Number(total) || 0,
-      deposit_amount: paymentType === "depositum" ? (Number(depositAmount) || 0) : 0,
-      remaining_amount: paymentType === "depositum" ? remaining : 0,
-      payment: paymentText(),
+        if (!createRes || createRes.status !== "created" || !createRes.repair_id) {
+          throw new Error("Opret reparation fejlede.");
+        }
 
-      password: order.password || "",
-      note: order.note || "",
-      contact: order.contact || "",
-      customer: order.customer?.name || "",
-      phone: order.customer?.phone || "",
+        const repairId = createRes.repair_id;
 
-      meta: metaPayload,
-    });
+        // 2) Opdater + gem historik
+        await api.updateRepairWithHistory({
+          repair_id: repairId,
+          fields: {
+            status: "under reparation",
+            payment_type: paymentType,
+            payment_total: (order?.repairs || []).reduce(
+              (s, x) => s + (Number(x.price) || 0),
+              0
+            ),
+            deposit_amount: paymentType === "depositum" ? Number(depositAmount) || 0 : 0,
+            remaining_amount:
+              paymentType === "depositum"
+                ? Math.max(
+                    (order?.repairs || []).reduce((s, x) => s + (Number(x.price) || 0), 0) -
+                      (Number(depositAmount) || 0),
+                    0
+                  )
+                : 0,
+            payment:
+              paymentType === "garanti"
+                ? "Garanti (ingen betaling)"
+                : paymentType === "betalt"
+                ? `Betalt: ${Number(
+                    (order?.repairs || []).reduce((s, x) => s + (Number(x.price) || 0), 0)
+                  ).toLocaleString("da-DK")} kr`
+                : paymentType === "depositum"
+                ? `Depositum: ${Number(depositAmount) || 0} kr`
+                : `Betaling efter reparation: ${Number(
+                    (order?.repairs || []).reduce((s, x) => s + (Number(x.price) || 0), 0)
+                  ).toLocaleString("da-DK")} kr`,
+            created_at: new Date().toISOString(),
+            password: order?.password || "",
+            note: order?.note || "",
+            contact: order?.contact || "",
+            customer: order?.customer?.name || "",
+            phone: order?.customer?.phone || "",
+          },
+          meta: part ? partFields : {},
+        });
 
-    if (!createRes || createRes.status !== "created" || !createRes.repair_id) {
-      throw new Error("Opret reparation fejlede.");
+        updatedRepairs.push({ ...r, id: repairId });
+      }
+
+      // Gem i state så print-siden har de nye id’er osv.
+      setOrder((prev) => ({
+        ...prev,
+        paymentType,
+        depositAmount,
+        repairs: updatedRepairs,
+      }));
+
+      return updatedRepairs;
     }
 
-    const masterRepairId = createRes.repair_id;
-
-    // 2) Opdater + historik (aggregerede felter + gem meta igen for en sikkerheds skyld)
-    const fields = {
-      status: "under reparation",
-      payment_type: paymentType,
-      payment_total: Number(total) || 0,
-      deposit_amount: paymentType === "depositum" ? (Number(depositAmount) || 0) : 0,
-      remaining_amount: paymentType === "depositum" ? remaining : 0,
-      payment: paymentText(),
-      created_at: createdAtISO,
-
-      // aggregeret “hoved”-reparation
-      repair: repairSummary || "Flere reparationer",
-      device: firstDevice,
-      price: Number(totalPrice) || 0,
-      time: Number(totalTime) || 0,
-
-      password: order.password || "",
-      note: order.note || "",
-      contact: order.contact || "",
-      customer: order.customer?.name || "",
-      phone: order.customer?.phone || "",
-    };
-
-    await api.updateRepairWithHistory({
-      repair_id: masterRepairId,
-      fields,
-      meta: metaPayload,
-    });
-
-    // Gem master id i state (vi beholder dine linjer uændret til print osv.)
-    setOrder((prev) => ({
-      ...prev,
-      paymentType,
-      depositAmount,
-      masterRepairId,
-      // behold prev.repairs som er linjerne
-    }));
-
-    return masterRepairId;
-  }
 
   async function handleConfirm() {
     if (!canSubmit) return;
@@ -179,7 +228,7 @@ export default function Step2_ReviewAndPayment({ order, onBack, onSubmit, setOrd
 
       try { localStorage.setItem("tg_last_order", JSON.stringify(cleanOrder)); } catch {}
 
-      navigate(`/print-slip/${order.id}`, { state: { order: cleanOrder }, replace: true });
+      navigate(`/print-slip/${order.id || ""}`, { state: { order: cleanOrder }, replace: true });
 
       if (typeof onSubmit === "function") onSubmit();
     } catch (e) {
