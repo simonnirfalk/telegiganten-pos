@@ -442,15 +442,28 @@ export const api = {
       query: { brand_id: brandId },
     }),
 
-  getRepairsForModel: (modelId) =>
+  // NY: hent ALLE repairs (evt. kun aktive)
+  getRepairs: (opts = {}) =>
+    proxyFetch({
+      path: "/wp-json/telegiganten/v1/repairs",
+      query: { active_only: opts.activeOnly ? 1 : undefined },
+    }),
+
+  // Opdateret: inkluder active_only
+  getRepairsForModel: (modelId, opts = {}) =>
     proxyFetch({
       path: "/wp-json/telegiganten/v1/repairs-by-model",
-      query: { model_id: modelId },
+      query: { model_id: modelId, active_only: opts.activeOnly ? 1 : undefined },
     }),
 
   getTopModels: () => proxyFetch({ path: "/wp-json/telegiganten/v1/top-models" }),
 
-  getAllRepairs: () => proxyFetch({ path: "/wp-json/telegiganten/v1/all-repairs" }),
+  // Opdateret: inkluder active_only (bruges til at bygge hele træet KUN med aktive)
+  getAllRepairs: (opts = {}) =>
+    proxyFetch({
+      path: "/wp-json/telegiganten/v1/all-repairs",
+      query: { active_only: opts.activeOnly ? 1 : undefined },
+    }),
 
   createRepairTemplate: (data) =>
     proxyFetch({ path: "/wp-json/telegiganten/v1/create-repair-template", method: "POST", body: data }),
@@ -506,6 +519,8 @@ export const api = {
     return res.id;
   },
 
+  /* ---------------------- Bookinger (til DashboardStats) ---------------------- */
+  getBookings: (args = {}) => fetchBookings(args),
 
   /* ---------------------- Spareparts (dual-source) ---------------------- */
   getSpareParts: (params = {}) => {

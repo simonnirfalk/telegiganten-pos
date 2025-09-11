@@ -154,6 +154,10 @@ export default function Step1_AddRepairToOrder({
   const { data: repairStructureRaw = [], loading } = useRepairContext();
   const repairStructure = Array.isArray(repairStructureRaw) ? repairStructureRaw : [];
 
+  // ⬅️ NY: server-filtrerede repairs til den valgte model
+  const [modalRepairs, setModalRepairs] = useState(null);
+  const [modalRepairsLoading, setModalRepairsLoading] = useState(false);
+
   // HENT NÆSTE ORDRE-ID OG SÆT DET PÅ FELTET `id`
   useEffect(() => {
     let cancelled = false;
@@ -195,6 +199,34 @@ export default function Step1_AddRepairToOrder({
       api.incrementModelUsage(prefillFromBooking.model_id).catch(() => {});
     }
   }, [prefillFromBooking]);
+
+  // ⬅️ NY: når der vælges en model (modalDevice), hent dens aktive repairs fra backend
+  useEffect(() => {
+    let alive = true;
+    async function loadRepairs() {
+      if (!modalDevice?.id) {
+        if (alive) setModalRepairs(null);
+        return;
+      }
+      try {
+        setModalRepairsLoading(true);
+        const arr = await api.getRepairsForModel(modalDevice.id, { activeOnly: true }); // SERVER-SIDE filtrering
+        if (!alive) return;
+        // sortér efter vores standard
+        const sorted = Array.isArray(arr) ? [...arr].sort(sortRepairs) : [];
+        setModalRepairs(sorted);
+      } catch (e) {
+        if (alive) {
+          console.warn("Kunne ikke hente server-filtrerede repairs – falder tilbage til context:", e?.message || e);
+          setModalRepairs(null); // fallback i render
+        }
+      } finally {
+        if (alive) setModalRepairsLoading(false);
+      }
+    }
+    loadRepairs();
+    return () => { alive = false; };
+  }, [modalDevice?.id]);
 
   /* ---------- UI styles ---------- */
   const buttonStyle = {
@@ -631,12 +663,21 @@ export default function Step1_AddRepairToOrder({
       {/* Modals (til at TILFØJE reparationer) */}
       <RepairModal
         device={modalDevice}
+        // Prioritér server-filtrerede repairs; fallback til context-struktur
         repairs={
-          (repairStructure
-            .flatMap((brand) => Array.isArray(brand.models) ? brand.models : [])
-            .find((m) => m.id === (modalDevice?.id ?? null)) || {}
-          ).repairs?.slice()?.sort(sortRepairs) || [] // ⬅️ NY: sortér reparationer
+          (modalRepairs ?? (
+            (
+              repairStructure
+                .flatMap((brand) => Array.isArray(brand.models) ? brand.models : [])
+                .find((m) => m.id === (modalDevice?.id ?? null)) || {}
+            ).repairs || []
+          ))
+            // hvis vi rammer fallback-struktur, filtrér på felt hvis det findes
+            .filter(r => String(r.repair_option_active ?? "1") === "1")
+            .slice()
+            .sort(sortRepairs)
         }
+        loading={modalRepairsLoading}
         onAdd={handleAddRepair}
         onClose={() => setModalDevice(null)}
       />

@@ -33,7 +33,11 @@ export default function RepairModal({ device, repairs, onAdd, onClose }) {
   }, [onClose]);
 
   const deviceTitle = device.title || device.name || "Ukendt enhed";
-  const safeRepairs = useMemo(() => (Array.isArray(repairs) ? repairs : []), [repairs]);
+  const safeRepairs = useMemo(
+    () => (Array.isArray(repairs) ? repairs.filter(r => String(r.repair_option_active ?? "1") === "1") : []),
+    [repairs]
+  );
+  
   const sortedRepairs = useMemo(
     () => safeRepairs.slice().sort(sortRepairs),
     [safeRepairs]
