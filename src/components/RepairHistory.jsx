@@ -1,6 +1,6 @@
 // src/components/RepairHistory.jsx
 import React, { useEffect, useRef, useState, useMemo } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { FaTimes } from "react-icons/fa";
 import { api } from "../data/apiClient";
 
@@ -139,6 +139,7 @@ function normalizePhoneLocalOrDK(phone) {
 /* ---------------- Component ---------------- */
 export default function RepairHistory({ repair, onClose, onAfterSave }) {
   const overlayRef = useRef(null);
+  const navigate = useNavigate();
 
   // Udled linjer fra props (syntetisk eller single)
   const { lines, fromMeta } = useMemo(() => extractLinesFromAny(repair), [repair]);
@@ -157,7 +158,6 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
     remaining_amount: Number(repair.remaining_amount || 0) || 0,
   }));
   useEffect(() => {
-    // hvis total ikke er sat, brug sum af linjer
     if (fromMeta && !edited.payment_total) {
       setEdited((prev) => ({ ...prev, payment_total: sum(lines, "price") }));
     }
@@ -595,7 +595,7 @@ Tlf. 70 70 78 56
             <div style={{ display: "flex", gap: 8 }}>
               <button
                 style={styles.secondary}
-                onClick={() => window.open(`/print-slip/${repair.order_id}`, "_blank")}
+                onClick={() => navigate(`/print-slip/${repair.order_id}`)}
               >
                 Print slip
               </button>
