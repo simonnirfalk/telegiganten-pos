@@ -143,7 +143,8 @@ export default function DashboardRecentBookings() {
     return grouped.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)).slice(0, 6);
   }, [grouped]);
 
-  const openOrder = (id) => navigate("/repairs", { state: { openRepair: { order_id: id } } });
+  // ⬇️ FIX: Åbn BookingsPage med state.openBookingId (ikke Repairs)
+  const openOrder = (id) => navigate("/bookings", { state: { openBookingId: id } });
 
   if (loading) {
     return (
@@ -176,7 +177,7 @@ export default function DashboardRecentBookings() {
           onClick={() => openOrder(g.order_id)}
           onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 8px 18px rgba(0,0,0,0.12)"; }}
           onMouseLeave={(e) => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "0 1px 4px rgba(0,0,0,0.05)"; }}
-          title={`Åbn ordre #${g.order_id}`}
+          title={`Åbn booking #${g.order_id}`}
         >
           <div style={{ fontWeight: 700, marginBottom: 4 }}>
             {g.model || "Uden model"} — {cap(g.repairs.map(r => r.name).filter(Boolean).join(", "), 48)}
