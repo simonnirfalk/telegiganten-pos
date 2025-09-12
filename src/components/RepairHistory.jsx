@@ -1,6 +1,6 @@
 // src/components/RepairHistory.jsx
 import React, { useEffect, useRef, useState, useMemo } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { FaTimes } from "react-icons/fa";
 import { api } from "../data/apiClient";
 
@@ -62,162 +62,111 @@ const PAYMENT_OPTIONS = [
 const STATUS_OPTIONS = ["under reparation", "klar til afhentning", "afsluttet", "annulleret"]
   .map((s) => ({ value: s, label: s }));
 
-function inferPaymentType(paymentText = "") {
-  const t = (paymentText || "").toLowerCase();
-  if (t.includes("garanti")) return "garanti";
-  if (t.includes("depositum") || t.includes("delvis")) return "depositum";
-  if (t.includes("allerede betalt") || t.includes("betalt:")) return "betalt";
-  return "efter";
-}
-
 const sum = (arr, key) => (arr || []).reduce((acc, it) => acc + (Number(it?.[key]) || 0), 0);
-
-function safeParseJSON(s) {
+const safeParseJSON = (s) => {
   if (typeof s !== "string") return null;
   try { return JSON.parse(s); } catch { return null; }
-}
+};
 
-/**
- * Forsøg at finde ordrelinjer i *alle* kendte former:
- * - repair.meta som objekt med {lines} / {lines_json}
- * - repair.meta som JSON-string
- * - felter på roden: lines / lines_json / meta_lines_json
- * - andre JSON-strenge på roden der indeholder et array med {repair, price, time}
- */
-function extractLinesFromAny(repair) {
-  const candidates = [];
+/** Læs linjer i *alle* kendte former */
+function extractLinesFromAny(r) {
+  if (!r) return { lines: [], fromMeta: false };
 
-  // 1) Direkte objekt
-  if (repair?.meta && typeof repair.meta === "object") candidates.push(repair.meta);
-  // 2) meta som JSON-string
-  const metaParsed = safeParseJSON(repair?.meta);
-  if (metaParsed) candidates.push(metaParsed);
-  // 3) andre mulige felter som JSON-string
-  ["lines_json", "meta_json", "meta_lines_json"].forEach((k) => {
-    const parsed = safeParseJSON(repair?.[k]);
-    if (parsed) candidates.push({ [k]: parsed });
-  });
-  // 4) rodfelter allerede som array
-  if (Array.isArray(repair?.lines)) candidates.push({ lines: repair.lines });
-
-  // 5) sidste chance: gennemgå alle stringfelter på roden og parse JSON
-  for (const [k, v] of Object.entries(repair || {})) {
-    if (typeof v === "string" && /lines/i.test(k)) {
-      const parsed = safeParseJSON(v);
-      if (parsed) candidates.push({ [k]: parsed });
-    }
-  }
-
-  for (const c of candidates) {
-    // direkte array
-    if (Array.isArray(c.lines) && c.lines.length) return { lines: c.lines, fromMeta: true };
-    // linjer via lines_json
-    if (Array.isArray(c.lines_json) && c.lines_json.length) return { lines: c.lines_json, fromMeta: true };
-    // hvis "meta" wrapper
-    if (c.meta && typeof c.meta === "object") {
-      if (Array.isArray(c.meta.lines) && c.meta.lines.length) return { lines: c.meta.lines, fromMeta: true };
-      const p = safeParseJSON(c.meta.lines_json);
-      if (Array.isArray(p) && p.length) return { lines: p, fromMeta: true };
-    }
-    // generisk: find *første* array med objekter der ligner linjer
-    for (const val of Object.values(c)) {
-      if (Array.isArray(val) && val.length && typeof val[0] === "object" && ("repair" in val[0] || "price" in val[0] || "time" in val[0])) {
-        return { lines: val, fromMeta: true };
-      }
-    }
-  }
-
-  // Fallback (legacy: topfelter)
-  return {
-    lines: [{
-      device: repair?.model || repair?.device || "",
-      repair: repair?.repair || repair?.repair_title || "",
-      price: Number(repair?.price || 0),
-      time: Number(repair?.time || 0),
-      model_id: repair?.model_id || 0,
-      part: undefined,
-    }],
-    fromMeta: false,
-  };
-}
-
-function buildPrintOrderFromRepair(r = {}) {
-  const { lines } = extractLinesFromAny(r);
-  const totalFromLines = sum(lines, "price");
-  const total = Number.isFinite(Number(r.payment_total))
-    ? Number(r.payment_total)
-    : (totalFromLines || Number(r.price || 0));
-  const upfront = Number.isFinite(Number(r.deposit_amount)) ? Number(r.deposit_amount) : 0;
-
-  return {
-    id: r.order_id || r.id || 0,
-    today: new Date().toLocaleDateString("da-DK"),
-    created_at: r.created_at || new Date().toISOString(),
-    customer: {
-      id: r.customer_id || 0,
-      name: r.customer || "",
-      phone: r.phone || "",
-      email: r.contact?.includes("@") ? r.contact : "",
-    },
-    repairs: lines.map((ln) => ({
+  // 1) direkte fra props (syntetisk samlet ordre)
+  if (Array.isArray(r.lines) && r.lines.length) {
+    const map = r.lines.map((ln) => ({
       device: ln.device || r.model || r.device || "",
-      repair: ln.repair || "",
+      repair: ln.repair || ln.title || "",
       price: Number(ln.price || 0),
       time: Number(ln.time || 0),
       part: ln.part || ln.meta || null,
-    })),
-    password: r.password || "",
-    note: r.note || "",
-    contact: r.contact || "",
-    total,
-    payment: { method: (r.payment_type || "efter").toLowerCase(), upfront },
+      source_id: ln.source_id ?? ln.id ?? null,
+    }));
+    return { lines: map, fromMeta: true };
+  }
+
+  // 2) WP meta som JSON-streng
+  const metaJson = r.meta_json || r.meta || r._meta || null;
+  const parsed = typeof metaJson === "string" ? safeParseJSON(metaJson) : metaJson;
+  const metaLines = parsed?.lines || parsed?.repairs || null;
+  if (Array.isArray(metaLines) && metaLines.length) {
+    return {
+      lines: metaLines.map((ln) => ({
+        device: ln.device || ln.model || r.model || r.device || "",
+        repair: ln.repair || ln.title || "",
+        price: Number(ln.price || 0),
+        time: Number(ln.time || 0),
+        part: ln.part || ln.meta || null,
+        source_id: ln.id ?? ln.source_id ?? null,
+      })),
+      fromMeta: true,
+    };
+  }
+
+  // 3) enkeltlinje-faldback
+  const single = {
+    device: r.model || r.device || "",
+    repair: r.repair || r.title || r.repair_title || "",
+    price: Number(r.price || r.amount || 0),
+    time: Number(r.time || r.duration || 0),
+    part: r.part || null,
+    source_id: r.id ?? r.repair_id ?? r.post_id ?? null,
   };
+  return { lines: [single], fromMeta: false };
+}
+
+/** Mapper UI-felter → WP meta keys, sådan som vi allerede gør ved linje-gem */
+function mapPriceTime(fields = {}) {
+  const f = { ...fields };
+  if (Object.prototype.hasOwnProperty.call(f, "price")) {
+    f._telegiganten_repair_repair_price = Number(f.price); delete f.price;
+  }
+  if (Object.prototype.hasOwnProperty.call(f, "time")) {
+    f._telegiganten_repair_repair_time = Number(f.time); delete f.time;
+  }
+  return f;
+}
+
+/* Normaliser telefon til DK-format (Twilio kræver E.164) */
+function normalizePhoneLocalOrDK(phone) {
+  const digits = String(phone || "").replace(/\D+/g, "");
+  if (!digits) return "";
+  if (digits.length === 8) return `+45${digits}`;
+  if (digits.length >= 10) return `+${digits.replace(/^0+/, "")}`;
+  return phone;
 }
 
 /* ---------------- Component ---------------- */
-export default function RepairHistory({ repair, onClose, onSave }) {
-  const navigate = useNavigate();
+export default function RepairHistory({ repair, onClose, onAfterSave }) {
   const overlayRef = useRef(null);
 
-  // Hvis første payload ikke har itemized linjer, prøv at hente fuld reparation fra API’et
-  const [enriched, setEnriched] = useState(repair);
-  useEffect(() => { setEnriched(repair); }, [repair]);
+  // Udled linjer fra props (syntetisk eller single)
+  const { lines, fromMeta } = useMemo(() => extractLinesFromAny(repair), [repair]);
 
-  const initial = useMemo(() => extractLinesFromAny(repair), [repair]);
+  // ----- top-level state (redigérbare felter)
+  const [edited, setEdited] = useState(() => ({
+    customer: repair.customer || "",
+    phone: repair.phone || "",
+    contact: repair.contact || "",
+    password: repair.password || "",
+    note: repair.note || "",
+    status: (repair.status || "").toLowerCase(),
+    payment_type: (repair.payment_type || "").toLowerCase() || "efter",
+    payment_total: Number(repair.payment_total || 0) || (fromMeta ? sum(lines, "price") : 0),
+    deposit_amount: Number(repair.deposit_amount || 0) || 0,
+    remaining_amount: Number(repair.remaining_amount || 0) || 0,
+  }));
   useEffect(() => {
-    let alive = true;
-    async function fetchFull() {
-      if (initial.fromMeta) return; // vi har allerede linjerne
-      if (!repair?.id) return;
-
-      try {
-        let full = null;
-        if (api.getRepairDetails && typeof api.getRepairDetails === "function") {
-          full = await api.getRepairDetails(repair.id);
-        } else if (api.getRepair && typeof api.getRepair === "function") {
-          full = await api.getRepair(repair.id);
-        } else if (api.fetchRepair && typeof api.fetchRepair === "function") {
-          full = await api.fetchRepair(repair.id);
-        } else if (api.repairById && typeof api.repairById === "function") {
-          full = await api.repairById(repair.id);
-        }
-        if (!alive || !full) return;
-        // forvent at full har samme form som repair (med evt. meta)
-        const merged = { ...repair, ...full };
-        const got = extractLinesFromAny(merged);
-        if (got.fromMeta) setEnriched(merged);
-      } catch {
-        // roligt fallback – vi fortsætter bare med den nuværende visning
-      }
+    // hvis total ikke er sat, brug sum af linjer
+    if (fromMeta && !edited.payment_total) {
+      setEdited((prev) => ({ ...prev, payment_total: sum(lines, "price") }));
     }
-    fetchFull();
-    return () => { alive = false; };
-  }, [repair, initial.fromMeta]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromMeta, lines]);
 
-  // Brug enriched når vi udleder linjer
-  const { lines, fromMeta } = useMemo(() => extractLinesFromAny(enriched), [enriched]);
-  const totalFromLines = useMemo(() => sum(lines, "price"), [lines]);
-  const timeFromLines = useMemo(() => sum(lines, "time"), [lines]);
+  const handleChange = (key, val) => setEdited((e) => ({ ...e, [key]: val }));
+
+  // ----- linjer (redigérbare)
   const [editableLines, setEditableLines] = useState(() =>
     (lines || []).map((ln, idx) => ({
       idx,
@@ -226,13 +175,10 @@ export default function RepairHistory({ repair, onClose, onSave }) {
       price: Number(ln.price || 0),
       time: Number(ln.time || 0),
       part: ln.part || ln.meta || null,
-      // hvis vi får source_id/ID med fra UI’et (fx fra RepairsPage-gruppering), så gemmer vi pr. post
       source_id: ln.source_id ?? ln.id ?? null,
       _dirty: false,
     }))
   );
-
-  // Hold redigerbar kopi i sync når "lines" ændres
   useEffect(() => {
     setEditableLines((lines || []).map((ln, idx) => ({
       idx,
@@ -246,7 +192,6 @@ export default function RepairHistory({ repair, onClose, onSave }) {
     })));
   }, [lines]);
 
-  // Sæt felter på en redigerbar linje
   const setLineField = (idx, field, value) => {
     setEditableLines(prev =>
       prev.map(l =>
@@ -255,7 +200,7 @@ export default function RepairHistory({ repair, onClose, onSave }) {
               ...l,
               [field]:
                 field === "price" || field === "time"
-                  ? Number(String(value).replace(",", "."))
+                  ? Number(String(value).replace(",", ".")) || 0
                   : value,
               _dirty: true,
             }
@@ -264,211 +209,110 @@ export default function RepairHistory({ repair, onClose, onSave }) {
     );
   };
 
-  // Totaler baseret på det redigerede indhold
+  // totaler fra edits
   const totalsFromEdits = useMemo(() => ({
     price: (editableLines || []).reduce((s, l) => s + (Number(l.price) || 0), 0),
     time:  (editableLines || []).reduce((s, l) => s + (Number(l.time)  || 0), 0),
   }), [editableLines]);
 
-  // Hvis vi har itemized linjer, forsøg at udfylde payment_total ud fra de redigerede totaler
-  useEffect(() => {
-    if (fromMeta) {
-      setEdited(e => ({ ...e, payment_total: e.payment_total ?? (totalsFromEdits.price || null) }));
+  // hvilke topfelter er ændret?
+  const changedFields = useMemo(() => {
+    const out = {};
+    const keys = ["phone", "contact", "password", "note", "status", "payment_type", "payment_total", "deposit_amount", "remaining_amount"];
+    for (const k of keys) {
+      const v = edited[k];
+      const orig = repair[k];
+      const nv = (k === "payment_total" || k === "deposit_amount" || k === "remaining_amount") ? Number(v || 0) : v;
+      const ov = (k === "payment_total" || k === "deposit_amount" || k === "remaining_amount") ? Number(orig || 0) : orig;
+      if ((nv ?? "") !== (ov ?? "")) out[k] = nv;
     }
-  }, [fromMeta, totalsFromEdits.price]);
+    return out;
+  }, [edited, repair]);
 
-  // Form state
-  const [edited, setEdited] = useState(() => ({
-    ...repair,
-    payment_type: repair.payment_type || inferPaymentType(repair.payment),
-    deposit_amount: repair.deposit_amount ?? null,
-    remaining_amount: repair.remaining_amount ?? null,
-    payment_total: repair.payment_total ?? (totalFromLines || null),
-  }));
-  useEffect(() => {
-    setEdited((e) => ({
-      ...e,
-      payment_total: e.payment_total ?? (totalFromLines || null),
-    }));
-  }, [totalFromLines]);
+  // beregn dirty linjer + note-ændring
+  const dirtyLines = useMemo(() => {
+    if (!fromMeta) return [];
+    return editableLines.filter((ln) => ln._dirty);
+  }, [fromMeta, editableLines]);
+
+  const noteChanged = useMemo(() => {
+    return (edited.note ?? "") !== (repair.note ?? "");
+  }, [edited.note, repair.note]);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  // Historik (nyeste først)
-  const [history, setHistory] = useState(Array.isArray(repair.history) ? [...repair.history] : []);
-  useEffect(() => {
-    const h = Array.isArray(repair.history) ? [...repair.history] : [];
-    h.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
-    setHistory(h);
-  }, [repair.history]);
-
-  // Luk på Escape
-  useEffect(() => {
-    const onKey = (e) => e.key === "Escape" && onClose?.();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  function handleOverlayClick(e) { if (e.target === overlayRef.current) onClose?.(); }
-  function handleChange(field, value) { setEdited((prev) => ({ ...prev, [field]: value })); }
-
-  // Hvilke felter må gemmes?
-  const changedFields = useMemo(() => {
-    const orig = repair || {};
-    const out = {};
-
-    // Når linjer kommer fra meta (vores nye model), skal topfelterne ikke gemmes.
-    const BASE_FIELDS = [
-      "customer","phone","contact",
-      "password","note",
-      "status","payment","payment_type",
-      "deposit_amount","remaining_amount","payment_total",
-    ];
-    const SINGLE_ONLY_FIELDS = ["model","repair","price","time"];
-    const compareFields = fromMeta ? BASE_FIELDS : [...BASE_FIELDS, ...SINGLE_ONLY_FIELDS];
-
-    for (const key of compareFields) {
-      if (edited[key] !== orig[key]) out[key] = edited[key];
-    }
-    for (const k of ["price","time","deposit_amount","remaining_amount","payment_total"]) {
-      if (out[k] !== undefined && out[k] !== "") {
-        const n = Number(out[k]); if (!Number.isNaN(n)) out[k] = n;
-      }
-    }
-    return out;
-  }, [edited, repair, fromMeta]);
-
-  // Depositum preview
-  const depositComputed = useMemo(() => {
-    if ((edited.payment_type || "efter") !== "depositum") return null;
-    const baseTotal = Number.isFinite(Number(edited.payment_total))
-      ? Number(edited.payment_total)
-      : (totalFromLines || Number(edited.price || repair.price || 0));
-    const deposit = Number(edited.deposit_amount ?? repair.deposit_amount ?? 0);
-    const remaining =
-      Number.isFinite(Number(edited.remaining_amount ?? repair.remaining_amount))
-        ? Number(edited.remaining_amount ?? repair.remaining_amount)
-        : Math.max(baseTotal - (Number.isFinite(deposit) ? deposit : 0), 0);
-    return { total: baseTotal, deposit: Number.isFinite(deposit) ? deposit : 0, remaining };
-  }, [edited, repair, totalFromLines]);
-
-  // Print slip (brug alle linjer)
-  const handlePrintSlip = () => {
-    const merged = { ...enriched, ...edited, meta: enriched.meta };
-    const order = buildPrintOrderFromRepair(merged);
-    try { localStorage.setItem("tg_last_order", JSON.stringify(order)); } catch {}
-    navigate(`/print-slip/${order.id || ""}`, { state: { order } });
-  };
-
-  /* ---------- SMS ---------- */
-  const [smsOpen, setSmsOpen] = useState(false);
-  const [smsSending, setSmsSending] = useState(false);
-  const defaultSmsText = useMemo(() => {
-    const name = repair.customer || "kunde";
-    const id = repair.order_id || repair.id || "";
-    const info = "Telegiganten – Taastrup hovedgade 66, 2630 Taastrup. Tlf. 70 70 78 56. Åbningstider: Man–Fre 10–18, Lør 10–14.";
-    return `Kære ${name}. Din reparation #${id} er klar til afhentning. ${info}`;
-  }, [repair.customer, repair.order_id, repair.id]);
-  const [smsText, setSmsText] = useState(defaultSmsText);
-
-  // >>> NYT: vælg SMS-modtager = Kontakt (alternativ) hvis udfyldt, ellers kundens telefon
-  const pickSmsRecipient = (r, e) => {
-    const alt = (e?.contact ?? r?.contact ?? "").toString().trim();
-    const primary = (r?.phone ?? "").toString().trim();
-    return alt || primary;
-  };
-  const [smsTo, setSmsTo] = useState(pickSmsRecipient(repair, edited));
-  useEffect(() => {
-    setSmsText(defaultSmsText);
-    setSmsTo(pickSmsRecipient(repair, edited));
-  }, [defaultSmsText, repair.phone, repair.contact, edited.contact]);
-
-  async function handleSendSMS() {
-    if (!smsTo || !smsText.trim()) return;
-    setSmsSending(true);
-    try {
-      await api.sendSMS({ to: smsTo, body: smsText, repair_id: Number(repair.id) || undefined });
-      setHistory((h) => [
-        { timestamp: new Date().toISOString(), field: "sms_sent", old: "", new: `Til ${smsTo}: ${smsText.slice(0,160)}` },
-        ...(Array.isArray(h) ? h : []),
-      ]);
-      setSmsOpen(false);
-      alert("SMS sendt ✅");
-    } catch (err) {
-      console.error(err);
-      alert(err?.message || "Kunne ikke sende SMS.");
-    } finally {
-      setSmsSending(false);
-    }
-  }
+  // target id til at gemme top-level felter:
+  // brug repair.id hvis den findes, ellers første linjes source_id
+  const primaryRepairId = useMemo(() => {
+    const direct = Number(repair?.id || 0) || null;
+    if (direct) return direct;
+    const first = editableLines.find((l) => l.source_id)?.source_id;
+    return first ? Number(first) : null;
+  }, [repair?.id, editableLines]);
 
   /* ---------- Gem ---------- */
   const handleSave = async () => {
-    // Find linjer der faktisk er ændret
-    const dirtyLines = fromMeta
-      ? editableLines.filter((ln, i) => {
-          const orig = lines[i] || {};
-          const changed =
-            ln._dirty &&
-            (
-              (ln.device || "") !== (orig.device || "") ||
-              (ln.repair || "") !== (orig.repair || "") ||
-              Number(ln.price || 0) !== Number(orig.price || 0) ||
-              Number(ln.time  || 0) !== Number(orig.time  || 0)
-            );
-          return changed;
-        })
-      : [];
+    const hasTop = Object.keys(changedFields).length > 0;
+    const hasLines = dirtyLines.length > 0;
+    const hasNote = noteChanged;
 
-    // Skal vi gemme noget som helst?
-    const nothingToSave =
-      (!Object.keys(changedFields).length) &&
-      (dirtyLines.length === 0) &&
-      !(fromMeta && typeof edited.note === "string" && edited.note !== (repair.note || ""));
-
-    if (nothingToSave) { onClose?.(); return; }
+    if (!hasTop && !hasLines && !hasNote) {
+      onClose?.();
+      return;
+    }
 
     setSaving(true);
     setError("");
 
     try {
-      // 1) Gem alle ændrede linjer (kun dem der har source_id)
+      // 1) Gem linjer (pris/tid mappes til WP meta-nøgler)
       for (const ln of dirtyLines) {
         if (!ln.source_id) continue;
-
-        // Map UI-felter til WP meta-nøgler for pris/tid
-        const fields = {
-          device: ln.device,
-          repair: ln.repair,
-          _telegiganten_repair_repair_price: Number(ln.price || 0),
-          _telegiganten_repair_repair_time:  Number(ln.time  || 0),
-        };
-
         await api.updateRepairWithHistory({
           repair_id: Number(ln.source_id),
-          fields,
+          fields: mapPriceTime({
+            device: ln.device,
+            repair: ln.repair,
+            price: Number(ln.price || 0),
+            time: Number(ln.time || 0),
+          }),
           change_note: "Opdateret via RepairHistory (linje)",
         });
       }
 
-      // 2) Hvis vi har itemized linjer og noten er ændret: gem note på første post i ordren
-      if (fromMeta && typeof edited.note === "string" && edited.note !== (repair.note || "")) {
-        const firstId = (editableLines.find((l) => l.source_id) || {}).source_id;
-        if (firstId) {
-          await api.updateRepairWithHistory({
-            repair_id: Number(firstId),
-            fields: { note: edited.note },
-            change_note: "Note opdateret via RepairHistory",
-          });
-        }
+      // 2) Gem note særskilt, hvis ændret
+      if (hasNote && primaryRepairId) {
+        await api.updateRepairWithHistory({
+          repair_id: primaryRepairId,
+          fields: { note: edited.note },
+          change_note: "Note opdateret via RepairHistory",
+        });
       }
 
-      // 3) Gem øvrige topfelter (legacy enkelt-post) via eksisterende onSave
-      if (Object.keys(changedFields).length) {
-        await Promise.resolve(onSave?.({ repair_id: Number(repair.id), fields: changedFields }));
+      // 3) Gem top-level felter på primaryRepairId
+      if (hasTop && primaryRepairId) {
+        await api.updateRepairWithHistory({
+          repair_id: primaryRepairId,
+          fields: {
+            // status & betaling
+            status: (edited.status || "").toLowerCase(),
+            payment_type: (edited.payment_type || "efter").toLowerCase(),
+            payment_total: Number(edited.payment_total || 0),
+            deposit_amount: Number(edited.deposit_amount || 0),
+            remaining_amount: Number(edited.remaining_amount || 0),
+            // kontaktfelter
+            phone: edited.phone ?? "",
+            contact: edited.contact ?? "",
+            password: edited.password ?? "",
+            // hvis note er ændret, tager vi den med her også
+            ...(hasNote ? { note: edited.note } : {}),
+          },
+          change_note: "Topfelter opdateret via RepairHistory",
+        });
       }
 
+      await Promise.resolve(onAfterSave?.()); // refresh RepairsPage
       onClose?.();
     } catch (err) {
       console.error(err);
@@ -478,10 +322,72 @@ export default function RepairHistory({ repair, onClose, onSave }) {
     }
   };
 
+  // klik udenfor for at lukke
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose?.(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  /* ---------- SMS modal state + helpers ---------- */
+  const [smsOpen, setSmsOpen] = useState(false);
+  const [smsPhone, setSmsPhone] = useState("");
+  const [smsText, setSmsText] = useState("");
+  const [smsSending, setSmsSending] = useState(false);
+  const [smsError, setSmsError] = useState("");
+
+  function defaultSmsText() {
+    return (
+`Kære ${repair.customer || "kunde"},
+
+Din reparation #${repair.order_id} er klar til afhentning. 
+
+Telegiganten
+Taastrup hovedgade 66
+2630 Taastrup
+Tlf. 70 70 78 56
+Åbningstider: Man - Fre 10-18, Lør 10-14`
+    );
+  }
+  function openSmsBox() {
+    const phonePrefill = edited.contact?.trim() || edited.phone?.trim() || "";
+    setSmsPhone(normalizePhoneLocalOrDK(phonePrefill));
+    setSmsText(defaultSmsText());
+    setSmsError("");
+    setSmsOpen(true);
+  }
+  async function handleSmsSend() {
+    setSmsSending(true);
+    setSmsError("");
+    try {
+      const to = normalizePhoneLocalOrDK(smsPhone);
+      if (!to) throw new Error("Telefonnummer mangler.");
+      await api.sendSMS({
+        to,
+        body: smsText, // vigtigt: hedder 'body' i jeres API
+        repair_id: primaryRepairId || repair.id || null,
+      });
+      setSmsOpen(false);
+    } catch (e) {
+      setSmsError(e?.message || "Kunne ikke sende SMS.");
+    } finally {
+      setSmsSending(false);
+    }
+  }
+  async function copySmsToClipboard() {
+    try {
+      await navigator.clipboard.writeText(`${smsPhone}\n\n${smsText}`);
+      setSmsError("Tekst kopieret til udklipsholder.");
+    } catch {
+      setSmsError("Kunne ikke kopiere til udklipsholder.");
+    }
+  }
 
   /* ---------- UI ---------- */
+  const history = repair.history || [];
+
   return (
-    <div ref={overlayRef} onClick={handleOverlayClick} style={styles.overlay}>
+    <div ref={overlayRef} style={styles.overlay} onClick={(e) => { if (e.target === overlayRef.current) onClose?.(); }}>
       <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div style={styles.header}>
@@ -518,17 +424,19 @@ export default function RepairHistory({ repair, onClose, onSave }) {
             <input type="text" value={edited.phone ?? ""} onChange={(e) => handleChange("phone", e.target.value)} style={styles.input} />
           </div>
 
-          {/* Itemized linjer (hvis vi har dem) ellers topfelter (legacy) */}
+          {/* Reparationslinjer */}
           {fromMeta ? (
             <div style={styles.inputGroup}>
               <label style={{ marginBottom: 6 }}><strong>Reparationslinjer</strong></label>
               <div style={{ display: "grid", gap: 10 }}>
+                {/* Header for kolonner */}
                 <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1.2fr .6fr .6fr", gap: 8, fontWeight: 700, fontSize: 14, color: "#374151" }}>
-                <div>Model</div>
-                <div>Reparation</div>
-                <div>Pris (kr)</div>
-                <div>Tid (min)</div>
-              </div>
+                  <div>Model</div>
+                  <div>Reparation</div>
+                  <div>Pris (kr)</div>
+                  <div>Tid (min)</div>
+                </div>
+
                 {editableLines.map((ln) => (
                   <div key={ln.idx} style={styles.lineCard}>
                     <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1.2fr .6fr .6fr", gap: 8, alignItems: "center", width: "100%" }}>
@@ -562,7 +470,6 @@ export default function RepairHistory({ repair, onClose, onSave }) {
                       />
                     </div>
 
-                    {/* ekstra info (reservedel + kilde-id) */}
                     <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
                       <div>{(ln.part || ln.meta) && <PartBadge meta={ln.part || ln.meta} />}</div>
                       <div style={{ fontSize: 12, color: "#6b7280" }}>{ln.source_id ? `#${ln.source_id}` : "—"}</div>
@@ -570,7 +477,7 @@ export default function RepairHistory({ repair, onClose, onSave }) {
                   </div>
                 ))}
 
-                {/* Samlet total for redigerede linjer */}
+                {/* Total */}
                 <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontWeight: 700 }}>
                   <span>Samlet</span>
                   <span>
@@ -581,24 +488,24 @@ export default function RepairHistory({ repair, onClose, onSave }) {
               </div>
             </div>
           ) : (
-
+            // “Legacy” enkeltlinje-visning – beholdes for fuldstændighed
             <>
               <div style={styles.inputGroup}>
                 <label style={{ marginBottom: 6 }}><strong>Model:</strong></label>
-                <input type="text" value={edited.model ?? ""} onChange={(e) => handleChange("model", e.target.value)} style={styles.input} />
+                <input type="text" value={edited.model ?? repair.model ?? ""} onChange={(e) => handleChange("model", e.target.value)} style={styles.input} />
               </div>
-              <div style={styles.inputGroup}>
-                <label style={{ marginBottom: 6 }}><strong>Reparation:</strong></label>
-                <input type="text" value={edited.repair ?? ""} onChange={(e) => handleChange("repair", e.target.value)} style={styles.input} />
-              </div>
-              <div style={styles.row2}>
-                <div style={styles.inputGroup}>
-                  <label style={{ marginBottom: 6 }}><strong>Pris (kr):</strong></label>
-                  <input type="number" value={edited.price ?? ""} onChange={(e) => handleChange("price", e.target.value)} style={styles.input} />
+              <div style={styles.inputRow2}>
+                <div>
+                  <label style={{ marginBottom: 6 }}><strong>Reparation:</strong></label>
+                  <input type="text" value={edited.repair ?? repair.repair ?? ""} onChange={(e) => handleChange("repair", e.target.value)} style={styles.input} />
                 </div>
-                <div style={styles.inputGroup}>
+                <div>
+                  <label style={{ marginBottom: 6 }}><strong>Pris (kr):</strong></label>
+                  <input type="text" inputMode="numeric" value={edited.price ?? repair.price ?? ""} onChange={(e) => handleChange("price", e.target.value)} style={styles.input} />
+                </div>
+                <div>
                   <label style={{ marginBottom: 6 }}><strong>Tid (min):</strong></label>
-                  <input type="number" value={edited.time ?? ""} onChange={(e) => handleChange("time", e.target.value)} style={styles.input} />
+                  <input type="text" inputMode="numeric" value={edited.time ?? repair.time ?? ""} onChange={(e) => handleChange("time", e.target.value)} style={styles.input} />
                 </div>
               </div>
             </>
@@ -607,41 +514,49 @@ export default function RepairHistory({ repair, onClose, onSave }) {
           {/* Betaling */}
           <div style={styles.inputGroup}>
             <label style={{ marginBottom: 6 }}><strong>Betaling:</strong></label>
-            <select value={edited.payment_type || "efter"} onChange={(e) => handleChange("payment_type", e.target.value)} style={styles.input}>
+            <select
+              value={edited.payment_type}
+              onChange={(e) => handleChange("payment_type", e.target.value)}
+              style={{ ...styles.input, appearance: "auto" }}
+            >
               {PAYMENT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
-            <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
-              {edited.payment || ""}
-            </div>
           </div>
 
-          {/* Depositum felter */}
+          {/* Depositum felter (vises når "depositum") */}
           {edited.payment_type === "depositum" && (
-            <div style={styles.row2}>
-              <div style={styles.inputGroup}>
+            <div style={styles.inputRow2}>
+              <div>
                 <label style={{ marginBottom: 6 }}><strong>Total (kr):</strong></label>
-                <input type="number" value={edited.payment_total ?? ((fromMeta ? totalsFromEdits.price : totalFromLines) || "")}
-                 onChange={(e) => handleChange("payment_total", e.target.value)} style={styles.input} />
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={edited.payment_total ?? ((fromMeta ? totalsFromEdits.price : sum(lines, "price")) || "")}
+                  onChange={(e) => handleChange("payment_total", Number(String(e.target.value).replace(",", ".")) || 0)}
+                  style={styles.input}
+                />
               </div>
-              <div style={styles.inputGroup}>
+              <div>
                 <label style={{ marginBottom: 6 }}><strong>Depositum (kr):</strong></label>
-                <input type="number" value={edited.deposit_amount ?? ""} onChange={(e) => handleChange("deposit_amount", e.target.value)} style={styles.input} />
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={edited.deposit_amount ?? ""}
+                  onChange={(e) => handleChange("deposit_amount", Number(String(e.target.value).replace(",", ".")) || 0)}
+                  style={styles.input}
+                />
               </div>
-              <div style={styles.inputGroup}>
+              <div>
                 <label style={{ marginBottom: 6 }}><strong>Mangler (kr):</strong></label>
                 <input
-                  type="number"
-                  value={
-                    edited.payment_type === "depositum"
-                      ? Math.max(
-                          Number(edited.payment_total ?? (fromMeta ? totalsFromEdits.price : totalFromLines) ?? 0)
-                           - Number(edited.deposit_amount ?? 0),
-                          0
-                        )
-                      : (edited.remaining_amount ?? "")
-                  }
-                  onChange={(e) => handleChange("remaining_amount", e.target.value)}
-                  style={styles.input}
+                  type="text"
+                  inputMode="numeric"
+                  value={Math.max(
+                    0,
+                    Number(edited.payment_total ?? (fromMeta ? totalsFromEdits.price : sum(lines, "price")) ?? 0) - Number(edited.deposit_amount ?? 0)
+                  )}
+                  readOnly
+                  style={{ ...styles.input, background: "#f9fafb" }}
                 />
               </div>
             </div>
@@ -650,20 +565,24 @@ export default function RepairHistory({ repair, onClose, onSave }) {
           {/* Status */}
           <div style={styles.inputGroup}>
             <label style={{ marginBottom: 6 }}><strong>Status:</strong></label>
-            <select value={edited.status || "under reparation"} onChange={(e) => handleChange("status", e.target.value)} style={styles.input}>
+            <select
+              value={edited.status || ""}
+              onChange={(e) => handleChange("status", e.target.value)}
+              style={{ ...styles.input, appearance: "auto" }}
+            >
               {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
 
-          {/* Kode, kontakt, note */}
-          <div style={styles.row2}>
-            <div style={styles.inputGroup}>
+          {/* Kontakt + password + note */}
+          <div style={styles.inputRow2}>
+            <div>
+              <label style={{ marginBottom: 6 }}><strong>Kontakt:</strong></label>
+              <input type="text" value={edited.contact ?? ""} onChange={(e) => handleChange("contact", e.target.value)} style={styles.input} />
+            </div>
+            <div>
               <label style={{ marginBottom: 6 }}><strong>Adgangskode:</strong></label>
               <input type="text" value={edited.password ?? ""} onChange={(e) => handleChange("password", e.target.value)} style={styles.input} />
-            </div>
-            <div style={styles.inputGroup}>
-              <label style={{ marginBottom: 6 }}><strong>Kontakt (alternativ):</strong></label>
-              <input type="text" value={edited.contact ?? ""} onChange={(e) => handleChange("contact", e.target.value)} style={styles.input} />
             </div>
           </div>
           <div style={styles.inputGroup}>
@@ -673,36 +592,44 @@ export default function RepairHistory({ repair, onClose, onSave }) {
 
           {/* Footer */}
           <div style={styles.footer}>
-            <button onClick={onClose} disabled={saving} style={styles.cancel}>Annullér</button>
-            <button type="button" onClick={() => setSmsOpen((v) => !v)} style={styles.sms} disabled={saving} title="Send SMS til kunden">Send SMS</button>
-            <button type="button" onClick={handlePrintSlip} style={styles.print} disabled={saving} title="Print reparations-slip">Print slip</button>
-            <button onClick={handleSave} style={styles.save} disabled={saving || !Object.keys(changedFields).length} title={!Object.keys(changedFields).length ? "Ingen ændringer" : "Gem"}>
-              {saving ? "Gemmer…" : "Gem ændringer"}
-            </button>
-          </div>
-
-          {/* SMS-panel */}
-          {smsOpen && (
-            <div style={styles.smsPanel}>
-              <div style={{ display: "grid", gap: 8 }}>
-                <div>
-                  <label style={{ display: "block", marginBottom: 6 }}><strong>Modtager (telefon):</strong></label>
-                  <input type="text" value={smsTo} onChange={(e) => setSmsTo(e.target.value)} style={styles.input} placeholder="+45XXXXXXXX" />
-                </div>
-                <div>
-                  <label style={{ display: "block", marginBottom: 6 }}><strong>Besked:</strong></label>
-                  <textarea value={smsText} onChange={(e) => setSmsText(e.target.value)} rows={4} style={{ ...styles.input, resize: "vertical" }} />
-                  <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>{smsText.length} tegn</div>
-                </div>
-                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                  <button onClick={() => setSmsOpen(false)} style={styles.cancel}>Luk</button>
-                  <button onClick={handleSendSMS} disabled={smsSending || !smsTo || !smsText.trim()} style={styles.save}>
-                    {smsSending ? "Sender…" : "Send SMS"}
-                  </button>
-                </div>
-              </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                style={styles.secondary}
+                onClick={() => window.open(`/print-slip/${repair.order_id}`, "_blank")}
+              >
+                Print slip
+              </button>
+              <button
+                style={styles.secondary}
+                onClick={openSmsBox}
+                title="Send SMS til kunden"
+              >
+                Send SMS
+              </button>
             </div>
-          )}
+
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={onClose} disabled={saving} style={styles.cancel}>Annullér</button>
+              <button
+                onClick={handleSave}
+                style={styles.save}
+                disabled={
+                  saving || (
+                    Object.keys(changedFields).length === 0 &&
+                    dirtyLines.length === 0 &&
+                    !noteChanged
+                  )
+                }
+                title={
+                  (Object.keys(changedFields).length === 0 && dirtyLines.length === 0 && !noteChanged)
+                    ? "Ingen ændringer"
+                    : "Gem"
+                }
+              >
+                {saving ? "Gemmer…" : "Gem ændringer"}
+              </button>
+            </div>
+          </div>
 
           {/* Historik */}
           {!!history?.length && (
@@ -722,31 +649,161 @@ export default function RepairHistory({ repair, onClose, onSave }) {
           )}
         </div>
       </div>
+
+      {/* ---------- SMS modal ---------- */}
+      {smsOpen && (
+        <div style={styles.smsOverlay} onClick={() => setSmsOpen(false)}>
+          <div style={styles.smsModal} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0, marginBottom: 8 }}>Send SMS</h3>
+            <div style={{ display: "grid", gap: 10 }}>
+              <div>
+                <label style={{ display: "block", fontWeight: 700, marginBottom: 6 }}>Telefon</label>
+                <input
+                  style={styles.input}
+                  value={smsPhone}
+                  onChange={(e) => setSmsPhone(e.target.value)}
+                  placeholder="Modtagers telefon"
+                />
+              </div>
+              <div>
+                <label style={{ display: "block", fontWeight: 700, marginBottom: 6 }}>Besked</label>
+                <textarea
+                  rows={7}
+                  style={{ ...styles.input, resize: "vertical" }}
+                  value={smsText}
+                  onChange={(e) => setSmsText(e.target.value)}
+                  placeholder="Skriv din besked…"
+                />
+              </div>
+              {smsError && (
+                <div style={{ background: "#fff7ed", color: "#9a3412", padding: "8px 10px", borderRadius: 10 }}>
+                  {smsError}
+                </div>
+              )}
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button style={styles.secondary} onClick={copySmsToClipboard}>Kopiér tekst</button>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button style={styles.cancel} onClick={() => setSmsOpen(false)} disabled={smsSending}>Luk</button>
+                  <button
+                    style={styles.save}
+                    onClick={handleSmsSend}
+                    disabled={smsSending || !normalizePhoneLocalOrDK(smsPhone) || !smsText.trim()}
+                  >
+                    {smsSending ? "Sender…" : "Send SMS"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ---------- /SMS modal ---------- */}
     </div>
   );
 }
 
 /* ---------------- Styles ---------------- */
 const styles = {
-  overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 1000 },
-  modal: { background: "#fff", width: "min(980px, 96vw)", maxHeight: "92vh", borderRadius: 12, overflow: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.2)", padding: 16 },
-  header: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
-  close: { border: "none", background: "transparent", fontSize: 18, cursor: "pointer", width: 36, height: 36, display: "grid", placeItems: "center", borderRadius: 8 },
+  overlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,.35)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1000,
+  },
+  modal: {
+    width: "min(980px, 94vw)",
+    maxHeight: "90vh",
+    overflow: "auto",
+    background: "#fff",
+    borderRadius: 16,
+    padding: "18px 18px 14px",
+    boxShadow: "0 20px 60px rgba(0,0,0,.2)",
+  },
+  header: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 10,
+  },
+  close: {
+    border: "none",
+    background: "#eef2ff",
+    color: "#111827",
+    padding: "8px 10px",
+    borderRadius: 10,
+    cursor: "pointer",
+    fontWeight: 700,
+  },
   body: { display: "grid", gap: 12 },
   inputGroup: { display: "grid", gap: 6 },
-  input: { width: "100%", padding: "10px 12px", border: "1px solid #e5e7eb", borderRadius: 8, outline: "none" },
-  row2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 },
-  footer: { marginTop: 6, display: "flex", gap: 8, justifyContent: "flex-end" },
-  cancel: { background: "#f3f4f6", color: "#111", border: "none", padding: "10px 14px", borderRadius: 8, cursor: "pointer" },
-  save: { background: "#2166AC", color: "#fff", border: "none", padding: "10px 14px", borderRadius: 8, cursor: "pointer" },
-  print: { background: "#10b981", color: "#fff", border: "none", padding: "10px 14px", borderRadius: 8, cursor: "pointer" },
-  sms: { background: "#f59e0b", color: "#fff", border: "none", padding: "10px 14px", borderRadius: 8, cursor: "pointer" },
-  errorBox: { background: "#fee2e2", color: "#991b1b", padding: 10, borderRadius: 8, marginBottom: 8 },
-  linkBox: { display: "inline-block", padding: "10px 12px", border: "1px solid #e5e7eb", borderRadius: 8, textDecoration: "none", color: "#111" },
-  readonlyBox: { padding: "10px 12px", border: "1px solid #e5e7eb", borderRadius: 8, background: "#fafafa" },
+  inputRow2: { display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" },
+  input: {
+    width: "100%",
+    padding: "10px 12px",
+    border: "1px solid #e5e7eb",
+    borderRadius: 10,
+    fontSize: 14,
+    background: "#fff",
+  },
+  readonlyBox: {
+    width: "100%",
+    padding: "10px 12px",
+    border: "1px solid #e5e7eb",
+    borderRadius: 10,
+    fontSize: 14,
+    background: "#f9fafb",
+  },
+  linkBox: {
+    display: "inline-block",
+    padding: "10px 12px",
+    border: "1px solid #e5e7eb",
+    borderRadius: 10,
+    background: "#f0f9ff",
+    textDecoration: "none",
+    color: "#0c4a6e",
+    fontWeight: 700,
+  },
+  lineCard: {
+    padding: 8,
+    border: "1px solid #e5e7eb",
+    borderRadius: 12,
+    background: "#fff",
+  },
+  footer: { display: "flex", gap: 8, justifyContent: "space-between", marginTop: 12 },
+  cancel: { background: "#fff", color: "#374151", border: "1px solid #d1d5db", borderRadius: 10, padding: "10px 14px", cursor: "pointer", fontWeight: 700 },
+  save: { background: "#2166AC", color: "#fff", border: "none", borderRadius: 10, padding: "10px 14px", cursor: "pointer", fontWeight: 700 },
+  secondary: {
+    background: "#f0f9ff",
+    color: "#0369a1",
+    border: "1px solid #bae6fd",
+    borderRadius: 10,
+    padding: "10px 14px",
+    cursor: "pointer",
+    fontWeight: 700,
+  },
+  errorBox: { background: "#fee2e2", color: "#991b1b", padding: "8px 10px", borderRadius: 10, marginBottom: 10 },
 
-  // Itemized kort
-  lineCard: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, border: "1px solid #e5e7eb", borderRadius: 10, padding: 10 },
-  priceChip: { fontWeight: 800 },
-  timeChip: { fontSize: 12, color: "#374151" },
+  // SMS modal
+  smsOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,.45)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1200,
+  },
+  smsModal: {
+    width: "min(560px, 92vw)",
+    background: "#fff",
+    borderRadius: 14,
+    padding: 16,
+    boxShadow: "0 16px 44px rgba(0,0,0,.25)",
+  },
 };

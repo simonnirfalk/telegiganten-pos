@@ -1,5 +1,5 @@
 // src/pages/RepairsPage.jsx
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { FaHome } from "react-icons/fa";
 import RepairHistory from "../components/RepairHistory";
@@ -66,31 +66,30 @@ export default function RepairsPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
-  /** Hent reparationer (uændrede endpoints) */
-  useEffect(() => {
-    let isMounted = true;
-    (async () => {
-      try {
-        setLoading(true);
-        setLoadError("");
-        const data = await api.getRepairOrders();
-        const items = Array.isArray(data) ? data : (data?.items ?? []);
-        if (!isMounted) return;
-        setRepairs(items);
-      } catch (err) {
-        console.error("Fejl ved hentning af reparationer:", err);
-        if (isMounted) setLoadError("Kunne ikke hente reparationer.");
-      } finally {
-        if (isMounted) setLoading(false);
-      }
-    })();
-    return () => { isMounted = false; };
+  /** Genbrugelig loader så vi kan refetch'e efter gem */
+  const loadRepairs = useCallback(async () => {
+    setLoadError("");
+    setLoading(true);
+    try {
+      const data = await api.getRepairOrders();
+      const items = Array.isArray(data) ? data : (data?.items ?? []);
+      setRepairs(items);
+    } catch (err) {
+      console.error("Fejl ved hentning af reparationer:", err);
+      setLoadError("Kunne ikke hente reparationer.");
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  /** Første load */
+  useEffect(() => {
+    loadRepairs();
+  }, [loadRepairs]);
 
   /** Normaliser topfelter (ingen API-ændringer) */
   const normalizedRepairs = useMemo(() => {
     return (Array.isArray(repairs) ? repairs : []).map((r) => ({
-      // vigtig: bevar alle rå felter
       _raw: r,
       id: r.id ?? r.ID ?? r.post_id ?? r.order_id ?? Math.random().toString(36).slice(2),
       order_id: r.order_id ?? r.id ?? r.ID ?? "",
@@ -128,23 +127,20 @@ export default function RepairsPage() {
           lines: [],
           totalPrice: 0,
           totalTime: 0,
-          _rows: [], // de oprindelige rækker i gruppen
+          _rows: [],
         });
       }
       const g = map.get(key);
       g._rows.push(r);
-      // konsolidér felt-værdier (bevar tidligste dato, seneste status)
       if (r.created_at && (!g.created_at || new Date(r.created_at) < new Date(g.created_at))) {
         g.created_at = r.created_at;
       }
-      // seneste status (højeste timestamp)
       const gLatestTs = new Date(g._rows[g._rows.length - 1]?.created_at || 0).getTime();
       const rTs = new Date(r.created_at || 0).getTime();
       if (rTs >= gLatestTs && r.status) g.status = r.status;
 
       const sourceId = r?._raw?.id ?? r?.id ?? r?._raw?.post_id ?? r?.post_id ?? null;
 
-      // linje
       g.lines.push({
         device: r.model,
         repair: r.repair,
@@ -166,7 +162,7 @@ export default function RepairsPage() {
     const opener = location.state?.openRepair;
     if (!opener || consumedOpenRef.current) return;
 
-    if (!Array.isArray(grouped) || grouped.length === 0) return; // vent til grouped er klar
+    if (!Array.isArray(grouped) || grouped.length === 0) return;
 
     const key = String(opener.order_id ?? opener.id ?? "");
     const g = grouped.find((x) => String(x.order_id) === key);
@@ -177,7 +173,6 @@ export default function RepairsPage() {
       navigate(location.pathname, { replace: true, state: null }); // ryd state
     }
   }, [location, grouped, navigate]);
-
 
   /** Filtrering + sortering på gruppe-niveau */
   const filtered = useMemo(() => {
@@ -213,7 +208,7 @@ export default function RepairsPage() {
       .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
   }, [grouped, searchTerm, fromDate, toDate, selectedStatus]);
 
-  /* Åbn RepairHistory med syntetisk “samlet ordre” (kun visning/print) */
+  /* Åbn RepairHistory med syntetisk “samlet ordre” */
   const openGroupedInHistory = (g) => {
     const synthetic = {
       id: g._rows[0]?.id,
@@ -235,7 +230,6 @@ export default function RepairsPage() {
       remaining_amount: null,
       note: g._rows[0]?._raw?.note || "",
       password: g._rows[0]?._raw?.password || "",
-      // vigtig: linjerne vi allerede har samlet
       lines: g.lines,
       history: g._rows[0]?._raw?.history || [],
     };
@@ -352,8 +346,7 @@ export default function RepairsPage() {
         <RepairHistory
           repair={selectedRepair}
           onClose={() => setSelectedRepair(null)}
-          // Valgfrit: deaktiver gem på syntetisk (ellers vil den forsøge at gemme ét post-id)
-          onSave={() => Promise.resolve()}
+          onAfterSave={loadRepairs}  // ⬅️ refresher listen efter gem
         />
       )}
     </div>
