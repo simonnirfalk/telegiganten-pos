@@ -1,5 +1,26 @@
 // src/data/apiClient.js
 
+// Decode HTML entities (fx &#8211; → –)
+function normalizeEntities(obj) {
+  if (typeof obj === "string") {
+    return obj
+      .replace(/&#8211;/g, "–") // en dash
+      .replace(/&#8212;/g, "—") // em dash
+      .replace(/&amp;/g, "&")
+      .replace(/&quot;/g, '"')
+      .replace(/&#039;/g, "'")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">");
+  } else if (Array.isArray(obj)) {
+    return obj.map(normalizeEntities);
+  } else if (obj && typeof obj === "object") {
+    return Object.fromEntries(
+      Object.entries(obj).map(([k, v]) => [k, normalizeEntities(v)])
+    );
+  }
+  return obj;
+}
+
 // ===== Konfiguration =====
 const WP_ORIGIN =
   (typeof import.meta !== "undefined" && import.meta.env?.VITE_WP_ORIGIN) ||
@@ -127,7 +148,8 @@ export async function proxyFetch({ path, method = "GET", query, body, headers = 
     }
     throw new Error(`Proxy fejl: ${res.status} - ${errText}`);
   }
-  return ct.includes("application/json") ? res.json() : res.text();
+  const data = ct.includes("application/json") ? await res.json() : await res.text();
+  return normalizeEntities(data);
 }
 
 /* ===== (ALIAS) Named exports til bagudkompatibilitet ===== */
