@@ -1,109 +1,15 @@
 // src/components/DashboardRecentBookings.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { fetchBookings } from "../data/apiClient"; // bruger din eksisterende helper
+import { fetchBookings } from "../data/apiClient";
 
 const cap = (s = "", n = 80) => (s?.length > n ? s.slice(0, n - 1) + "…" : s);
 
-/* -------------------- Dato/tid helpers -------------------- */
-function cleanTime(t = "") {
-  // strip "kl." og ekstra mellemrum
-  return String(t).replace(/\bkl\.\s*/i, "").trim();
-}
-
-function parseDateTime(date, time) {
-  const dRaw = String(date || "").trim();
-  const tRaw = cleanTime(time);
-
-  if (!dRaw && !tRaw) return NaN;
-
-  // 1) ISO direkte i date eller time
-  if (/^\d{4}-\d{2}-\d{2}(?:[T\s]\d{2}:\d{2}(:\d{2})?)?$/.test(dRaw)) {
-    const ms = Date.parse(dRaw);
-    if (!Number.isNaN(ms)) return ms;
-  }
-  if (/^\d{4}-\d{2}-\d{2}/.test(tRaw) || /T\d{2}:\d{2}/.test(tRaw)) {
-    const ms = Date.parse(tRaw);
-    if (!Number.isNaN(ms)) return ms;
-  }
-
-  // 2) DD/MM/YYYY
-  let m = dRaw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (m) {
-    const [_, dd, mm, yyyy] = m;
-    const [HH = "00", MM = "00"] = tRaw.split(/[.:]/);
-    const d = new Date(
-      Number(yyyy),
-      Number(mm) - 1,
-      Number(dd),
-      Number(HH),
-      Number(MM)
-    );
-    return isNaN(d.getTime()) ? NaN : d.getTime();
-  }
-
-  // 3) DD-MM-YYYY
-  m = dRaw.match(/^(\d{2})-(\d{2})-(\d{4})$/);
-  if (m) {
-    const [_, dd, mm, yyyy] = m;
-    const [HH = "00", MM = "00"] = tRaw.split(/[.:]/);
-    const d = new Date(
-      Number(yyyy),
-      Number(mm) - 1,
-      Number(dd),
-      Number(HH),
-      Number(MM)
-    );
-    return isNaN(d.getTime()) ? NaN : d.getTime();
-  }
-
-  // 4) DD.MM.YYYY
-  m = dRaw.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
-  if (m) {
-    const [_, dd, mm, yyyy] = m;
-    const [HH = "00", MM = "00"] = tRaw.split(/[.:]/);
-    const d = new Date(
-      Number(yyyy),
-      Number(mm) - 1,
-      Number(dd),
-      Number(HH),
-      Number(MM)
-    );
-    return isNaN(d.getTime()) ? NaN : d.getTime();
-  }
-
-  // 5) Sidste forsøg: kombiner som fri tekst (kan virke hvis browseren kan tolke lokalt)
-  const joined = `${dRaw}${tRaw ? ` ${tRaw}` : ""}`.trim();
-  const ms = Date.parse(joined);
-  if (!Number.isNaN(ms)) return ms;
-
-  return NaN;
-}
-
-function startMsOrFallback(v) {
-  const ms1 = parseDateTime(v.date, v.time);
-  if (!Number.isNaN(ms1)) return ms1;
-
-  const ms2 = v.created_at ? Date.parse(v.created_at) : NaN;
-  if (!Number.isNaN(ms2)) return ms2;
-
-  return Number.POSITIVE_INFINITY; // ukendt → til sidst
-}
-
-function fmtDate(d, t) {
-  const hasD = !!d;
-  const hasT = !!t;
-  if (!hasD && !hasT) return "—";
-  return `${hasD ? d : ""}${hasT ? ` kl. ${cleanTime(t)}` : ""}`.trim();
-}
-
-/* -------------------- UI helpers -------------------- */
 const gridStyle = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
   gap: "1rem",
 };
-
 const cardStyle = {
   background: "white",
   borderRadius: 12,
@@ -112,13 +18,7 @@ const cardStyle = {
   cursor: "pointer",
   transition: "transform .12s ease, box-shadow .12s ease",
 };
-
-const skeletonLine = (w) => ({
-  height: 12,
-  width: w,
-  background: "#eee",
-  borderRadius: 8,
-});
+const skeletonLine = (w) => ({ height: 12, width: w, background: "#eee", borderRadius: 8 });
 
 const statusPill = (status) => {
   const map = {
@@ -130,22 +30,49 @@ const statusPill = (status) => {
   }[status] || { bg: "#eef2ff", fg: "#3730a3", label: status || "—" };
 
   return (
-    <span
-      style={{
-        background: map.bg,
-        color: map.fg,
-        padding: "2px 8px",
-        borderRadius: 999,
-        fontSize: 12,
-        fontWeight: 700,
-      }}
-    >
+    <span style={{ background: map.bg, color: map.fg, padding: "2px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700 }}>
       {map.label}
     </span>
   );
 };
 
-/* -------------------- Component -------------------- */
+function normalize(v) {
+  // Dækker både “bookings” og “repairs” tilfælde
+  const order_id = v.order_id ?? v.id ?? v.ID ?? "";
+  const created_at = v.created_at ?? v.date ?? v.updated_at ?? null;
+  const customer_name = v.customer_name ?? v.customer ?? v.name ?? "";
+  const customer_phone = v.customer_phone ?? v.phone ?? "";
+  const customer_email = v.customer_email ?? v.email ?? (v.contact?.includes("@") ? v.contact : "");
+  const model = v.model || v.model_name || v.device || "";
+  const time = Number(v.time ?? v.duration ?? 0);
+  const price = Number(v.price ?? v.amount ?? 0);
+  const repairName = v.repair || v.repair_title || v.title || "";
+  const status = v.status ?? v.booking_status ?? "";
+
+  // Hvis der allerede er en repairs-liste, transformer den til {name, price, time}
+  const repairs = Array.isArray(v.repairs)
+    ? v.repairs.map(r => ({
+        name: r?.name || r?.title || r?.repair || "",
+        price: Number(r?.price || 0),
+        time: Number(r?.time || 0),
+      }))
+    : (repairName || price || time)
+      ? [{ name: repairName, price, time }]
+      : [];
+
+  return {
+    raw: v,
+    order_id,
+    created_at,
+    customer_name,
+    customer_phone,
+    customer_email,
+    model,
+    repairs,
+    status,
+  };
+}
+
 export default function DashboardRecentBookings() {
   const navigate = useNavigate();
   const [items, setItems] = useState([]);
@@ -158,7 +85,7 @@ export default function DashboardRecentBookings() {
       try {
         setLoading(true);
         setErr("");
-        const res = await fetchBookings({ per_page: 200 }); // hent nok til at sortere korrekt
+        const res = await fetchBookings({ per_page: 200 });
         const raw = Array.isArray(res) ? res : (res?.items ?? []);
         if (!cancel) setItems(raw);
       } catch (e) {
@@ -170,19 +97,53 @@ export default function DashboardRecentBookings() {
     return () => { cancel = true; };
   }, []);
 
-  // Sortér: kommende først (nærmest nu), derefter tidligere (nærmest nu), ukendte til sidst
-  const sorted = useMemo(() => {
-    const now = Date.now();
-    const withKeys = (Array.isArray(items) ? items : []).map((v) => ({ v, ms: startMsOrFallback(v) }));
+  // Gruppér pr. ordre-id (én kort pr. ordre)
+  const grouped = useMemo(() => {
+    const m = new Map();
+    for (const it of (Array.isArray(items) ? items : [])) {
+      const n = normalize(it);
+      const key = n.order_id || Math.random().toString(36).slice(2);
+      if (!m.has(key)) {
+        m.set(key, {
+          order_id: key,
+          created_at: n.created_at,
+          customer_name: n.customer_name,
+          customer_phone: n.customer_phone,
+          customer_email: n.customer_email,
+          model: n.model,
+          status: n.status,
+          repairs: [],
+          totalPrice: 0,
+          totalTime: 0,
+        });
+      }
+      const g = m.get(key);
+      // lav “første” skabelon for model/kunde
+      if (!g.model && n.model) g.model = n.model;
+      if (!g.customer_name && n.customer_name) g.customer_name = n.customer_name;
+      if (!g.customer_phone && n.customer_phone) g.customer_phone = n.customer_phone;
+      if (!g.customer_email && n.customer_email) g.customer_email = n.customer_email;
+      if (n.created_at && (!g.created_at || new Date(n.created_at) < new Date(g.created_at))) {
+        g.created_at = n.created_at;
+      }
+      if (n.status) g.status = n.status;
 
-    const future  = withKeys.filter((x) => x.ms >= now && Number.isFinite(x.ms)).sort((a, b) => a.ms - b.ms);
-    const past    = withKeys.filter((x) => x.ms <  now && Number.isFinite(x.ms)).sort((a, b) => b.ms - a.ms);
-    const unknown = withKeys.filter((x) => !Number.isFinite(x.ms));
-
-    return [...future, ...past, ...unknown].map((x) => x.v).slice(0, 6);
+      // push linjer
+      for (const r of n.repairs) {
+        g.repairs.push(r);
+        g.totalPrice += Number(r.price || 0);
+        g.totalTime += Number(r.time || 0);
+      }
+    }
+    return Array.from(m.values());
   }, [items]);
 
-  const openBooking = (id) => navigate("/bookings", { state: { openBookingId: id } });
+  // Sortér nyeste først
+  const sorted = useMemo(() => {
+    return grouped.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)).slice(0, 6);
+  }, [grouped]);
+
+  const openOrder = (id) => navigate("/repairs", { state: { openRepair: { order_id: id } } });
 
   if (loading) {
     return (
@@ -208,26 +169,25 @@ export default function DashboardRecentBookings() {
 
   return (
     <div style={gridStyle}>
-      {sorted.map((b, i) => (
+      {sorted.map((g) => (
         <div
-          key={b.id ?? i}
+          key={g.order_id}
           style={cardStyle}
-          onClick={() => openBooking(b.id)}
+          onClick={() => openOrder(g.order_id)}
           onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 8px 18px rgba(0,0,0,0.12)"; }}
           onMouseLeave={(e) => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "0 1px 4px rgba(0,0,0,0.05)"; }}
-          title={b.id ? `Åbn booking #${b.id}` : "Åbn booking"}
+          title={`Åbn ordre #${g.order_id}`}
         >
           <div style={{ fontWeight: 700, marginBottom: 4 }}>
-            {b.model || "Uden model"}
-            {Array.isArray(b.repairs) && b.repairs.length ? ` — ${cap(b.repairs.map(r => r?.name || r?.title || "").filter(Boolean).join(", "), 40)}` : ""}
+            {g.model || "Uden model"} — {cap(g.repairs.map(r => r.name).filter(Boolean).join(", "), 48)}
           </div>
-          <div style={{ color: "#374151" }}>{b.customer_name || "Uden navn"}</div>
+          <div style={{ color: "#374151" }}>{g.customer_name || "Uden navn"}</div>
           <div style={{ color: "#6b7280", fontSize: 13, marginTop: 2 }}>
-            {[b.customer_phone, b.customer_email].filter(Boolean).join(" · ") || "—"}
+            {[g.customer_phone, g.customer_email].filter(Boolean).join(" · ") || "—"}
           </div>
-          <div style={{ marginTop: 8 }}>{statusPill(b.status)}</div>
+          <div style={{ marginTop: 8 }}>{statusPill(g.status)}</div>
           <div style={{ color: "#6b7280", fontSize: 13, marginTop: 8 }}>
-            {fmtDate(b.date, b.time)}
+            Total: {g.totalPrice.toLocaleString("da-DK")} kr • {g.totalTime || 0} min
           </div>
         </div>
       ))}

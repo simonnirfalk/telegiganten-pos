@@ -218,6 +218,64 @@ export default function RepairHistory({ repair, onClose, onSave }) {
   const { lines, fromMeta } = useMemo(() => extractLinesFromAny(enriched), [enriched]);
   const totalFromLines = useMemo(() => sum(lines, "price"), [lines]);
   const timeFromLines = useMemo(() => sum(lines, "time"), [lines]);
+  const [editableLines, setEditableLines] = useState(() =>
+    (lines || []).map((ln, idx) => ({
+      idx,
+      device: ln.device || "",
+      repair: ln.repair || "",
+      price: Number(ln.price || 0),
+      time: Number(ln.time || 0),
+      part: ln.part || ln.meta || null,
+      // hvis vi får source_id/ID med fra UI’et (fx fra RepairsPage-gruppering), så gemmer vi pr. post
+      source_id: ln.source_id ?? ln.id ?? null,
+      _dirty: false,
+    }))
+  );
+
+  // Hold redigerbar kopi i sync når "lines" ændres
+  useEffect(() => {
+    setEditableLines((lines || []).map((ln, idx) => ({
+      idx,
+      device: ln.device || "",
+      repair: ln.repair || "",
+      price: Number(ln.price || 0),
+      time: Number(ln.time || 0),
+      part: ln.part || ln.meta || null,
+      source_id: ln.source_id ?? ln.id ?? null,
+      _dirty: false,
+    })));
+  }, [lines]);
+
+  // Sæt felter på en redigerbar linje
+  const setLineField = (idx, field, value) => {
+    setEditableLines(prev =>
+      prev.map(l =>
+        l.idx === idx
+          ? {
+              ...l,
+              [field]:
+                field === "price" || field === "time"
+                  ? Number(String(value).replace(",", "."))
+                  : value,
+              _dirty: true,
+            }
+          : l
+      )
+    );
+  };
+
+  // Totaler baseret på det redigerede indhold
+  const totalsFromEdits = useMemo(() => ({
+    price: (editableLines || []).reduce((s, l) => s + (Number(l.price) || 0), 0),
+    time:  (editableLines || []).reduce((s, l) => s + (Number(l.time)  || 0), 0),
+  }), [editableLines]);
+
+  // Hvis vi har itemized linjer, forsøg at udfylde payment_total ud fra de redigerede totaler
+  useEffect(() => {
+    if (fromMeta) {
+      setEdited(e => ({ ...e, payment_total: e.payment_total ?? (totalsFromEdits.price || null) }));
+    }
+  }, [fromMeta, totalsFromEdits.price]);
 
   // Form state
   const [edited, setEdited] = useState(() => ({
@@ -347,19 +405,79 @@ export default function RepairHistory({ repair, onClose, onSave }) {
 
   /* ---------- Gem ---------- */
   const handleSave = async () => {
-    if (!Object.keys(changedFields).length) { onClose?.(); return; }
+    // Find linjer der faktisk er ændret
+    const dirtyLines = fromMeta
+      ? editableLines.filter((ln, i) => {
+          const orig = lines[i] || {};
+          const changed =
+            ln._dirty &&
+            (
+              (ln.device || "") !== (orig.device || "") ||
+              (ln.repair || "") !== (orig.repair || "") ||
+              Number(ln.price || 0) !== Number(orig.price || 0) ||
+              Number(ln.time  || 0) !== Number(orig.time  || 0)
+            );
+          return changed;
+        })
+      : [];
+
+    // Skal vi gemme noget som helst?
+    const nothingToSave =
+      (!Object.keys(changedFields).length) &&
+      (dirtyLines.length === 0) &&
+      !(fromMeta && typeof edited.note === "string" && edited.note !== (repair.note || ""));
+
+    if (nothingToSave) { onClose?.(); return; }
+
     setSaving(true);
     setError("");
+
     try {
-      await Promise.resolve(onSave?.({ repair_id: Number(repair.id), fields: changedFields }));
+      // 1) Gem alle ændrede linjer (kun dem der har source_id)
+      for (const ln of dirtyLines) {
+        if (!ln.source_id) continue;
+
+        // Map UI-felter til WP meta-nøgler for pris/tid
+        const fields = {
+          device: ln.device,
+          repair: ln.repair,
+          _telegiganten_repair_repair_price: Number(ln.price || 0),
+          _telegiganten_repair_repair_time:  Number(ln.time  || 0),
+        };
+
+        await api.updateRepairWithHistory({
+          repair_id: Number(ln.source_id),
+          fields,
+          change_note: "Opdateret via RepairHistory (linje)",
+        });
+      }
+
+      // 2) Hvis vi har itemized linjer og noten er ændret: gem note på første post i ordren
+      if (fromMeta && typeof edited.note === "string" && edited.note !== (repair.note || "")) {
+        const firstId = (editableLines.find((l) => l.source_id) || {}).source_id;
+        if (firstId) {
+          await api.updateRepairWithHistory({
+            repair_id: Number(firstId),
+            fields: { note: edited.note },
+            change_note: "Note opdateret via RepairHistory",
+          });
+        }
+      }
+
+      // 3) Gem øvrige topfelter (legacy enkelt-post) via eksisterende onSave
+      if (Object.keys(changedFields).length) {
+        await Promise.resolve(onSave?.({ repair_id: Number(repair.id), fields: changedFields }));
+      }
+
       onClose?.();
     } catch (err) {
-      console.error("Fejl fra onSave:", err);
-      setError("Kunne ikke gemme ændringer. Prøv igen.");
+      console.error(err);
+      setError(err?.message || "Kunne ikke gemme ændringer. Prøv igen.");
     } finally {
       setSaving(false);
     }
   };
+
 
   /* ---------- UI ---------- */
   return (
@@ -405,29 +523,65 @@ export default function RepairHistory({ repair, onClose, onSave }) {
             <div style={styles.inputGroup}>
               <label style={{ marginBottom: 6 }}><strong>Reparationslinjer</strong></label>
               <div style={{ display: "grid", gap: 10 }}>
-                {lines.map((ln, idx) => (
-                  <div key={idx} style={styles.lineCard}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 700 }}>{ln.device || "—"}</div>
-                      <div style={{ color: "#374151" }}>{ln.repair || "—"}</div>
-                      {(ln.part || ln.meta) && <div style={{ marginTop: 6 }}><PartBadge meta={ln.part || ln.meta} /></div>}
+                <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1.2fr .6fr .6fr", gap: 8, fontWeight: 700, fontSize: 14, color: "#374151" }}>
+                <div>Model</div>
+                <div>Reparation</div>
+                <div>Pris (kr)</div>
+                <div>Tid (min)</div>
+              </div>
+                {editableLines.map((ln) => (
+                  <div key={ln.idx} style={styles.lineCard}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1.2fr .6fr .6fr", gap: 8, alignItems: "center", width: "100%" }}>
+                      <input
+                        style={styles.input}
+                        value={ln.device}
+                        onChange={(e) => setLineField(ln.idx, "device", e.target.value)}
+                        placeholder="Model / enhed"
+                      />
+                      <input
+                        style={styles.input}
+                        value={ln.repair}
+                        onChange={(e) => setLineField(ln.idx, "repair", e.target.value)}
+                        placeholder="Reparation"
+                      />
+                      <input
+                        style={styles.input}
+                        type="text"
+                        inputMode="numeric"
+                        value={String(ln.price)}
+                        onChange={(e) => setLineField(ln.idx, "price", e.target.value)}
+                        placeholder="Pris"
+                      />
+                      <input
+                        style={styles.input}
+                        type="text"
+                        inputMode="numeric"
+                        value={String(ln.time)}
+                        onChange={(e) => setLineField(ln.idx, "time", e.target.value)}
+                        placeholder="Min."
+                      />
                     </div>
-                    <div style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                      <div style={styles.priceChip}>{Number(ln.price || 0).toLocaleString("da-DK")} kr</div>
-                      <div style={styles.timeChip}>{Number(ln.time || 0)} min</div>
+
+                    {/* ekstra info (reservedel + kilde-id) */}
+                    <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
+                      <div>{(ln.part || ln.meta) && <PartBadge meta={ln.part || ln.meta} />}</div>
+                      <div style={{ fontSize: 12, color: "#6b7280" }}>{ln.source_id ? `#${ln.source_id}` : "—"}</div>
                     </div>
                   </div>
                 ))}
+
+                {/* Samlet total for redigerede linjer */}
                 <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontWeight: 700 }}>
                   <span>Samlet</span>
                   <span>
-                    {(Number(edited.payment_total ?? 0) || totalFromLines || 0).toLocaleString("da-DK")} kr
-                    {timeFromLines ? ` • ${timeFromLines} min` : ""}
+                    {(Number(edited.payment_total ?? 0) || totalsFromEdits.price || 0).toLocaleString("da-DK")} kr
+                    {totalsFromEdits.time ? ` • ${totalsFromEdits.time} min` : ""}
                   </span>
                 </div>
               </div>
             </div>
           ) : (
+
             <>
               <div style={styles.inputGroup}>
                 <label style={{ marginBottom: 6 }}><strong>Model:</strong></label>
@@ -466,7 +620,8 @@ export default function RepairHistory({ repair, onClose, onSave }) {
             <div style={styles.row2}>
               <div style={styles.inputGroup}>
                 <label style={{ marginBottom: 6 }}><strong>Total (kr):</strong></label>
-                <input type="number" value={edited.payment_total ?? (totalFromLines || "")} onChange={(e) => handleChange("payment_total", e.target.value)} style={styles.input} />
+                <input type="number" value={edited.payment_total ?? ((fromMeta ? totalsFromEdits.price : totalFromLines) || "")}
+                 onChange={(e) => handleChange("payment_total", e.target.value)} style={styles.input} />
               </div>
               <div style={styles.inputGroup}>
                 <label style={{ marginBottom: 6 }}><strong>Depositum (kr):</strong></label>
@@ -479,7 +634,8 @@ export default function RepairHistory({ repair, onClose, onSave }) {
                   value={
                     edited.payment_type === "depositum"
                       ? Math.max(
-                          Number(edited.payment_total ?? totalFromLines ?? 0) - Number(edited.deposit_amount ?? 0),
+                          Number(edited.payment_total ?? (fromMeta ? totalsFromEdits.price : totalFromLines) ?? 0)
+                           - Number(edited.deposit_amount ?? 0),
                           0
                         )
                       : (edited.remaining_amount ?? "")
