@@ -11,27 +11,16 @@ import { useNavigate } from "react-router-dom";
  *  og som sidste udvej antag WP-route på samme origin.
  */
 const LIST_URL =
-  import.meta.env.VITE_SPAREPARTS_LIST ||
-  import.meta.env.VITE_GAS_URL || // sidst kendte variabel hos dig
-  "/wp-json/telegiganten/v1/spareparts";
-
+  (import.meta.env.VITE_SPAREPARTS_LIST || import.meta.env.VITE_GAS_URL || "/wp-json/telegiganten/v1/spareparts");
 const EXEC_URL =
-  import.meta.env.VITE_GAS_EXEC ||
-  import.meta.env.VITE_GAS_URL || // hvis du tidligere brugte samme til POST
-  "";
+  (import.meta.env.VITE_GAS_EXEC || import.meta.env.VITE_GAS_URL || "");
 
 if (!import.meta.env.VITE_SPAREPARTS_LIST) {
-  // Én gang pr. load – hjælper med at opdage misconfig i dev tools
-  console.warn(
-    "[SparePartsPage] VITE_SPAREPARTS_LIST er ikke sat. Bruger fallback:",
-    LIST_URL
-  );
+  console.warn("[SparePartsPage] VITE_SPAREPARTS_LIST er ikke sat. Bruger fallback:", LIST_URL);
 }
 
-/** Felter vi viser/redigerer (matcher Code.gs -> _apiList kortnøgler) */
+/** Felter der vises/redigeres */
 const FIELDS = ["model", "price", "stock", "location", "category", "cost_price", "repair"];
-
-// Viste titler (UI) – rører ikke ved kolonne-mapping
 const FIELD_LABELS = {
   model: "Model",
   price: "Pris",
@@ -41,8 +30,7 @@ const FIELD_LABELS = {
   cost_price: "Kostpris",
   repair: "Reparation",
 };
-
-/** Map til create-kald (kortnøgle -> header i arket) */
+/** Kort nøgle -> header i arket (til create) */
 const TO_SHEET_HEADER = {
   model: "Model",
   sku: "SKU",
@@ -54,7 +42,7 @@ const TO_SHEET_HEADER = {
   repair: "Reparation",
 };
 
-/* -------------------- UI styles -------------------- */
+/* --------- UI styles --------- */
 const BLUE = "#2166AC";
 const btnPrimary = { backgroundColor: BLUE, color: "white", padding: "10px 16px", border: "none", borderRadius: 6, cursor: "pointer" };
 const btnGhost   = { background: "white", color: BLUE, border: `1px solid ${BLUE}33`, padding: "8px 12px", borderRadius: 6, cursor: "pointer" };
@@ -62,7 +50,7 @@ const btnDanger  = { backgroundColor: "#cc0000", color: "white", padding: "6px 1
 const inputStyle = { padding: 8, borderRadius: 6, border: "1px solid #ccc" };
 const chip = { fontSize: 12, color: "#64748b" };
 
-/* -------------------- små helpers -------------------- */
+/* --------- små helpers --------- */
 function useRowDebouncers() {
   const mapRef = useRef(new Map());
   return (key, fn, delay = 600) => {
@@ -72,46 +60,31 @@ function useRowDebouncers() {
     map.set(key, t);
   };
 }
+function useDebouncedValue(v, ms = 500) {
+  const [out, setOut] = useState(v);
+  useEffect(() => { const t = setTimeout(() => setOut(v), ms); return () => clearTimeout(t); }, [v, ms]);
+  return out;
+}
 function useUpdateQueue() {
-  const chainRef = useRef(Promise.resolve());
-  return (task) => {
-    const next = chainRef.current.then(() => task()).catch(() => {});
-    chainRef.current = next;
-    return next;
-  };
-}
-function useDebouncedValue(value, delay = 500) {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), delay);
-    return () => clearTimeout(t);
-  }, [value, delay]);
-  return v;
+  const q = useRef(Promise.resolve());
+  return (job) => { q.current = q.current.then(() => job()).catch(() => {}); return q.current; };
 }
 
-/* -------------------- HTTP -------------------- */
-async function httpGet(paramsObj, signal) {
-  const base = String(LIST_URL || "").trim();
-  if (!base) throw new Error("LIST_URL mangler – sæt VITE_SPAREPARTS_LIST i .env");
-  const qs = new URLSearchParams(paramsObj).toString();
-  const url = base.includes("?") ? `${base}&${qs}` : `${base}?${qs}`;
-
-  const res = await fetch(url, { method: "GET", signal });
-  const text = await res.text();
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    data = { ok: res.ok, raw: text };
-  }
-  if (!res.ok || data?.error) {
-    const err = new Error(data?.error || `Request failed (${res.status})`);
-    err.status = res.status;
-    throw err;
-  }
-  return data;
+/* --------- HTTP --------- */
+function withQuery(url, q = {}) {
+  const u = new URL(url, window.location.origin);
+  Object.entries(q).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== "") u.searchParams.set(k, v); });
+  return u.toString();
 }
-
+async function httpGet(params, signal) {
+  const url = withQuery(LIST_URL, params);
+  const res = await fetch(url, { method: "GET", headers: { Accept: "application/json" }, signal });
+  if (!res.ok) throw new Error(`List fejlede (${res.status})`);
+  const data = await res.json().catch(() => ({}));
+  // understøt både {items,total} og rå arrays
+  if (Array.isArray(data)) return { items: data, total: data.length };
+  return { items: data.items || [], total: typeof data.total === "number" ? data.total : null };
+}
 async function httpPost(body) {
   const base = String(EXEC_URL || "").trim();
   if (!base) throw new Error("EXEC_URL mangler – sæt VITE_GAS_EXEC i .env");
@@ -122,27 +95,13 @@ async function httpPost(body) {
   });
   const text = await res.text();
   let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    data = { ok: res.ok, raw: text };
-  }
-  if (data?.status === "conflict") {
-    const err = new Error("Conflict");
-    err.status = 409;
-    err.data = data;
-    throw err;
-  }
-  if (!res.ok || data?.error) {
-    const err = new Error(data?.error || "Request failed");
-    err.status = res.status;
-    err.data = data;
-    throw err;
-  }
+  try { data = JSON.parse(text); } catch { data = { ok: res.ok, raw: text }; }
+  if (data?.status === "conflict") { const e = new Error("Conflict"); e.status = 409; e.data = data; throw e; }
+  if (!res.ok || data?.error) { const e = new Error(data?.error || "Request failed"); e.status = res.status; e.data = data; throw e; }
   return data;
 }
 
-/* -------------------- API wrapper -------------------- */
+/* --------- API wrapper --------- */
 async function apiList({ offset = 0, limit = 200, search = "", lokation = "" } = {}, signal) {
   return httpGet({ offset: String(offset), limit: String(limit), search, lokation }, signal);
 }
@@ -162,12 +121,10 @@ async function apiDelete(id) {
   return httpPost({ action: "delete", id });
 }
 
-/* -------------------- Simple page cache -------------------- */
-function makeKey({ query, limit, page }) {
-  return `${query}::${limit}::${page}`;
-}
+/* --------- Simple page cache --------- */
+function makeKey({ query, limit, page }) { return `${query}::${limit}::${page}`; }
 
-/* -------------------- Komponent -------------------- */
+/* =================== Komponent =================== */
 export default function SparePartsPage() {
   const [parts, setParts] = useState([]);
   const [search, setSearch] = useState("");
@@ -196,7 +153,7 @@ export default function SparePartsPage() {
   const listReqIdRef = useRef(0);
 
   const pageCacheRef = useRef(new Map());
-  const [newPart, setNewPart] = useState(FIELDS.reduce((acc, k) => ((acc[k] = ""), acc), {}));
+  const [newPart, setNewPart] = useState(FIELDS.reduce((acc, k) => (acc[k] = "", acc), {}));
 
   const navigate = useNavigate();
   const debounceRow = useRowDebouncers();
@@ -217,7 +174,6 @@ export default function SparePartsPage() {
     if (listAbortRef.current) listAbortRef.current.abort();
     const controller = new AbortController();
     listAbortRef.current = controller;
-
     const myId = ++listReqIdRef.current;
 
     setLoading(true);
@@ -241,7 +197,6 @@ export default function SparePartsPage() {
         setActiveQuery(query);
 
         if (lim !== pageSize) setPageSize(lim);
-
         pageCacheRef.current.set(cacheKey, { items, total: srvTotal, ts: Date.now() });
 
         setLoading(false);
@@ -329,7 +284,7 @@ export default function SparePartsPage() {
   const addPart = async () => {
     try {
       await enqueue(async () => { await apiCreate(newPart); });
-      setNewPart(FIELDS.reduce((acc, k) => ((acc[k] = ""), acc), {}));
+      setNewPart(FIELDS.reduce((acc, k) => (acc[k] = "", acc), {}));
       pageCacheRef.current.clear();
       await fetchPage({ pageArg: 1, query: activeQuery });
       setPage(1);
@@ -418,7 +373,7 @@ export default function SparePartsPage() {
             title="Tilføj ny række"
           >
             <FaPlus style={{ marginRight: 6 }} />
-            Tilføj reservedel, Samer
+            Tilføj reservedel
           </button>
 
           {loading && <span style={chip} aria-live="polite">Indlæser…</span>}
@@ -439,9 +394,7 @@ export default function SparePartsPage() {
       </div>
 
       {editingIndex === -1 && (
-        <div
-          style={{ marginBottom: "1rem", border: "1px solid #ddd", padding: "1rem", borderRadius: 6, background: "#fff" }}
-        >
+        <div style={{ marginBottom: "1rem", border: "1px solid #ddd", padding: "1rem", borderRadius: 6, background: "#fff" }}>
           <h4 style={{ marginBottom: "0.75rem", fontSize: "1.05rem", fontWeight: "bold" }}>Opret ny reservedel</h4>
           <div style={{ display: "grid", gridTemplateColumns: "1.6fr 0.6fr 0.6fr 1fr 1fr 1fr 1.2fr auto", gap: "0.5rem" }}>
             {FIELDS.map((field) => (
@@ -511,9 +464,7 @@ export default function SparePartsPage() {
         </table>
       </div>
 
-      <div
-        style={{ display: "flex", alignItems: "center", gap: "1rem", marginTop: "1.25rem", flexWrap: "wrap" }}
-      >
+      <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginTop: "1.25rem", flexWrap: "wrap" }}>
         <button
           onClick={() => setPage((p) => Math.max(1, p - 1))}
           disabled={page <= 1 || loading}
@@ -533,9 +484,9 @@ export default function SparePartsPage() {
           onClick={() => setPage((p) => p + 1)}
           disabled={(!unknownTotal && page >= totalPages) || loading || (unknownTotal && parts.length < pageSize)}
           style={{
-            ...( (!unknownTotal && page >= totalPages) || loading || (unknownTotal && parts.length < pageSize)
+            ...(((!unknownTotal && page >= totalPages) || loading || (unknownTotal && parts.length < pageSize))
               ? { backgroundColor: "#ccc", cursor: "not-allowed" }
-              : { backgroundColor: BLUE, cursor: "pointer" } ),
+              : { backgroundColor: BLUE, cursor: "pointer" }),
             color: "white", padding: "6px 14px", borderRadius: 6, border: "none",
           }}
         >

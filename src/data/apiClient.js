@@ -293,27 +293,29 @@ export async function createRepairFromBooking(booking) {
 /* ================================
  * Spareparts – konfiguration
  * ================================ */
-
 const env = (k) =>
   (typeof import.meta !== "undefined" && import.meta.env && import.meta.env[k]) || undefined;
 
-// Mode: "gas" (default) eller "wp"
+// Læs .env
+const ENV_GAS_URL  = env("VITE_GAS_URL");   // kan være WP-route (/wp-json/...) eller GAS
+const ENV_GAS_EXEC = env("VITE_GAS_EXEC");  // GAS /exec (skrivninger)
+
+// Mode: "wp" hvis VITE_GAS_URL ligner en WP-route, ellers "gas".
+// (Du kan altid overstyre med VITE_SPAREPARTS_MODE=wp|gas)
 const SPAREPARTS_MODE =
   env("VITE_SPAREPARTS_MODE") ||
+  ((ENV_GAS_URL || "").startsWith("/wp-json/") ? "wp" : undefined) ||
   (typeof window !== "undefined" && window.__SPAREPARTS_MODE) ||
   "gas";
 
-/** GAS base URL prioritet */
+// Base til GAS-kald (list/create/update/delete i GAS-scenariet)
 const GAS_BASE_URL =
-  GAS_BASE_URL_ENV ||
-  env("VITE_SPAREPARTS_GAS_URL") ||
+  ENV_GAS_EXEC || ENV_GAS_URL ||
   (typeof window !== "undefined" && (window.__GAS_URL || window.__SPAREPARTS_GAS_URL)) ||
   "";
 
 if (!GAS_BASE_URL) {
-  console.warn(
-    "[spareparts] GAS_BASE_URL mangler. Sæt VITE_GAS_URL i Vercel env eller window.__GAS_URL i runtime."
-  );
+  console.warn("[spareparts] Mangler GAS URL. Sæt VITE_GAS_EXEC (foretrukket) eller VITE_GAS_URL i .env");
 }
 
 /** Normalisering til kanonisk shape */
