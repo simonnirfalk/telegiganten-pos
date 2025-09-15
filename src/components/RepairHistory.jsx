@@ -595,7 +595,7 @@ Tlf. 70 70 78 56
             <div style={{ display: "flex", gap: 8 }}>
               <button
                 style={styles.secondary}
-                onClick={() => navigate(`/print-slip/${repair.order_id}`)}
+                onClick={() => navigate(`/print-slip/${repair.order_id}`, { state: { order: repair } })}
               >
                 Print slip
               </button>
