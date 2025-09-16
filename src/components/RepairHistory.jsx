@@ -404,7 +404,12 @@ Tlf. 70 70 78 56
   }
 
   /* ---------- UI ---------- */
-  const history = repair.history || [];
+  // Nyeste først
+  const history = useMemo(() => {
+    const arr = Array.isArray(repair.history) ? [...repair.history] : [];
+    const ts = (e) => e?.timestamp || e?.ts || e?.date || e?.created_at || e?.time || 0;
+    return arr.sort((a, b) => new Date(ts(b)) - new Date(ts(a)));
+  }, [repair.history]);
 
   return (
     <div ref={overlayRef} style={styles.overlay} onClick={(e) => { if (e.target === overlayRef.current) onClose?.(); }}>
