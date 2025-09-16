@@ -674,8 +674,50 @@ Tlf. 70 70 78 56
         </div>
       </div>
 
-      {/* ---------- SMS modal ---------- */}
-      {false && null}
+  {/* ---------- SMS modal ---------- */}
+  {smsOpen && (
+    <div
+      style={styles.smsOverlay}
+      onClick={(e) => { if (e.target === e.currentTarget) setSmsOpen(false); }}
+    >
+      <div style={styles.smsModal} onClick={(e) => e.stopPropagation()}>
+        <h3 style={{ marginTop: 0, marginBottom: 8 }}>Send SMS</h3>
+
+        {smsError && <div style={styles.errorBox} role="alert">{smsError}</div>}
+
+        <div style={{ display: "grid", gap: 8 }}>
+          <label><strong>Telefon</strong></label>
+          <input
+            style={styles.input}
+            value={smsPhone}
+            onChange={(e) => setSmsPhone(e.target.value)}
+            placeholder="+45xxxxxxxx"
+          />
+
+          <label><strong>Besked</strong></label>
+          <textarea
+            rows={8}
+            style={{ ...styles.input, resize: "vertical" }}
+            value={smsText}
+            onChange={(e) => setSmsText(e.target.value)}
+          />
+        </div>
+
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}>
+          <button onClick={() => setSmsOpen(false)} style={styles.cancel}>Luk</button>
+          <button onClick={copySmsToClipboard} style={styles.secondary}>Kopiér</button>
+          <button
+            onClick={handleSmsSend}
+            style={styles.save}
+            disabled={smsSending || !smsPhone || !smsText.trim()}
+          >
+            {smsSending ? "Sender…" : "Send SMS"}
+          </button>
+        </div>
+      </div>
+    </div>
+  )}
+
     </div>
   );
 }
@@ -763,5 +805,24 @@ const styles = {
     cursor: "pointer",
     fontWeight: 700,
   },
+  smsOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,.45)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1100,
+  },
+  smsModal: {
+    width: "min(560px, 94vw)",
+    maxHeight: "85vh",
+    overflow: "auto",
+    background: "#fff",
+    borderRadius: 16,
+    padding: 16,
+    boxShadow: "0 20px 60px rgba(0,0,0,.25)",
+  },
+
   errorBox: { background: "#fee2e2", color: "#991b1b", padding: "8px 10px", borderRadius: 10, marginBottom: 10 },
 };
