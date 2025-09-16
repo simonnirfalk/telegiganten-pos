@@ -115,7 +115,7 @@ function extractLinesFromAny(r) {
   return { lines: [single], fromMeta: false };
 }
 
-/** Mapper UI-felter → WP meta keys, sådan som vi allerede gør ved linje-gem */
+/** Mapper UI-felter → WP meta keys */
 function mapPriceTime(fields = {}) {
   const f = { ...fields };
   if (Object.prototype.hasOwnProperty.call(f, "price")) {
@@ -242,8 +242,7 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  // target id til at gemme top-level felter:
-  // brug repair.id hvis den findes, ellers første linjes source_id
+  // id til top-level gem (primær post)
   const primaryRepairId = useMemo(() => {
     const direct = Number(repair?.id || 0) || null;
     if (direct) return direct;
@@ -251,11 +250,20 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
     return first ? Number(first) : null;
   }, [repair?.id, editableLines]);
 
+  // 🔁 ALLE repair-ids i ordren (bruges til at broadcaste status)
+  const allRepairIds = useMemo(() => {
+    const ids = [];
+    if (repair?.id) ids.push(Number(repair.id));
+    for (const l of editableLines) if (l?.source_id) ids.push(Number(l.source_id));
+    return Array.from(new Set(ids.filter(Boolean)));
+  }, [repair?.id, editableLines]);
+
   /* ---------- Gem ---------- */
   const handleSave = async () => {
     const hasTop = Object.keys(changedFields).length > 0;
     const hasLines = dirtyLines.length > 0;
     const hasNote = noteChanged;
+    const statusChanged = Object.prototype.hasOwnProperty.call(changedFields, "status");
 
     if (!hasTop && !hasLines && !hasNote) {
       onClose?.();
@@ -290,26 +298,38 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
         });
       }
 
-      // 3) Gem top-level felter på primaryRepairId
+      // 3) Gem topfelter (uden status) på primaryRepairId
       if (hasTop && primaryRepairId) {
-        await api.updateRepairWithHistory({
-          repair_id: primaryRepairId,
-          fields: {
-            // status & betaling
-            status: (edited.status || "").toLowerCase(),
-            payment_type: (edited.payment_type || "efter").toLowerCase(),
-            payment_total: Number(edited.payment_total || 0),
-            deposit_amount: Number(edited.deposit_amount || 0),
-            remaining_amount: Number(edited.remaining_amount || 0),
-            // kontaktfelter
-            phone: edited.phone ?? "",
-            contact: edited.contact ?? "",
-            password: edited.password ?? "",
-            // hvis note er ændret, tager vi den med her også
-            ...(hasNote ? { note: edited.note } : {}),
-          },
-          change_note: "Topfelter opdateret via RepairHistory",
-        });
+        const topWithoutStatus = {
+          payment_type: (edited.payment_type || "efter").toLowerCase(),
+          payment_total: Number(edited.payment_total || 0),
+          deposit_amount: Number(edited.deposit_amount || 0),
+          remaining_amount: Number(edited.remaining_amount || 0),
+          phone: edited.phone ?? "",
+          contact: edited.contact ?? "",
+          password: edited.password ?? "",
+          ...(hasNote ? { note: edited.note } : {}),
+        };
+        // kun hvis der faktisk er noget udover status at gemme
+        if (Object.keys(topWithoutStatus).length > 0) {
+          await api.updateRepairWithHistory({
+            repair_id: primaryRepairId,
+            fields: topWithoutStatus,
+            change_note: "Topfelter opdateret via RepairHistory",
+          });
+        }
+      }
+
+      // 4) 🔁 Broadcaster status til ALLE rækker i ordren
+      if (statusChanged && allRepairIds.length) {
+        const statusVal = (edited.status || "").toLowerCase();
+        for (const id of allRepairIds) {
+          await api.updateRepairWithHistory({
+            repair_id: id,
+            fields: { status: statusVal },
+            change_note: "Status opdateret for hele ordren via RepairHistory",
+          });
+        }
       }
 
       await Promise.resolve(onAfterSave?.()); // refresh RepairsPage
@@ -364,7 +384,7 @@ Tlf. 70 70 78 56
       if (!to) throw new Error("Telefonnummer mangler.");
       await api.sendSMS({
         to,
-        body: smsText, // vigtigt: hedder 'body' i jeres API
+        body: smsText,
         repair_id: primaryRepairId || repair.id || null,
       });
       setSmsOpen(false);
@@ -488,7 +508,6 @@ Tlf. 70 70 78 56
               </div>
             </div>
           ) : (
-            // “Legacy” enkeltlinje-visning – beholdes for fuldstændighed
             <>
               <div style={styles.inputGroup}>
                 <label style={{ marginBottom: 6 }}><strong>Model:</strong></label>
@@ -523,7 +542,7 @@ Tlf. 70 70 78 56
             </select>
           </div>
 
-          {/* Depositum felter (vises når "depositum") */}
+          {/* Depositum felter */}
           {edited.payment_type === "depositum" && (
             <div style={styles.inputRow2}>
               <div>
@@ -651,55 +670,7 @@ Tlf. 70 70 78 56
       </div>
 
       {/* ---------- SMS modal ---------- */}
-      {smsOpen && (
-        <div style={styles.smsOverlay} onClick={() => setSmsOpen(false)}>
-          <div style={styles.smsModal} onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ marginTop: 0, marginBottom: 8 }}>Send SMS</h3>
-            <div style={{ display: "grid", gap: 10 }}>
-              <div>
-                <label style={{ display: "block", fontWeight: 700, marginBottom: 6 }}>Telefon</label>
-                <input
-                  style={styles.input}
-                  value={smsPhone}
-                  onChange={(e) => setSmsPhone(e.target.value)}
-                  placeholder="Modtagers telefon"
-                />
-              </div>
-              <div>
-                <label style={{ display: "block", fontWeight: 700, marginBottom: 6 }}>Besked</label>
-                <textarea
-                  rows={7}
-                  style={{ ...styles.input, resize: "vertical" }}
-                  value={smsText}
-                  onChange={(e) => setSmsText(e.target.value)}
-                  placeholder="Skriv din besked…"
-                />
-              </div>
-              {smsError && (
-                <div style={{ background: "#fff7ed", color: "#9a3412", padding: "8px 10px", borderRadius: 10 }}>
-                  {smsError}
-                </div>
-              )}
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button style={styles.secondary} onClick={copySmsToClipboard}>Kopiér tekst</button>
-                </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button style={styles.cancel} onClick={() => setSmsOpen(false)} disabled={smsSending}>Luk</button>
-                  <button
-                    style={styles.save}
-                    onClick={handleSmsSend}
-                    disabled={smsSending || !normalizePhoneLocalOrDK(smsPhone) || !smsText.trim()}
-                  >
-                    {smsSending ? "Sender…" : "Send SMS"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-      {/* ---------- /SMS modal ---------- */}
+      {false && null}
     </div>
   );
 }
@@ -788,22 +759,4 @@ const styles = {
     fontWeight: 700,
   },
   errorBox: { background: "#fee2e2", color: "#991b1b", padding: "8px 10px", borderRadius: 10, marginBottom: 10 },
-
-  // SMS modal
-  smsOverlay: {
-    position: "fixed",
-    inset: 0,
-    background: "rgba(0,0,0,.45)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 1200,
-  },
-  smsModal: {
-    width: "min(560px, 92vw)",
-    background: "#fff",
-    borderRadius: 14,
-    padding: 16,
-    boxShadow: "0 16px 44px rgba(0,0,0,.25)",
-  },
 };
