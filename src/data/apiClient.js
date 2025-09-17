@@ -49,6 +49,11 @@ const GAS_BASE_URL_ENV =
   (typeof import.meta !== "undefined" && import.meta.env?.VITE_GAS_URL) ||
   "";
 
+  // --- POPULAR MODELS ENDPOINT (kan styres via .env)
+const POPULAR_MODELS_URL =
+  (typeof import.meta !== "undefined" && import.meta.env?.VITE_POPULAR_MODELS_URL) ||
+  "/wp-json/telegiganten/v1/top-models";
+
 // ================================
 // Hjælpere
 // ================================
@@ -431,6 +436,41 @@ async function primaryThenFallback(primaryFn, fallbackFn) {
   }
 }
 
+// Hent top-N populære modeller fra backend
+// Forventet svar (eksempler):
+//   [{ model_id: 123, title: "iPhone 13", count: 87 }, ...]  // foretrukket
+//   [{ id: 123, title: "iPhone 13", count: 87 }, ...]
+//   { ids: [123, 456, ...] }  // mindre ideel – titler hentes fra struktur
+async function getPopularModelsTop(limit = 20) {
+  const urlFromEnv =
+    (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_POPULAR_MODELS_URL) ||
+    (typeof window !== "undefined" && window.__POPULAR_MODELS_URL) ||
+    null;
+
+  const url = urlFromEnv
+    ? `${urlFromEnv}${urlFromEnv.includes("?") ? "&" : "?"}limit=${encodeURIComponent(limit)}`
+    : `/wp-json/telegiganten/v1/popular-models?limit=${encodeURIComponent(limit)}`;
+
+  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  if (!res.ok) throw new Error(`getPopularModelsTop: ${res.status}`);
+  const data = await res.json().catch(() => null);
+  if (!data) return [];
+
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data.items)) return data.items;
+  if (Array.isArray(data.models)) return data.models;
+
+  // Hvis backend returnerer { ids: [...] }:
+  if (Array.isArray(data.ids)) {
+    return data.ids.map((id) => ({ id }));
+  }
+  // Hvis backend returnerer { titles: [...] }:
+  if (Array.isArray(data.titles)) {
+    return data.titles.map((title) => ({ title }));
+  }
+  return [];
+}
+
 /* ================================
  * API – hoved-objekt
  * ================================ */
@@ -481,6 +521,20 @@ export const api = {
     }),
 
   getTopModels: () => proxyFetch({ path: "/wp-json/telegiganten/v1/top-models" }),
+
+  // Top-N populære modeller – bruger /top-models endpoint fra WP
+  // Returnerer [{id, title}] i den rækkefølge backend har sorteret efter usage_count
+  getPopularModelsTop: async (limit = 25) => {
+    const data = await proxyFetch({
+      path: "/wp-json/telegiganten/v1/top-models",
+      method: "GET",
+    });
+    const arr = Array.isArray(data) ? data : [];
+    return arr.slice(0, limit).map(m => ({
+      id: Number(m.id),
+      title: String(m.title || ""),
+    }));
+  },
 
   // Opdateret: inkluder active_only (bruges til at bygge hele træet KUN med aktive)
   getAllRepairs: (opts = {}) =>

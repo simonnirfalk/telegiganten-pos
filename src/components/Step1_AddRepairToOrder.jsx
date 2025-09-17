@@ -13,12 +13,12 @@ import { useRepairContext } from "../context/RepairContext";
 import { api } from "../data/apiClient";
 import { getNextOrderId } from "../data/orderId";
 
-// ⬅️ NY: fælles sorter
+// Fælles sortere
 import {
   sortBrands,
   makeModelSorter,
   sortRepairs,
-  brandOrder as BrandPriorityOrder, // bruger vi til per-brand prioritet ved søgning
+  brandOrder as BrandPriorityOrder,
 } from "../helpers/sorting";
 
 /* ----------------- Små helpers til søgning ----------------- */
@@ -62,7 +62,25 @@ function tokenize(q = "") {
   return n.split("").every((c) => c === " ") ? [] : n.split(" ").filter(Boolean);
 }
 
-/* ----------------- NY: Modal for brugerdefineret enhed ----------------- */
+// Strengt ord-match: token skal optræde som helt ord i hay
+function tokenMatchStrict(hay, token) {
+  if (!token) return true;
+  const re = new RegExp(`\\b${token}\\b`, "i");
+  return re.test(hay);
+}
+
+// Byg hay *kun* fra model/aliases (uden brand), så vi kan kræve et "model-hit"
+function buildModelOnlyHay(model) {
+  const raw = `${model?.title || ""} ${
+    Array.isArray(model?.aliases) ? model.aliases.join(" ") : ""
+  }`;
+  const base = norm(raw);
+  const shortCodes = deriveShortCodes(base);
+  const hay = [base, shortCodes.join(" ")].join(" ");
+  return hay.replace(/\s+/g, " ").trim();
+}
+
+/* ----------------- Modal for brugerdefineret enhed ----------------- */
 function CustomRepairModal({ open, onClose, onAdd }) {
   const [device, setDevice] = useState("");
   const [repair, setRepair] = useState("");
@@ -144,7 +162,7 @@ export default function Step1_AddRepairToOrder({
   const [modalDevice, setModalDevice] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState("Alle");
 
-  // NY: åbne/lukke “brugerdefineret enhed”
+  // “Brugerdefineret enhed”
   const [openCustom, setOpenCustom] = useState(false);
 
   const [openCreateCustomer, setOpenCreateCustomer] = useState(false);
@@ -154,7 +172,7 @@ export default function Step1_AddRepairToOrder({
   const { data: repairStructureRaw = [], loading } = useRepairContext();
   const repairStructure = Array.isArray(repairStructureRaw) ? repairStructureRaw : [];
 
-  // ⬅️ NY: server-filtrerede repairs til den valgte model
+  // Server-filtrerede repairs til den valgte model
   const [modalRepairs, setModalRepairs] = useState(null);
   const [modalRepairsLoading, setModalRepairsLoading] = useState(false);
 
@@ -200,7 +218,7 @@ export default function Step1_AddRepairToOrder({
     }
   }, [prefillFromBooking]);
 
-  // ⬅️ NY: når der vælges en model (modalDevice), hent dens aktive repairs fra backend
+  // Når der vælges en model (modalDevice), hent dens aktive repairs fra backend
   useEffect(() => {
     let alive = true;
     async function loadRepairs() {
@@ -210,15 +228,14 @@ export default function Step1_AddRepairToOrder({
       }
       try {
         setModalRepairsLoading(true);
-        const arr = await api.getRepairsForModel(modalDevice.id, { activeOnly: true }); // SERVER-SIDE filtrering
+        const arr = await api.getRepairsForModel(modalDevice.id, { activeOnly: true }); // SERVER-side filtrering
         if (!alive) return;
-        // sortér efter vores standard
         const sorted = Array.isArray(arr) ? [...arr].sort(sortRepairs) : [];
         setModalRepairs(sorted);
       } catch (e) {
         if (alive) {
           console.warn("Kunne ikke hente server-filtrerede repairs – falder tilbage til context:", e?.message || e);
-          setModalRepairs(null); // fallback i render
+          setModalRepairs(null);
         }
       } finally {
         if (alive) setModalRepairsLoading(false);
@@ -227,6 +244,31 @@ export default function Step1_AddRepairToOrder({
     loadRepairs();
     return () => { alive = false; };
   }, [modalDevice?.id]);
+
+  /* ---------- POPULÆRE MODELLER (fra API) ---------- */
+  const [popular, setPopular] = useState({ ids: [], titles: [], order: [] });
+  const [loadingPopular, setLoadingPopular] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        setLoadingPopular(true);
+        // Forventer getPopularModelsTop(limit) ⇒ [{ id, title }]
+        const list = await api.getPopularModelsTop(20);
+        const ids = list.map(x => Number(x.id)).filter(Boolean);
+        const titles = list.map(x => String(x.title || "")).filter(Boolean);
+        const order = [...ids]; // bevar serverens rækkefølge (allerede sorteret efter popularitet)
+        if (alive) setPopular({ ids, titles, order });
+      } catch (e) {
+        console.warn("Kunne ikke hente populære modeller:", e?.message || e);
+        if (alive) setPopular({ ids: [], titles: [], order: [] });
+      } finally {
+        if (alive) setLoadingPopular(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
 
   /* ---------- UI styles ---------- */
   const buttonStyle = {
@@ -266,14 +308,6 @@ export default function Step1_AddRepairToOrder({
   };
 
   /* ---------- Model/brand filtrering ---------- */
-  const popularModelNames = [
-    "iPhone 11","iPhone 12","iPhone 13","iPhone 14","iPhone 15",
-    "iPhone 11 Pro","iPhone 12 Mini","iPhone 13 Pro Max","iPhone 14 Plus","iPhone 15 Pro",
-    "Samsung Galaxy S20 FE","Samsung Galaxy S21+","Samsung Galaxy S22","Samsung Galaxy S23 Ultra","Samsung Galaxy S24",
-    "Samsung Galaxy A55","Samsung Galaxy A34","Samsung Galaxy A14","Samsung Galaxy A54","Samsung Galaxy A72",
-    "iPad 10.2 (2021)","iPad Pro 11 (2018)","MacBook Pro 13 inch A1708","MacBook Air 13 inch, A2179","Motorola Moto G54",
-  ];
-
   const customCategoryOrder = [
     "Alle","iPhone","Samsung mobil","iPad","MacBook","iMac","Samsung Galaxy Tab","Motorola mobil","OnePlus mobil",
     "Nokia mobil","Xiaomi mobil","Sony Xperia","Oppo mobil","Microsoft mobil","Honor mobil",
@@ -293,19 +327,26 @@ export default function Step1_AddRepairToOrder({
 
   // Brands (filtreret + sorteret)
   const brandsFiltered = useMemo(() => {
-    let list;
+    // 1) Hvis en konkret kategori er valgt, brug kun det brand
     if (selectedCategory !== "Alle" && repairStructure.some((b) => b.title === selectedCategory)) {
-      list = repairStructure.filter((b) => b.title === selectedCategory);
-    } else if (searchTokens.length > 0) {
-      list = repairStructure; // global søgning på tværs af brands
-    } else {
-      // “Alle” uden søgning → kun brands med populære modeller
-      list = repairStructure.filter((b) =>
-        (b.models || []).some((m) => popularModelNames.includes(m.title))
-      );
+      return repairStructure.filter((b) => b.title === selectedCategory).sort(sortBrands);
     }
-    return [...list].sort(sortBrands);
-  }, [repairStructure, selectedCategory, searchTokens, popularModelNames]);
+
+    // 2) Global søgning → alle brands
+    if (searchTokens.length > 0) {
+      return [...repairStructure].sort(sortBrands);
+    }
+
+    // 3) Default (Alle + ingen søgning) → brands der indeholder de populære modeller
+    const hasPopular = (b) =>
+      (b.models || []).some(
+        (m) =>
+          (m.id && popular.ids.includes(Number(m.id))) ||
+          (m.title && popular.titles.includes(String(m.title)))
+      );
+
+    return repairStructure.filter(hasPopular).sort(sortBrands);
+  }, [repairStructure, selectedCategory, searchTokens, popular]);
 
   // Hjælp: brand-prioritet tal (til søgning hvor flere brands blandes)
   const brandPriorityIndex = useMemo(() => {
@@ -325,44 +366,77 @@ export default function Step1_AddRepairToOrder({
 
     if (modelsWithBrand.length === 0) return [];
 
-    // “Alle” uden søgning → vis populære modeller i fast rækkefølge
+    // A) Default (Alle + ingen søgning) → vis KUN populære modeller i API-rækkefølge
     if (searchTokens.length === 0 && selectedCategory === "Alle") {
-      return modelsWithBrand
-        .filter((m) => popularModelNames.includes(m.title))
-        .sort(
-          (a, b) => popularModelNames.indexOf(a.title) - popularModelNames.indexOf(b.title)
-        );
+      const inPopular = modelsWithBrand.filter(
+        (m) =>
+          (m.id && popular.ids.includes(Number(m.id))) ||
+          (m.title && popular.titles.includes(String(m.title)))
+      );
+      // sortér efter serverens order hvis vi har den, ellers brug normal sortering
+      const indexOf = (id) => {
+        const n = Number(id || 0);
+        const i = popular.order.indexOf(n);
+        return i === -1 ? 9999 : i;
+      };
+      if (popular.order.length > 0) {
+        return inPopular.sort((a, b) => indexOf(a.id) - indexOf(b.id));
+      }
+      // fallback sortering hvis backend ikke gav order
+      return inPopular.sort((a, b) => {
+        const ba = a.__brand || "";
+        const bb = b.__brand || "";
+        const pA = brandPriorityIndex(ba);
+        const pB = brandPriorityIndex(bb);
+        if (pA !== pB) return pA - pB;
+        const sorter = makeModelSorter(ba);
+        const res = sorter(a, b);
+        return res !== 0 ? res : String(a.title || "").localeCompare(String(b.title || ""), "da");
+      });
     }
 
-    // Hvis der søges → AND-match pr. model
-    const matched = searchTokens.length
-      ? modelsWithBrand.filter((m) => {
-          const hay = buildHaystack(m, m.__brand);
-          return searchTokens.every((t) => hay.includes(norm(t)));
-        })
-      : modelsWithBrand;
+    // B) Søgning → AND-match pr. model (søger i ALLE modeller)
+    if (searchTokens.length > 0) {
+      const matched = modelsWithBrand.filter((m) => {
+        const hayAll   = buildHaystack(m, m.__brand);   // brand + model + aliases + shortcodes
+        const hayModel = buildModelOnlyHay(m);          // model + aliases + shortcodes (uden brand)
 
-    if (matched.length === 0) return [];
+        // 1) ALLE tokens skal findes (strengt) et eller andet sted i hayAll
+        const allTokensHit = searchTokens.every((t) => tokenMatchStrict(hayAll, t));
 
-    // Sorter:
-    // 1) brand-prioritet
-    // 2) brand-specifik model-sorter
-    return [...matched].sort((a, b) => {
+        if (!allTokensHit) return false;
+
+        // 2) Mindst ÉT token skal matche model/aliases (for at undgå brand-only hits)
+        const oneTokenHitsModel = searchTokens.some((t) => tokenMatchStrict(hayModel, t));
+
+        return oneTokenHitsModel;
+      });
+
+      return matched.sort((a, b) => {
+        const ba = a.__brand || "";
+        const bb = b.__brand || "";
+        const pA = brandPriorityIndex(ba);
+        const pB = brandPriorityIndex(bb);
+        if (pA !== pB) return pA - pB;
+        const modelSorter = makeModelSorter(ba);
+        const res = modelSorter(a, b);
+        return res !== 0 ? res : String(a.title || "").localeCompare(String(b.title || ""), "da");
+      });
+    }
+
+
+    // C) Kategori ≠ Alle og ingen søgning → vis ALLE modeller i den kategori
+    return [...modelsWithBrand].sort((a, b) => {
       const ba = a.__brand || "";
       const bb = b.__brand || "";
       const pA = brandPriorityIndex(ba);
       const pB = brandPriorityIndex(bb);
       if (pA !== pB) return pA - pB;
-
-      // pr-brand modelsorter
       const modelSorter = makeModelSorter(ba);
       const res = modelSorter(a, b);
-      if (res !== 0) return res;
-
-      // stabil tie-break (dansk alfabetisk)
-      return String(a.title || "").localeCompare(String(b.title || ""), "da");
+      return res !== 0 ? res : String(a.title || "").localeCompare(String(b.title || ""), "da");
     });
-  }, [brandsFiltered, selectedCategory, searchTokens, popularModelNames, brandPriorityIndex]);
+  }, [brandsFiltered, selectedCategory, searchTokens, popular, brandPriorityIndex]);
 
   /* ---------- Handlers ---------- */
   const handleAddRepair = (deviceName, repair) => {
@@ -397,7 +471,7 @@ export default function Step1_AddRepairToOrder({
     }));
   };
 
-  // Opdater KUN pris/tid for en specifik linje
+  // Opdater pris/tid for en linje
   const onUpdateRepair = (idx, patch) => {
     setOrder((prev) => {
       const next = [...prev.repairs];
@@ -406,7 +480,6 @@ export default function Step1_AddRepairToOrder({
     });
   };
 
-  // NY: tilføj brugerdefineret linje
   const addCustomLine = (line) => {
     setOrder((prev) => ({ ...prev, repairs: [...prev.repairs, line] }));
   };
@@ -473,11 +546,11 @@ export default function Step1_AddRepairToOrder({
           <div style={{ flexGrow: 1, minWidth: 0 }}>
             <h2 style={{ textTransform: "uppercase" }}>Vælg enhed og reparation</h2>
 
-            {/* Søg + NY “Brugerdefineret enhed”-knap */}
+            {/* Søg + Brugerdefineret enhed */}
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <input
                 type="text"
-                placeholder="Søg efter model..."
+                placeholder={loadingPopular ? "Indlæser populære modeller..." : "Søg efter model..."}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 style={{ ...inputStyle, marginBottom: 0, flex: 1 }}
@@ -518,7 +591,9 @@ export default function Step1_AddRepairToOrder({
                 ))}
                 {filteredModels.length === 0 && (
                   <div style={{ gridColumn: "1 / -1", opacity: 0.7 }}>
-                    Ingen modeller fundet.
+                    {searchTerm.trim()
+                      ? "Ingen modeller fundet."
+                      : (loadingPopular ? "Indlæser populære modeller…" : "Ingen populære modeller fundet.")}
                   </div>
                 )}
               </div>
@@ -663,7 +738,6 @@ export default function Step1_AddRepairToOrder({
       {/* Modals (til at TILFØJE reparationer) */}
       <RepairModal
         device={modalDevice}
-        // Prioritér server-filtrerede repairs; fallback til context-struktur
         repairs={
           (modalRepairs ?? (
             (
@@ -672,7 +746,6 @@ export default function Step1_AddRepairToOrder({
                 .find((m) => m.id === (modalDevice?.id ?? null)) || {}
             ).repairs || []
           ))
-            // hvis vi rammer fallback-struktur, filtrér på felt hvis det findes
             .filter(r => String(r.repair_option_active ?? "1") === "1")
             .slice()
             .sort(sortRepairs)
@@ -682,7 +755,7 @@ export default function Step1_AddRepairToOrder({
         onClose={() => setModalDevice(null)}
       />
 
-      {/* NY: Brugerdefineret enhed */}
+      {/* Brugerdefineret enhed */}
       <CustomRepairModal
         open={openCustom}
         onClose={() => setOpenCustom(false)}

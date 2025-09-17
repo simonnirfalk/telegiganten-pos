@@ -1,7 +1,7 @@
 // src/pages/Dashboard.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import DashboardStats from "../components/DashboardStats";
-import DashboardRecentBookings from "../components/DashboardRecentBookings"; // ✅
+import DashboardRecentBookings from "../components/DashboardRecentBookings";
 import { useNavigate } from "react-router-dom";
 import { api } from "../data/apiClient";
 

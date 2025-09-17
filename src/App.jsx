@@ -41,7 +41,7 @@ export default function App() {
         <header
           style={{
             display: "flex",
-            justifyContent: "space-between", // ⬅️ plads til højre-justeret knap
+            justifyContent: "space-between",
             alignItems: "center",
             padding: "1rem 2rem",
             backgroundColor: "white",
@@ -55,7 +55,7 @@ export default function App() {
           {/* Lille header-knap til Import/Export */}
           <Link
             to="/import-export"
-            className="no-print"              // ⬅️ HIDE ON PRINT
+            className="no-print"
             style={{
               display: "inline-flex",
               alignItems: "center",
