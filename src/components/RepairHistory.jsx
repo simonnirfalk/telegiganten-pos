@@ -177,6 +177,7 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
       part: ln.part || ln.meta || null,
       source_id: ln.source_id ?? ln.id ?? null,
       _dirty: false,
+      _new: false,
     }))
   );
   useEffect(() => {
@@ -189,6 +190,7 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
       part: ln.part || ln.meta || null,
       source_id: ln.source_id ?? ln.id ?? null,
       _dirty: false,
+      _new: false,
     })));
   }, [lines]);
 
@@ -208,6 +210,60 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
       )
     );
   };
+
+  // ➕ Tilføj ny (tom) reparationslinje
+  function addNewLine() {
+    setEditableLines(prev => {
+      const nextIdx = (prev?.length || 0);
+      return [
+        ...prev,
+        {
+          idx: nextIdx,
+          device: "",
+          repair: "",
+          price: 0,
+          time: 0,
+          part: null,
+          source_id: null,   // ny/ikke oprettet i WP endnu
+          _dirty: true,      // totals opdaterer
+          _new: true,        // markør: skal oprettes ved gem
+        },
+      ];
+    });
+  }
+
+  // 🗑️ Slet en linje (med bekræftelse)
+  async function requestDeleteLine(line) {
+    if (!line) return;
+    const ok = window.confirm("Er du sikker på at du vil slette?");
+    if (!ok) return;
+
+    // Ny/ikke-gemt linje → fjern lokalt
+    if (!line.source_id) {
+      setEditableLines(prev => prev.filter(l => l.idx !== line.idx).map((l, i) => ({ ...l, idx: i })));
+      return;
+    }
+
+    try {
+      if (api.deleteRepairWithHistory) {
+        await api.deleteRepairWithHistory({ repair_id: Number(line.source_id) });
+      } else if (api.deleteRepair) {
+        await api.deleteRepair({ repair_id: Number(line.source_id) });
+      } else {
+        // fallback: markér annulleret
+        await api.updateRepairWithHistory?.({
+          repair_id: Number(line.source_id),
+          fields: { status: "annulleret" },
+          change_note: "Linje annulleret via RepairHistory",
+        });
+      }
+      // Fjern fra UI
+      setEditableLines(prev => prev.filter(l => l.idx !== line.idx).map((l, i) => ({ ...l, idx: i })));
+    } catch (e) {
+      console.error(e);
+      alert(e?.message || "Kunne ikke slette linjen.");
+    }
+  }
 
   // totaler fra edits
   const totalsFromEdits = useMemo(() => ({
@@ -232,8 +288,13 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
   // beregn dirty linjer + note-ændring
   const dirtyLines = useMemo(() => {
     if (!fromMeta) return [];
-    return editableLines.filter((ln) => ln._dirty);
+    return editableLines.filter((ln) => ln._dirty && !!ln.source_id);
   }, [fromMeta, editableLines]);
+
+  const newLinesForCreate = useMemo(() => {
+    // nye (uden source_id) og med mindst ét udfyldt felt
+    return editableLines.filter(l => !l.source_id && (l.device || l.repair || l.price || l.time));
+  }, [editableLines]);
 
   const noteChanged = useMemo(() => {
     return (edited.note ?? "") !== (repair.note ?? "");
@@ -265,7 +326,7 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
     const hasNote = noteChanged;
     const statusChanged = Object.prototype.hasOwnProperty.call(changedFields, "status");
 
-    if (!hasTop && !hasLines && !hasNote) {
+    if (!hasTop && !hasLines && !hasNote && newLinesForCreate.length === 0) {
       onClose?.();
       return;
     }
@@ -274,6 +335,48 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
     setError("");
 
     try {
+      // 0) Opret NYE linjer (uden source_id)
+      const createdIds = [];
+      for (const ln of newLinesForCreate) {
+        try {
+          const payload = {
+            order_id: repair.order_id,
+            device: ln.device || "",
+            repair: ln.repair || "",
+            price: Number(ln.price || 0),
+            time: Number(ln.time || 0),
+            ...(edited.status ? { status: (edited.status || "").toLowerCase() } : {}),
+            ...(edited.contact ? { contact: edited.contact } : {}),
+            ...(edited.password ? { password: edited.password } : {}),
+            ...(edited.note ? { note: edited.note } : {}),
+            ...(repair.customer_id ? { customer_id: repair.customer_id } : {}),
+          };
+
+          let created;
+          if (api.createRepairWithHistory) {
+            created = await api.createRepairWithHistory({ fields: payload, change_note: "Ny linje tilføjet via RepairHistory" });
+          } else if (api.createRepair) {
+            created = await api.createRepair(payload);
+          } else {
+            throw new Error("Intet create-endpoint tilgængeligt (createRepair[WithHistory]).");
+          }
+
+          const newId = created?.id || created?.repair_id || created?.post_id || created?.ID || null;
+          if (newId) createdIds.push(Number(newId));
+
+          setEditableLines(prev =>
+            prev.map(x =>
+              x === ln
+                ? { ...x, source_id: newId ? Number(newId) : null, _new: false, _dirty: false }
+                : x
+            )
+          );
+        } catch (e) {
+          console.error(e);
+          setError(e?.message || "Kunne ikke oprette ny linje.");
+        }
+      }
+
       // 1) Gem linjer (pris/tid mappes til WP meta-nøgler)
       for (const ln of dirtyLines) {
         if (!ln.source_id) continue;
@@ -310,7 +413,6 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
           password: edited.password ?? "",
           ...(hasNote ? { note: edited.note } : {}),
         };
-        // kun hvis der faktisk er noget udover status at gemme
         if (Object.keys(topWithoutStatus).length > 0) {
           await api.updateRepairWithHistory({
             repair_id: primaryRepairId,
@@ -320,10 +422,13 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
         }
       }
 
-      // 4) 🔁 Broadcaster status til ALLE rækker i ordren
-      if (statusChanged && allRepairIds.length) {
+      // 4) 🔁 Broadcaster status til ALLE rækker i ordren (inkl. de nye)
+      if (statusChanged) {
         const statusVal = (edited.status || "").toLowerCase();
-        for (const id of allRepairIds) {
+        const idsForBroadcast = Array.from(new Set([...allRepairIds, ...newLinesForCreate.map(l => l.source_id).filter(Boolean)]));
+        // Hvis nogle blev oprettet i dette run, men vi ikke nåede at sætte source_id i map (asynkront), brug createdIds:
+        const finalIds = Array.from(new Set([...idsForBroadcast, ...createdIds].filter(Boolean)));
+        for (const id of finalIds) {
           await api.updateRepairWithHistory({
             repair_id: id,
             fields: { status: statusVal },
@@ -403,14 +508,14 @@ Tlf. 70 70 78 56
     }
   }
 
-  /* ---------- UI ---------- */
-  // Nyeste først
+  /* ---------- Historik: nyeste først ---------- */
   const history = useMemo(() => {
     const arr = Array.isArray(repair.history) ? [...repair.history] : [];
     const ts = (e) => e?.timestamp || e?.ts || e?.date || e?.created_at || e?.time || 0;
     return arr.sort((a, b) => new Date(ts(b)) - new Date(ts(a)));
   }, [repair.history]);
 
+  /* ---------- UI ---------- */
   return (
     <div ref={overlayRef} style={styles.overlay} onClick={(e) => { if (e.target === overlayRef.current) onClose?.(); }}>
       <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
@@ -462,6 +567,13 @@ Tlf. 70 70 78 56
                   <div>Tid (min)</div>
                 </div>
 
+                {/* Toolbar */}
+                <div style={{ display: "flex", justifyContent: "flex-end", margin: "6px 0 2px" }}>
+                  <button onClick={addNewLine} style={styles.secondary} title="Tilføj ny linje">
+                    + Tilføj linje
+                  </button>
+                </div>
+
                 {editableLines.map((ln) => (
                   <div key={ln.idx} style={styles.lineCard}>
                     <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1.2fr .6fr .6fr", gap: 8, alignItems: "center", width: "100%" }}>
@@ -495,9 +607,20 @@ Tlf. 70 70 78 56
                       />
                     </div>
 
-                    <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
                       <div>{(ln.part || ln.meta) && <PartBadge meta={ln.part || ln.meta} />}</div>
-                      <div style={{ fontSize: 12, color: "#6b7280" }}>{ln.source_id ? `#${ln.source_id}` : "—"}</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <button
+                          onClick={() => requestDeleteLine(ln)}
+                          style={{ ...styles.cancel, padding: "6px 10px" }}
+                          title="Slet linje"
+                        >
+                          Slet
+                        </button>
+                        <div style={{ fontSize: 12, color: "#6b7280" }}>
+                          {ln.source_id ? `#${ln.source_id}` : "—"}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -641,11 +764,12 @@ Tlf. 70 70 78 56
                   saving || (
                     Object.keys(changedFields).length === 0 &&
                     dirtyLines.length === 0 &&
+                    newLinesForCreate.length === 0 &&
                     !noteChanged
                   )
                 }
                 title={
-                  (Object.keys(changedFields).length === 0 && dirtyLines.length === 0 && !noteChanged)
+                  (Object.keys(changedFields).length === 0 && dirtyLines.length === 0 && newLinesForCreate.length === 0 && !noteChanged)
                     ? "Ingen ændringer"
                     : "Gem"
                 }
@@ -674,50 +798,49 @@ Tlf. 70 70 78 56
         </div>
       </div>
 
-  {/* ---------- SMS modal ---------- */}
-  {smsOpen && (
-    <div
-      style={styles.smsOverlay}
-      onClick={(e) => { if (e.target === e.currentTarget) setSmsOpen(false); }}
-    >
-      <div style={styles.smsModal} onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ marginTop: 0, marginBottom: 8 }}>Send SMS</h3>
+      {/* ---------- SMS modal ---------- */}
+      {smsOpen && (
+        <div
+          style={styles.smsOverlay}
+          onClick={(e) => { if (e.target === e.currentTarget) setSmsOpen(false); }}
+        >
+          <div style={styles.smsModal} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0, marginBottom: 8 }}>Send SMS</h3>
 
-        {smsError && <div style={styles.errorBox} role="alert">{smsError}</div>}
+            {smsError && <div style={styles.errorBox} role="alert">{smsError}</div>}
 
-        <div style={{ display: "grid", gap: 8 }}>
-          <label><strong>Telefon</strong></label>
-          <input
-            style={styles.input}
-            value={smsPhone}
-            onChange={(e) => setSmsPhone(e.target.value)}
-            placeholder="+45xxxxxxxx"
-          />
+            <div style={{ display: "grid", gap: 8 }}>
+              <label><strong>Telefon</strong></label>
+              <input
+                style={styles.input}
+                value={smsPhone}
+                onChange={(e) => setSmsPhone(e.target.value)}
+                placeholder="+45xxxxxxxx"
+              />
 
-          <label><strong>Besked</strong></label>
-          <textarea
-            rows={8}
-            style={{ ...styles.input, resize: "vertical" }}
-            value={smsText}
-            onChange={(e) => setSmsText(e.target.value)}
-          />
+              <label><strong>Besked</strong></label>
+              <textarea
+                rows={8}
+                style={{ ...styles.input, resize: "vertical" }}
+                value={smsText}
+                onChange={(e) => setSmsText(e.target.value)}
+              />
+            </div>
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}>
+              <button onClick={() => setSmsOpen(false)} style={styles.cancel}>Luk</button>
+              <button onClick={copySmsToClipboard} style={styles.secondary}>Kopiér</button>
+              <button
+                onClick={handleSmsSend}
+                style={styles.save}
+                disabled={smsSending || !smsPhone || !smsText.trim()}
+              >
+                {smsSending ? "Sender…" : "Send SMS"}
+              </button>
+            </div>
+          </div>
         </div>
-
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}>
-          <button onClick={() => setSmsOpen(false)} style={styles.cancel}>Luk</button>
-          <button onClick={copySmsToClipboard} style={styles.secondary}>Kopiér</button>
-          <button
-            onClick={handleSmsSend}
-            style={styles.save}
-            disabled={smsSending || !smsPhone || !smsText.trim()}
-          >
-            {smsSending ? "Sender…" : "Send SMS"}
-          </button>
-        </div>
-      </div>
-    </div>
-  )}
-
+      )}
     </div>
   );
 }
@@ -805,6 +928,9 @@ const styles = {
     cursor: "pointer",
     fontWeight: 700,
   },
+  errorBox: { background: "#fee2e2", color: "#991b1b", padding: "8px 10px", borderRadius: 10, marginBottom: 10 },
+
+  // SMS modal styles
   smsOverlay: {
     position: "fixed",
     inset: 0,
@@ -823,6 +949,4 @@ const styles = {
     padding: 16,
     boxShadow: "0 20px 60px rgba(0,0,0,.25)",
   },
-
-  errorBox: { background: "#fee2e2", color: "#991b1b", padding: "8px 10px", borderRadius: 10, marginBottom: 10 },
 };
