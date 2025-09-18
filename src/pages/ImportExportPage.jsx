@@ -98,10 +98,10 @@ export default function ImportExportPage() {
 
   const onDownloadTemplate = () => {
     // Tom skabelon med KORREKTE kolonnehoveder (matcher backend)
-    const headersByType = {
+        const headersByType = {
       customers: "id,name,phone,email,created_at\n",
-      models: "id,brand_id,title,slug,active\n",
-      repair_options: "id,model_id,title,price,time_min,repair_option_active\n",
+      models: "id,brand_id,brand,title,slug,active\n",
+      repair_options: "id,model_id,model,title,price,time_min,repair_option_active\n",
       repair_orders: "id,order_id,customer_id,device,repair,price,time_min,payment,status,created_at,phone,contact,password,note\n",
     };
     const csv = headersByType[activeType] || "id\n";
