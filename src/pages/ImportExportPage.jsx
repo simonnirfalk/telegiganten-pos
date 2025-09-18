@@ -13,6 +13,61 @@ const TYPES = [
   { key: "repair_orders", label: "Repair orders" },
 ];
 
+// Heuristik: gætværk på delimiter ud fra første linje
+function detectDelimiter(text) {
+  const firstLine = (text.split(/\r?\n/)[0] || "").trim();
+  const commas = (firstLine.match(/,/g) || []).length;
+  const semis  = (firstLine.match(/;/g) || []).length;
+  if (semis > commas) return ";";
+  return ","; // default
+}
+
+// Erstat et tegn kun UDENFOR anførselstegn (meget enkel state-maskine)
+function replaceOutsideQuotes(line, fromChar = ";", toChar = ",") {
+  let out = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      // håndter "" som escaped "
+      if (inQuotes && line[i + 1] === '"') {
+        out += '""';
+        i++;
+        continue;
+      }
+      inQuotes = !inQuotes;
+      out += ch;
+      continue;
+    }
+    if (!inQuotes && ch === fromChar) {
+      out += toChar;
+    } else {
+      out += ch;
+    }
+  }
+  return out;
+}
+
+// Normalisér CSV til kommasepareret hvis brugeren har gemt med semikolon (Excel i DK)
+async function normalizeCsvFileToComma(file) {
+  const txt = await file.text(); // modern browsers
+  const normalized = txt.replace(/\r\n/g, "\n"); // CRLF -> LF
+  const delim = detectDelimiter(normalized);
+
+  if (delim === ",") {
+    return file; // intet at gøre
+  }
+
+  // Konverter linje for linje: ; -> , (kun udenfor anførselstegn)
+  const lines = normalized.split("\n");
+  const converted = lines.map((ln) => replaceOutsideQuotes(ln, ";", ",")).join("\n");
+
+  // Lav en ny File, så vi kan uploade den som CSV
+  const blob = new Blob([converted], { type: "text/csv;charset=utf-8" });
+  const newName = file.name.replace(/\.csv$/i, "") + "_comma.csv";
+  return new File([blob], newName, { type: "text/csv" });
+}
+
 export default function ImportExportPage() {
   const nav = useNavigate();
   const [activeType, setActiveType] = useState(TYPES[0].key);
@@ -29,7 +84,9 @@ export default function ImportExportPage() {
     setReport(null);
     setUploading(true);
     try {
-      const res = await api.importCSV(activeType, file);
+      // 🔧 VIGTIGT: auto-fix semikolon-CSV fra Excel
+      const normalizedFile = await normalizeCsvFileToComma(file);
+      const res = await api.importCSV(activeType, normalizedFile);
       setReport(res);
     } catch (err) {
       setError(err?.message || "Upload fejlede.");
@@ -208,7 +265,7 @@ export default function ImportExportPage() {
         </div>
       </div>
 
-      {/* Right: fixed info panel (samme “sidebar”-stil som resten af appen) */}
+      {/* Right: info panel */}
       <div style={{
         width: "22%",
         backgroundColor: "#fff",
@@ -228,7 +285,7 @@ export default function ImportExportPage() {
           <p><strong>Repair options</strong>: id,model_id,title,price,time_min,repair_option_active</p>
           <p><strong>Repair orders</strong>: id,order_id,customer_id,device,repair,price,time_min,payment,status,created_at,phone,contact,password,note</p>
           <p style={{ color: "#666" }}>
-            Tip: Eksportér først, redigér i Excel, og importér derefter for sikre kolonnenavne og encodning.
+            Tip: Gem som <em>CSV UTF-8 (kommaadskilt)</em> i Excel – eller upload hvad som helst, vi konverterer semikolon automatisk.
           </p>
           <p style={{ color: "#666" }}>
             Bemærk: <em>models</em> kræver et gyldigt <code>brand_id</code>. <em>repair_options</em> kræver gyldigt <code>model_id</code>.
