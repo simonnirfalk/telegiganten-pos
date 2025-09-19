@@ -98,7 +98,7 @@ export default function ImportExportPage() {
 
   const onDownloadTemplate = () => {
     // Tom skabelon med KORREKTE kolonnehoveder (matcher backend)
-        const headersByType = {
+    const headersByType = {
       customers: "id,name,phone,email,created_at\n",
       models: "id,brand_id,brand,title,slug,active\n",
       repair_options: "id,model_id,model,title,price,time_min,repair_option_active\n",
@@ -281,8 +281,8 @@ export default function ImportExportPage() {
         <h4 style={{ textTransform: "uppercase", borderBottom: "1px solid #eee", paddingBottom: 8 }}>CSV formater</h4>
         <div style={{ fontSize: "0.92rem", lineHeight: 1.4 }}>
           <p><strong>Kunder</strong>: id,name,phone,email,created_at</p>
-          <p><strong>Modeller</strong>: id,brand_id,title,slug,active</p>
-          <p><strong>Repair options</strong>: id,model_id,title,price,time_min,repair_option_active</p>
+          <p><strong>Modeller</strong>: id,brand_id, brand, title,slug,active</p>
+          <p><strong>Repair options</strong>: id,model_id, model, title,price,time_min,repair_option_active</p>
           <p><strong>Repair orders</strong>: id,order_id,customer_id,device,repair,price,time_min,payment,status,created_at,phone,contact,password,note</p>
           <p style={{ color: "#666" }}>
             Tip: Gem som <em>CSV UTF-8 (kommaadskilt)</em> i Excel – eller upload hvad som helst, vi konverterer semikolon automatisk.
