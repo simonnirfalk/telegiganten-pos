@@ -157,28 +157,28 @@ export async function proxyFetch({ path, method = "GET", query, body, headers = 
   return normalizeEntities(data);
 }
 
-/* ===== (ALIAS) Named exports til bagudkompatibilitet ===== */
-export async function createModel({ brand, brand_id, model }) {
-  return proxyFetch({
-    method: "POST",
-    path: "/wp-json/telegiganten/v1/create-model",
-    body: { brand, brand_id, model },
-  }); // -> { status: "created", model_id }
-}
+// /* ===== (ALIAS) Named exports til bagudkompatibilitet ===== */
+// export async function createModel({ brand, brand_id, model }) {
+//   return proxyFetch({
+//     method: "POST",
+//     path: "/wp-json/telegiganten/v1/create-model",
+//     body: { brand, brand_id, model },
+//   }); // -> { status: "created", model_id }
+// }
 
-export async function bulkCreateRepairTemplates({
-  model_id,
-  titles,
-  price = 0,
-  time = 0,
-  active = 0,
-}) {
-  return proxyFetch({
-    method: "POST",
-    path: "/wp-json/telegiganten/v1/bulk-create-repair-templates",
-    body: { model_id, titles, price, time, active },
-  });
-}
+// export async function bulkCreateRepairTemplates({
+//   model_id,
+//   titles,
+//   price = 0,
+//   time = 0,
+//   active = 0,
+// }) {
+//   return proxyFetch({
+//     method: "POST",
+//     path: "/wp-json/telegiganten/v1/bulk-create-repair-templates",
+//     body: { model_id, titles, price, time, active },
+//   });
+// }
 
 // --- BOOKING API HELPERS ---
 function normalizeBooking(b = {}) {
@@ -479,19 +479,28 @@ export const api = {
   /* -------- Brands / modeller / skabeloner -------- */
   getBrands: () => proxyFetch({ path: "/wp-json/telegiganten/v1/brands" }),
 
-  createModel: ({ brand, brand_id, model }) =>
-    proxyFetch({
-      method: "POST",
-      path: "/wp-json/telegiganten/v1/create-model",
-      body: { brand, brand_id, model },
-    }),
+// createModel: default aktiv = 1
+createModel: ({ brand, brand_id, model, active = 1 }) =>
+  proxyFetch({
+    method: "POST",
+    path: "/wp-json/telegiganten/v1/create-model",
+    body: { brand, brand_id, model, active: active ? 1 : 0 },
+  }),
 
-  updateModel: ({ model_id, fields }) =>
-    proxyFetch({
-      path: `/wp-json/telegiganten/v1/update-model`,
-      method: "POST",
-      body: { model_id, fields: { model: fields?.model?.trim() } },
-    }),
+// updateModel: send kun eksplicit det vi vil ændre
+updateModel: ({ model_id, fields }) => {
+  const f = {};
+  if (fields?.model != null)  f.model  = String(fields.model).trim();
+  if (fields?.active != null) f.active = fields.active ? 1 : 0;
+  if (fields?.slug != null)   f.slug   = String(fields.slug).trim();
+  if (fields?.brand_id != null) f.brand_id = Number(fields.brand_id) || 0;
+
+  return proxyFetch({
+    path: "/wp-json/telegiganten/v1/update-model",
+    method: "POST",
+    body: { model_id, fields: f },
+  });
+},
 
   bulkCreateRepairTemplates: ({ model_id, titles, price = 0, time = 0, active = 0 }) =>
     proxyFetch({

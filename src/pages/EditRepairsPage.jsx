@@ -644,7 +644,7 @@ export default function EditRepairsPage() {
     setCreatingModel(true);
     try {
       // 1) Opret selve modellen og få model_id
-      const res = await api.createModel({ brand, model: modelName });
+      const res = await api.createModel({ brand, model: modelName, active: 1 });
       if (!res || res.status === "error") {
         setCreatingModel(false);
         return alert(res?.message || "Kunne ikke oprette model.");
