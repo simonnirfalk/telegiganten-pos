@@ -626,8 +626,13 @@ export const api = {
   /* ---------------------- CSV Import / Export ---------------------- */
   getExportUrl(type) {
     const t = encodeURIComponent(type || "");
+    // special-case: new route for repair options so we include model column
+    if (t === "repair_options") {
+      return `${WP_API_BASE}/export-repair-options`;
+    }
     return `${WP_API_BASE}/export?type=${t}`;
   },
+
 
   async importCSV(type, file) {
     if (!type) throw new Error("Mangler type");
