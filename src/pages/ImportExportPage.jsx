@@ -55,7 +55,7 @@ async function normalizeCsvFileToComma(file) {
   const delim = detectDelimiter(normalized);
 
   if (delim === ",") {
-    return file; // intet at gøre
+    return file;
   }
 
   // Konverter linje for linje: ; -> , (kun udenfor anførselstegn)
@@ -75,7 +75,12 @@ export default function ImportExportPage() {
   const [report, setReport] = useState(null);
   const [error, setError] = useState("");
 
-  const exportUrl = useMemo(() => api.getExportUrl(activeType), [activeType]);
+  const exportUrl = useMemo(() => {
+    if (activeType === 'repair_options') {
+      return `${API_BASE}/telegiganten/v1/export-repair-options`;
+    }
+    return `${API_BASE}/telegiganten/v1/export?type=${activeType}`;
+  }, [activeType]);
 
   const onUpload = async (e) => {
     const file = e.target.files?.[0];
