@@ -253,6 +253,9 @@ export default function RepairSlipPrint() {
 
       <div class="hr"></div>
       <div class="total"><span>Total</span><span>${total} kr</span></div>
+      <div class="hr"></div>
+      <div class="payment">Betaling: ${paymentText}</div>
+      <div class="hr"></div>
 
       <div class="title">Kunde</div>
        <div>${order?.customer?.name || "-"}</div>
