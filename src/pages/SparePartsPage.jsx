@@ -1,37 +1,15 @@
 // src/pages/SparePartsPage.jsx
-import React, { useEffect, useRef, useState, useMemo } from "react";
-import { FaUndo, FaTrash, FaPlus, FaHistory, FaHome } from "react-icons/fa";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { FaUndo, FaTrash, FaPlus, FaHistory, FaHome, FaSlidersH, FaChevronDown } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 
-/** URLs:
- *  - LIST (WP endpoint med cache/pagination): /wp-json/telegiganten/v1/spareparts
- *  - EXEC (GAS – create/update/delete):       https://script.google.com/.../exec
- *
- *  Robust fallback: hvis VITE_SPAREPARTS_LIST mangler, prøv VITE_GAS_URL (back-compat),
- *  og som sidste udvej antag WP-route på samme origin.
- */
-const LIST_URL =
-  (import.meta.env.VITE_SPAREPARTS_LIST || import.meta.env.VITE_GAS_URL || "/wp-json/telegiganten/v1/spareparts");
-const EXEC_URL =
-  (import.meta.env.VITE_GAS_EXEC || import.meta.env.VITE_GAS_URL || "");
+/** === KONFIG === */
+const API_BASE = import.meta.env.VITE_SPAREPARTS_V2 || "/wp-json/telegiganten/v1/spareparts-v2";
+const AUTH_HEADER = (import.meta.env.VITE_WP_BASIC_AUTH || "").trim();
 
-if (!import.meta.env.VITE_SPAREPARTS_LIST) {
-  console.warn("[SparePartsPage] VITE_SPAREPARTS_LIST er ikke sat. Bruger fallback:", LIST_URL);
-}
-
-/** Felter der vises/redigeres */
-const FIELDS = ["model", "price", "stock", "location", "category", "cost_price", "repair"];
-const FIELD_LABELS = {
-  model: "Model",
-  price: "Pris",
-  stock: "Lager",
-  location: "Lokation",
-  category: "Kategori",
-  cost_price: "Kostpris",
-  repair: "Reparation",
-};
-/** Kort nøgle -> header i arket (til create) */
-const TO_SHEET_HEADER = {
+// must-keep felter
+const COLS = ["model", "sku", "price", "stock", "location", "category", "cost_price", "repair"];
+const LABEL = {
   model: "Model",
   sku: "SKU",
   price: "Pris",
@@ -40,17 +18,85 @@ const TO_SHEET_HEADER = {
   category: "Kategori",
   cost_price: "Kostpris",
   repair: "Reparation",
+  updatedAt: "UpdatedAt",
 };
 
-/* --------- UI styles --------- */
+/** --- UI styles --- */
 const BLUE = "#2166AC";
-const btnPrimary = { backgroundColor: BLUE, color: "white", padding: "10px 16px", border: "none", borderRadius: 6, cursor: "pointer" };
-const btnGhost   = { background: "white", color: BLUE, border: `1px solid ${BLUE}33`, padding: "8px 12px", borderRadius: 6, cursor: "pointer" };
-const btnDanger  = { backgroundColor: "#cc0000", color: "white", padding: "6px 10px", border: "none", borderRadius: 6, cursor: "pointer" };
-const inputStyle = { padding: 8, borderRadius: 6, border: "1px solid #ccc" };
-const chip = { fontSize: 12, color: "#64748b" };
+const btnPrimary = { backgroundColor: BLUE, color: "#fff", padding: "10px 14px", border: "none", borderRadius: 8, cursor: "pointer" };
+const btnGhost   = { background: "#fff", color: BLUE, border: `1px solid ${BLUE}33`, padding: "8px 12px", borderRadius: 8, cursor: "pointer" };
+const btnDanger  = { backgroundColor: "#cc0000", color: "#fff", padding: "6px 10px", border: "none", borderRadius: 8, cursor: "pointer" };
+const inputStyle = { padding: 8, borderRadius: 8, border: "1px solid #d1d5db" };
+const chip = { fontSize: 13, color: "#64748b" };
 
-/* --------- små helpers --------- */
+/** --- helpers --- */
+function withQuery(u, q = {}) {
+  const url = new URL(u, window.location.origin);
+  Object.entries(q).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, v);
+  });
+  return url.toString();
+}
+function authHeaders(base = {}) {
+  const h = { ...base };
+  if (AUTH_HEADER) h.Authorization = AUTH_HEADER;
+  const nonce = window?.wpApiSettings?.nonce;
+  if (nonce) h["X-WP-Nonce"] = nonce;
+  return h;
+}
+async function apiList({ offset = 0, limit = 100, search = "", lokation = "" } = {}, signal) {
+  const res = await fetch(withQuery(API_BASE, { offset: String(offset), limit: String(limit), search, lokation }), {
+    method: "GET",
+    headers: authHeaders({ Accept: "application/json" }),
+    signal,
+  });
+  if (!res.ok) throw new Error(`List fejlede (${res.status})`);
+  const data = await res.json().catch(() => ({}));
+  if (Array.isArray(data)) return { items: data, total: data.length };
+  return { items: data.items || [], total: typeof data.total === "number" ? data.total : null };
+}
+async function apiCreate(row) {
+  const res = await fetch(API_BASE, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(row),
+  });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(out?.message || `Create fejlede (${res.status})`);
+  return out;
+}
+async function apiPatch(id, patch, expectedUpdatedAt) {
+  const res = await fetch(`${API_BASE}/${id}`, {
+    method: "PATCH",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ patch, expectedUpdatedAt }),
+  });
+  const out = await res.json().catch(() => ({}));
+  if (res.status === 409) {
+    const e = new Error(out?.message || "Conflict");
+    e.status = 409;
+    e.data = out;
+    throw e;
+  }
+  if (!res.ok) throw new Error(out?.message || `Update fejlede (${res.status})`);
+  return out;
+}
+async function apiRemove(id) {
+  const res = await fetch(`${API_BASE}/${id}`, {
+    method: "DELETE",
+    headers: authHeaders({ Accept: "application/json" }),
+  });
+  if (!res.ok) {
+    const out = await res.json().catch(() => ({}));
+    throw new Error(out?.message || `Delete fejlede (${res.status})`);
+  }
+  return true;
+}
+function useDebouncedValue(v, ms = 500) {
+  const [out, setOut] = useState(v);
+  useEffect(() => { const t = setTimeout(() => setOut(v), ms); return () => clearTimeout(t); }, [v, ms]);
+  return out;
+}
 function useRowDebouncers() {
   const mapRef = useRef(new Map());
   return (key, fn, delay = 600) => {
@@ -60,124 +106,87 @@ function useRowDebouncers() {
     map.set(key, t);
   };
 }
-function useDebouncedValue(v, ms = 500) {
-  const [out, setOut] = useState(v);
-  useEffect(() => { const t = setTimeout(() => setOut(v), ms); return () => clearTimeout(t); }, [v, ms]);
-  return out;
-}
 function useUpdateQueue() {
   const q = useRef(Promise.resolve());
   return (job) => { q.current = q.current.then(() => job()).catch(() => {}); return q.current; };
 }
 
-/* --------- HTTP --------- */
-function withQuery(url, q = {}) {
-  const u = new URL(url, window.location.origin);
-  Object.entries(q).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== "") u.searchParams.set(k, v); });
-  return u.toString();
-}
-async function httpGet(params, signal) {
-  const url = withQuery(LIST_URL, params);
-  const res = await fetch(url, { method: "GET", headers: { Accept: "application/json" }, signal });
-  if (!res.ok) throw new Error(`List fejlede (${res.status})`);
-  const data = await res.json().catch(() => ({}));
-  // understøt både {items,total} og rå arrays
-  if (Array.isArray(data)) return { items: data, total: data.length };
-  return { items: data.items || [], total: typeof data.total === "number" ? data.total : null };
-}
-async function httpPost(body) {
-  const base = String(EXEC_URL || "").trim();
-  if (!base) throw new Error("EXEC_URL mangler – sæt VITE_GAS_EXEC i .env");
-  const res = await fetch(base, {
-    method: "POST",
-    headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify(body),
-  });
-  const text = await res.text();
-  let data;
-  try { data = JSON.parse(text); } catch { data = { ok: res.ok, raw: text }; }
-  if (data?.status === "conflict") { const e = new Error("Conflict"); e.status = 409; e.data = data; throw e; }
-  if (!res.ok || data?.error) { const e = new Error(data?.error || "Request failed"); e.status = res.status; e.data = data; throw e; }
-  return data;
-}
-
-/* --------- API wrapper --------- */
-async function apiList({ offset = 0, limit = 200, search = "", lokation = "" } = {}, signal) {
-  return httpGet({ offset: String(offset), limit: String(limit), search, lokation }, signal);
-}
-async function apiCreate(rowShort) {
-  const rowHeaders = {};
-  const withSku = { sku: "", ...rowShort };
-  for (const [shortKey, val] of Object.entries(withSku)) {
-    const header = TO_SHEET_HEADER[shortKey];
-    if (header) rowHeaders[header] = val ?? "";
-  }
-  return httpPost({ action: "create", row: rowHeaders });
-}
-async function apiUpdate(id, patchShort, expectedUpdatedAt) {
-  return httpPost({ action: "update", id, patch: patchShort, expectedUpdatedAt: expectedUpdatedAt || null });
-}
-async function apiDelete(id) {
-  return httpPost({ action: "delete", id });
-}
-
-/* --------- Simple page cache --------- */
-function makeKey({ query, limit, page }) { return `${query}::${limit}::${page}`; }
-
-/* =================== Komponent =================== */
 export default function SparePartsPage() {
+  const navigate = useNavigate();
+
   const [parts, setParts] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [unknownTotal, setUnknownTotal] = useState(false);
+
+  const [pageSize, setPageSize] = useState(100);
+  const [page, setPage] = useState(1);
+
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 500);
+
+  const [locationFilter, setLocationFilter] = useState("");        // valgt lokation (filtrering)
+  const [locationOpen, setLocationOpen] = useState(false);         // dropdown åben/lukket
+  const [locationQuery, setLocationQuery] = useState("");          // søgetekst i lokations-dropdown
+
+  const [problem, setProblem] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const [history, setHistory] = useState([]);
   const [editingIndex, setEditingIndex] = useState(null);
 
-  const [loading, setLoading] = useState(false);
-  const [problem, setProblem] = useState(null);
+  // kolonne-visibility (SKU, Pris, UpdatedAt skjult by default)
+  const [visibleCols, setVisibleCols] = useState(() => ({
+    model: true,
+    sku: false,          // skjult
+    price: false,        // skjult
+    stock: true,
+    location: true,
+    category: true,
+    cost_price: true,
+    repair: true,
+    updatedAt: false,    // skjult
+  }));
+  const [colPickerOpen, setColPickerOpen] = useState(false);
 
   const LIMITS = [200, 100, 50, 25];
-  const [pageSize, setPageSize] = useState(100);
-  const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [unknownTotal, setUnknownTotal] = useState(false);
-
   const totalPages = useMemo(() => {
     if (unknownTotal) return page + (parts.length >= pageSize ? 1 : 0);
-    return Math.max(1, Math.ceil(total / pageSize));
+    return Math.max(1, Math.ceil((total || 0) / pageSize));
   }, [unknownTotal, total, pageSize, page, parts.length]);
 
-  const [activeQuery, setActiveQuery] = useState("");
-
-  const listAbortRef = useRef(null);
-  const listReqIdRef = useRef(0);
-
+  const abortRef = useRef(null);
+  const reqIdRef = useRef(0);
   const pageCacheRef = useRef(new Map());
-  const [newPart, setNewPart] = useState(FIELDS.reduce((acc, k) => (acc[k] = "", acc), {}));
-
-  const navigate = useNavigate();
   const debounceRow = useRowDebouncers();
   const enqueue = useUpdateQueue();
 
-  const fetchPage = async ({ pageArg = page, query = activeQuery } = {}) => {
-    const cacheKey = makeKey({ query, limit: pageSize, page: pageArg });
-    const cached = pageCacheRef.current.get(cacheKey);
+  function cacheKey(q, loc, limit, p) { return `${q}::${loc}::${limit}::${p}`; }
+
+  // unikt sæt af lokationer (bruges i dropdown)
+  const locationOptions = useMemo(() => {
+    const set = new Set();
+    parts.forEach(p => { if (p.location) set.add(String(p.location)); });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "da"));
+  }, [parts]);
+
+  async function fetchPage({ pageArg = page, query = debouncedSearch, loc = locationFilter } = {}) {
+    const key = cacheKey(query, loc, pageSize, pageArg);
+    const cached = pageCacheRef.current.get(key);
     if (cached) {
       setParts(cached.items);
       setTotal(cached.total ?? 0);
       setUnknownTotal(cached.total == null);
-      setActiveQuery(query);
-      setProblem(null);
+      setProblem("");
       return;
     }
 
-    if (listAbortRef.current) listAbortRef.current.abort();
+    if (abortRef.current) abortRef.current.abort();
     const controller = new AbortController();
-    listAbortRef.current = controller;
-    const myId = ++listReqIdRef.current;
+    abortRef.current = controller;
+    const myId = ++reqIdRef.current;
 
     setLoading(true);
-    setProblem(null);
+    setProblem("");
 
     const currentIdx = Math.max(0, LIMITS.indexOf(pageSize));
     const tryLimits = [pageSize, ...LIMITS.slice(currentIdx + 1)];
@@ -185,313 +194,351 @@ export default function SparePartsPage() {
     for (const lim of tryLimits) {
       try {
         const offset = (pageArg - 1) * lim;
-        const data = await apiList({ offset, limit: lim, search: query, lokation: "" }, controller.signal);
-        if (myId !== listReqIdRef.current) return;
+        const data = await apiList({ offset, limit: lim, search: query, lokation: loc }, controller.signal);
+        if (myId !== reqIdRef.current) return;
 
-        const items = data?.items || [];
+        const items = Array.isArray(data?.items) ? data.items : [];
         const srvTotal = typeof data?.total === "number" ? data.total : null;
 
         setParts(items);
         setTotal(srvTotal ?? 0);
         setUnknownTotal(srvTotal == null);
-        setActiveQuery(query);
-
         if (lim !== pageSize) setPageSize(lim);
-        pageCacheRef.current.set(cacheKey, { items, total: srvTotal, ts: Date.now() });
 
+        pageCacheRef.current.set(key, { items, total: srvTotal, ts: Date.now() });
         setLoading(false);
         return;
       } catch (e) {
         if (e.name === "AbortError") return;
-        const s = e.status || 0;
-        const serverErr = s === 500 || s === 502 || s === 504 || s === 0;
-        const isLastAttempt = lim === tryLimits[tryLimits.length - 1];
-        if (!serverErr || isLastAttempt) {
+        const serverErr = [0, 500, 502, 504].includes(e.status || 0);
+        const isLast = lim === tryLimits[tryLimits.length - 1];
+        if (!serverErr || isLast) {
           setProblem(e.message || "Kunne ikke hente data");
           break;
         }
-        // ellers prøv næste lavere limit
       }
     }
+    if (myId === reqIdRef.current) setLoading(false);
+  }
 
-    if (myId === listReqIdRef.current) setLoading(false);
-  };
-
-  useEffect(() => {
-    setPage(1);
-    pageCacheRef.current.clear();
-    fetchPage({ pageArg: 1, query: "" });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    setPage(1);
-    pageCacheRef.current.clear();
-    fetchPage({ pageArg: 1, query: debouncedSearch });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch]);
-
-  useEffect(() => {
-    fetchPage({ pageArg: page, query: activeQuery });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page]);
+  // initial fetch
+  useEffect(() => { fetchPage({ pageArg: 1, query: "", loc: "" }); /* eslint-disable-next-line */ }, []);
+  // search ændrer
+  useEffect(() => { setPage(1); pageCacheRef.current.clear(); fetchPage({ pageArg: 1, query: debouncedSearch, loc: locationFilter }); /* eslint-disable-next-line */ }, [debouncedSearch]);
+  // lokationsfilter ændrer
+  useEffect(() => { setPage(1); pageCacheRef.current.clear(); fetchPage({ pageArg: 1, query: debouncedSearch, loc: locationFilter }); /* eslint-disable-next-line */ }, [locationFilter]);
+  // side ændrer
+  useEffect(() => { fetchPage({ pageArg: page, query: debouncedSearch, loc: locationFilter }); /* eslint-disable-next-line */ }, [page]);
 
   const saveChange = (id, field, value) => {
-    if (id == null) {
-      alert("Denne række mangler ID – opdaterer visningen.");
-      pageCacheRef.current.clear();
-      fetchPage({ pageArg: page, query: activeQuery });
-      return;
-    }
+    if (id == null) return;
     const prevRow = parts.find((p) => p.id === id);
     const old = prevRow ? prevRow[field] : undefined;
 
-    setParts((prev) => prev.map((p) => (p.id != null && p.id === id ? { ...p, [field]: value } : p)));
-    setHistory((prev) => [{ id, field, old, newVal: value }, ...prev.slice(0, 9)]);
+    // optimistic UI
+    setParts((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
+    setHistory((h) => [{ id, field, old, newVal: value }, ...h.slice(0, 9)]);
 
-    const debKey = `${id}:${field}`;
-    debounceRow(
-      debKey,
-      () =>
-        enqueue(async () => {
-          try {
-            const current = parts.find((p) => p.id === id) || {};
-            await apiUpdate(id, { [field]: value }, current.updatedAt);
-            pageCacheRef.current.delete(makeKey({ query: activeQuery, limit: pageSize, page }));
-            await fetchPage({ pageArg: page, query: activeQuery });
-          } catch (e) {
-            if (e.status === 409) {
-              pageCacheRef.current.clear();
-              await fetchPage({ pageArg: page, query: activeQuery });
-              alert("Rækken blev ændret et andet sted. Se opdaterede værdier og prøv igen.");
-            } else {
-              setParts((prev) => prev.map((p) => (p.id != null && p.id === id ? { ...p, [field]: old } : p)));
-              alert(e.message || "Fejl ved opdatering");
-            }
+    const expectedUpdatedAt = prevRow?.updatedAt || prevRow?.updated_at || null;
+    const patch = {
+      [field]:
+        field === "price" || field === "cost_price" ? Number(value) || 0 :
+        field === "stock" ? Number(value) || 0 :
+        value
+    };
+
+    debounceRow(`${id}:${field}`, () =>
+      enqueue(async () => {
+        try {
+          const updated = await apiPatch(id, patch, expectedUpdatedAt);
+          setParts((prev) => prev.map((p) => (p.id === id ? { ...p, ...updated } : p)));
+        } catch (e) {
+          if (e.status === 409) {
+            alert("Rækken er ændret siden sidst. Indlæser igen.");
+            pageCacheRef.current.clear();
+            fetchPage({ pageArg: page, query: debouncedSearch, loc: locationFilter });
+          } else {
+            alert(e.message || "Kunne ikke gemme ændring");
+            setParts((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: old } : p)));
           }
-        }),
-      600
-    );
+        }
+      })
+    , 600);
   };
 
-  const undoLast = () => {
-    const last = history[0];
-    if (!last) return;
-    saveChange(last.id, last.field, last.old);
-    setHistory((prev) => prev.slice(1));
-  };
-
-  const addPart = async () => {
+  const [newRow, setNewRow] = useState(() => COLS.reduce((acc, k) => ({ ...acc, [k]: "" }), {}));
+  async function handleCreate() {
     try {
-      await enqueue(async () => { await apiCreate(newPart); });
-      setNewPart(FIELDS.reduce((acc, k) => (acc[k] = "", acc), {}));
+      const clean = {
+        model: String(newRow.model || "").trim(),
+        sku: String(newRow.sku || "").trim(),
+        price: Number(newRow.price) || 0,
+        stock: Number(newRow.stock) || 0,
+        location: String(newRow.location || ""),
+        category: String(newRow.category || ""),
+        cost_price: Number(newRow.cost_price) || 0,
+        repair: String(newRow.repair || ""),
+      };
+      if (!clean.model) { alert("Model skal udfyldes."); return; }
+      await apiCreate(clean);
+      setNewRow(COLS.reduce((acc, k) => ({ ...acc, [k]: "" }), {}));
       pageCacheRef.current.clear();
-      await fetchPage({ pageArg: 1, query: activeQuery });
       setPage(1);
+      fetchPage({ pageArg: 1, query: debouncedSearch, loc: locationFilter });
     } catch (e) {
-      alert(e.message || "Fejl ved oprettelse");
+      alert(e.message || "Kunne ikke oprette række");
     }
-  };
-
-  const deletePart = async (id) => {
-    if (!window.confirm("Er du sikker på at du vil slette?")) return;
+  }
+  async function handleDelete(id) {
+    if (!window.confirm("Slet denne reservedel?")) return;
     try {
-      await enqueue(async () => { await apiDelete(id); });
+      await apiRemove(id);
+      setParts((prev) => prev.filter((p) => p.id !== id));
       pageCacheRef.current.clear();
-      const newTotal = Math.max(0, total - 1);
-      const maxPage = Math.max(1, Math.ceil(newTotal / pageSize));
-      const nextPage = Math.min(page, maxPage);
-      setPage(nextPage);
-      await fetchPage({ pageArg: nextPage, query: activeQuery });
+      fetchPage({ pageArg: page, query: debouncedSearch, loc: locationFilter });
     } catch (e) {
-      alert(e.message || "Fejl ved sletning");
+      alert(e.message || "Kunne ikke slette række");
     }
-  };
+  }
 
-  const totalInfo = unknownTotal ? (
-    <span>Viser {parts.length} rækker (ukendt total)</span>
-  ) : (
-    <span>Viser {parts.length} af {total} match</span>
-  );
+  /** --- UI helpers --- */
+  function cellEditor(row, field) {
+    const v = row[field] ?? "";
+    const num = field === "price" || field === "stock" || field === "cost_price";
+    return (
+      <input
+        type={num ? "number" : "text"}
+        step={num ? "0.01" : undefined}
+        value={String(v)}
+        onChange={(e) => saveChange(row.id, field, num ? (e.target.value === "" ? "" : e.target.valueAsNumber) : e.target.value)}
+        onFocus={() => setEditingIndex(row.id)}
+        onBlur={() => setEditingIndex(null)}
+        style={{ ...inputStyle, width: "100%" }}
+      />
+    );
+  }
+  const shownCols = useMemo(() => {
+    const arr = [];
+    COLS.forEach((c) => { if (visibleCols[c]) arr.push(c); });
+    if (visibleCols.updatedAt) arr.push("updatedAt");
+    return arr;
+  }, [visibleCols]);
+
+  // simple popover til kolonnevælger
+  function ColumnPicker() {
+    return (
+      <div style={{ position: "relative" }}>
+        <button style={{ ...btnGhost, display: "flex", alignItems: "center", gap: 8 }} onClick={() => setColPickerOpen((o) => !o)}>
+          <FaSlidersH /> Kolonner <FaChevronDown style={{ fontSize: 12 }} />
+        </button>
+        {colPickerOpen && (
+          <div style={{
+            position: "absolute", zIndex: 20, marginTop: 8, right: 0,
+            background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 10, minWidth: 220,
+            boxShadow: "0 10px 24px rgba(0,0,0,0.08)"
+          }}>
+            {[...COLS, "updatedAt"].map((key) => (
+              <label key={key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 4px", cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={!!visibleCols[key]}
+                  onChange={(e) => setVisibleCols((prev) => ({ ...prev, [key]: e.target.checked }))}
+                />
+                <span>{LABEL[key] || key}</span>
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Søgbar lokations-dropdown
+  function LocationFilter() {
+    const filt = locationOptions.filter(l => l.toLowerCase().includes(locationQuery.toLowerCase()));
+    return (
+      <div style={{ position: "relative" }}>
+        <button
+          style={{ ...btnGhost, display: "flex", alignItems: "center", gap: 8 }}
+          onClick={() => setLocationOpen((o) => !o)}
+        >
+          Lokation: {locationFilter || "Alle"} <FaChevronDown style={{ fontSize: 12 }} />
+        </button>
+        {locationOpen && (
+          <div style={{
+            position: "absolute", zIndex: 20, marginTop: 8,
+            background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 10, width: 260,
+            boxShadow: "0 10px 24px rgba(0,0,0,0.08)"
+          }}>
+            <input
+              value={locationQuery}
+              onChange={(e) => setLocationQuery(e.target.value)}
+              placeholder="Søg lokation…"
+              style={{ ...inputStyle, width: "100%", marginBottom: 8 }}
+            />
+            <div style={{ maxHeight: 220, overflowY: "auto" }}>
+              <div
+                onClick={() => { setLocationFilter(""); setLocationOpen(false); setLocationQuery(""); }}
+                style={{ padding: "6px 8px", borderRadius: 6, cursor: "pointer", background: locationFilter === "" ? "#f1f5f9" : "transparent" }}
+              >
+                Alle
+              </div>
+              {filt.map((loc) => (
+                <div
+                  key={loc}
+                  onClick={() => { setLocationFilter(loc); setLocationOpen(false); setLocationQuery(""); }}
+                  style={{ padding: "6px 8px", borderRadius: 6, cursor: "pointer", background: locationFilter === loc ? "#f1f5f9" : "transparent" }}
+                >
+                  {loc}
+                </div>
+              ))}
+              {!filt.length && <div style={{ padding: "6px 8px", color: "#64748b" }}>Ingen match</div>}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
-    <div style={{ padding: "2rem" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1.5rem" }}>
-        <button onClick={() => navigate("/")} style={btnPrimary}>
-          <FaHome style={{ marginRight: 6 }} /> Dashboard
-        </button>
-      </div>
-
-      <h2 style={{ textTransform: "uppercase", fontWeight: "bold", marginBottom: "1rem" }}>
-        Reservedele
-      </h2>
-
-      <div
-        style={{
-          position: "sticky", top: 0, zIndex: 10, background: "#f9f9f9",
-          padding: "1rem 0", display: "flex", flexWrap: "wrap", gap: "1rem",
-          alignItems: "center", marginBottom: "1.5rem", borderBottom: "1px solid #ddd",
-        }}
-      >
-        <button onClick={undoLast} style={btnGhost} title="Fortryd sidste ændring">
-          <FaUndo style={{ marginRight: 6 }} />
-          Fortryd
-        </button>
-
-        <button onClick={() => alert(JSON.stringify(history, null, 2))} style={btnGhost} title="Vis historik (debug)">
-          <FaHistory style={{ marginRight: 6 }} />
-          Historik
-        </button>
-
+    <div style={{ padding: 16 }}>
+      {/* Topbar */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+        <button onClick={() => navigate("/")} style={btnGhost}><FaHome /> Forside</button>
+        <div style={{ flex: 1 }} />
         <input
-          style={{ ...inputStyle, width: 320 }}
-          placeholder="Søg…"
+          placeholder="Søg fx 'Samsung S20 skærm'…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          title="Server-side søgning (hele arket)"
+          style={{ ...inputStyle, width: 380 }}
         />
+        <LocationFilter />
+        <ColumnPicker />
+      </div>
 
-        <div style={{ marginLeft: "auto", display: "flex", gap: 12, alignItems: "center" }}>
-          <label style={{ fontSize: 12, color: "#334155" }}>pr. side:</label>
-          <select
-            value={pageSize}
-            onChange={(e) => {
-              const n = Number(e.target.value);
-              setPageSize(n);
-              setPage(1);
-              pageCacheRef.current.clear();
-              fetchPage({ pageArg: 1, query: activeQuery });
-            }}
-            style={{ ...inputStyle, padding: "6px 8px" }}
-          >
-            {[25, 50, 100, 200].map(n => <option key={n} value={n}>{n}</option>)}
+      {/* Info / pagination */}
+      <div style={{ marginBottom: 8, display: "flex", gap: 12, alignItems: "center" }}>
+        <div style={chip}>{loading ? "Henter…" : `Viser ${parts.length}${unknownTotal ? "" : ` / ${total}`} rækker`}</div>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+          <label>Pr. side</label>
+          <select style={inputStyle} value={pageSize} onChange={(e) => setPageSize(parseInt(e.target.value, 10))}>
+            {LIMITS.map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
-
-          <button
-            onClick={() => setEditingIndex(editingIndex === -1 ? null : -1)}
-            style={btnPrimary}
-            title="Tilføj ny række"
-          >
-            <FaPlus style={{ marginRight: 6 }} />
-            Tilføj reservedel
-          </button>
-
-          {loading && <span style={chip} aria-live="polite">Indlæser…</span>}
+          <label>Side</label>
+          <input
+            style={{ ...inputStyle, width: 70 }}
+            type="number"
+            min={1}
+            max={totalPages}
+            value={page}
+            onChange={(e) => setPage(Math.max(1, Math.min(totalPages, parseInt(e.target.value || "1", 10))))}
+            onBlur={() => fetchPage({ pageArg: page, query: debouncedSearch, loc: locationFilter })}
+          />
+          <span style={chip}>af {totalPages}</span>
         </div>
       </div>
 
-      <div style={{ marginBottom: "0.75rem", fontSize: "0.95rem" }}>
-        {problem ? (
-          <span style={{ color: "#cc0000" }}>{problem}</span>
-        ) : (
-          <>
-            {totalInfo}
-            <span> · Side {page} af {totalPages}</span>
-            {activeQuery && <span style={chip}> · Søg: “{activeQuery}”</span>}
-            <span style={chip}> · pr. side: {pageSize}</span>
-          </>
-        )}
-      </div>
-
-      {editingIndex === -1 && (
-        <div style={{ marginBottom: "1rem", border: "1px solid #ddd", padding: "1rem", borderRadius: 6, background: "#fff" }}>
-          <h4 style={{ marginBottom: "0.75rem", fontSize: "1.05rem", fontWeight: "bold" }}>Opret ny reservedel</h4>
-          <div style={{ display: "grid", gridTemplateColumns: "1.6fr 0.6fr 0.6fr 1fr 1fr 1fr 1.2fr auto", gap: "0.5rem" }}>
-            {FIELDS.map((field) => (
-              <input
-                key={`new-${field}`}
-                placeholder={FIELD_LABELS[field] || field}
-                aria-label={FIELD_LABELS[field] || field}
-                value={newPart[field]}
-                onChange={(e) => setNewPart((prev) => ({ ...prev, [field]: e.target.value }))}
-                style={inputStyle}
-              />
-            ))}
-            <button onClick={addPart} style={btnPrimary}>Tilføj</button>
-          </div>
+      {problem && (
+        <div style={{ marginBottom: 12, padding: 10, borderRadius: 8, background: "#fee2e2", color: "#7f1d1d" }}>
+          {problem}
         </div>
       )}
 
-      <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden" }}>
-        <table className="w-full text-sm">
-          <thead style={{ background: "#f8fafc", borderBottom: "1px solid #e5e7eb" }}>
-            <tr>
-              <th className="p-2 text-left" style={{ width: "40%" }}>Model</th>
-              <th className="p-2 text-left" style={{ width: "6%" }}>Pris</th>
-              <th className="p-2 text-left" style={{ width: "6%" }}>Lager</th>
-              <th className="p-2 text-left" style={{ width: "12%" }}>Lokation</th>
-              <th className="p-2 text-left" style={{ width: "12%" }}>Kategori</th>
-              <th className="p-2 text-left" style={{ width: "12%" }}>Kostpris</th>
-              <th className="p-2 text-left" style={{ width: "12%" }}>Reparation</th>
-              <th className="p-2 text-left" style={{ width: "6%" }}></th>
+      {/* Tabel */}
+      <div style={{ overflowX: "auto", border: "1px solid #e5e7eb", borderRadius: 10 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+          <thead>
+            <tr style={{ background: "#f8fafc" }}>
+              <th style={{ textAlign: "left", padding: 8, width: 90 }}>ID</th>
+              {shownCols.map((c) => (
+                <th
+                  key={c}
+                  style={{
+                    textAlign: "left",
+                    padding: 8,
+                    ...(c === "model" ? { width: "40%", minWidth: 260 } : {})
+                  }}
+                >
+                  {LABEL[c]}
+                </th>
+              ))}
+              <th style={{ textAlign: "left", padding: 8, width: 110 }}>Handling</th>
             </tr>
           </thead>
           <tbody>
-            {parts.map((part, idx) => {
-              const keyBase = part.id ?? `row-${idx}`;
+            {/* Opret-ny række */}
+            <tr style={{ background: "#F0F7FF" /* markant farve */, borderBottom: "2px solid #e2e8f0" }}>
+              <td style={{ padding: 8, color: "#334155", fontWeight: 700 }}>Opret ny</td>
+              {shownCols.map((c) => {
+                const num = c === "price" || c === "stock" || c === "cost_price";
+                return (
+                  <td key={c} style={{ padding: 6 }}>
+                    <input
+                      type={num ? "number" : "text"}
+                      step={num ? "0.01" : undefined}
+                      value={String(newRow[c] ?? "")}
+                      onChange={(e) => setNewRow((prev) => ({ ...prev, [c]: num ? (e.target.value === "" ? "" : e.target.valueAsNumber) : e.target.value }))}
+                      style={{ ...inputStyle, width: "100%" }}
+                      placeholder={LABEL[c]}
+                    />
+                  </td>
+                );
+              })}
+              <td style={{ padding: 6 }}>
+                <button onClick={handleCreate} style={btnPrimary}><FaPlus /> Opret</button>
+              </td>
+            </tr>
+
+            {parts.map((row) => {
+              const rowUpdatedAt = row.updatedAt || row.updated_at || "—";
               return (
-                <tr key={keyBase} style={{ borderTop: "1px dashed #e5e7eb" }}>
-                  {FIELDS.map((field) => (
-                    <td key={`${keyBase}-${field}`} className="p-1">
-                      <input
-                        style={{ ...inputStyle, padding: "6px", width: "100%" }}
-                        value={part[field] ?? ""}
-                        onChange={(e) => saveChange(part.id, field, e.target.value)}
-                      />
-                    </td>
-                  ))}
-                  <td className="p-1" style={{ textAlign: "right" }}>
-                    <button
-                      onClick={() => part.id != null && deletePart(part.id)}
-                      style={btnDanger}
-                      title="Slet række"
-                      disabled={part.id == null}
-                    >
-                      <FaTrash />
-                    </button>
+                <tr key={row.id} style={{ borderTop: "1px solid #f1f5f9", background: editingIndex === row.id ? "#fffbeb" : "#fff" }}>
+                  <td style={{ padding: 6, color: "#64748b" }}>{row.id}</td>
+                  {shownCols.map((c) =>
+                    c === "updatedAt" ? (
+                      <td key="updatedAt" style={{ padding: 6, fontFamily: "monospace", fontSize: 12 }}>{rowUpdatedAt}</td>
+                    ) : (
+                      <td key={c} style={{ padding: 6, ...(c === "model" ? { width: "30%", minWidth: 260 } : {}) }}>
+                        {cellEditor(row, c)}
+                      </td>
+                    )
+                  )}
+                  <td style={{ padding: 6 }}>
+                    <button onClick={() => handleDelete(row.id)} style={btnDanger}><FaTrash /> Slet</button>
                   </td>
                 </tr>
               );
             })}
-            {parts.length === 0 && (
-              <tr>
-                <td colSpan={8} style={{ padding: "1rem", color: "#64748b" }}>
-                  Ingen resultater.
-                </td>
-              </tr>
+
+            {!parts.length && !loading && (
+              <tr><td colSpan={shownCols.length + 2} style={{ padding: 16, color: "#64748b" }}>Ingen rækker</td></tr>
             )}
           </tbody>
         </table>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginTop: "1.25rem", flexWrap: "wrap" }}>
-        <button
-          onClick={() => setPage((p) => Math.max(1, p - 1))}
-          disabled={page <= 1 || loading}
-          style={{
-            ...(page <= 1 || loading ? { backgroundColor: "#ccc", cursor: "not-allowed" } : { backgroundColor: BLUE, cursor: "pointer" }),
-            color: "white", padding: "6px 14px", borderRadius: 6, border: "none",
-          }}
-        >
-          Forrige
-        </button>
+      {/* Pagination knapper */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
+        <span style={chip}>Side {page} / {totalPages} {loading ? " • Indlæser…" : ""}</span>
+        <div style={{ flex: 1 }} />
+        <button disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} style={btnGhost}>Forrige</button>
+        <button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)} style={btnGhost}>Næste</button>
+      </div>
 
-        <span style={{ fontSize: "0.95rem" }}>
-          Side {page} af {totalPages} { !unknownTotal && <span style={chip}>({total} rækker)</span> }
-        </span>
-
-        <button
-          onClick={() => setPage((p) => p + 1)}
-          disabled={(!unknownTotal && page >= totalPages) || loading || (unknownTotal && parts.length < pageSize)}
-          style={{
-            ...(((!unknownTotal && page >= totalPages) || loading || (unknownTotal && parts.length < pageSize))
-              ? { backgroundColor: "#ccc", cursor: "not-allowed" }
-              : { backgroundColor: BLUE, cursor: "pointer" }),
-            color: "white", padding: "6px 14px", borderRadius: 6, border: "none",
-          }}
-        >
-          Næste
-        </button>
+      {/* Seneste ændringer (klient) */}
+      <div style={{ marginTop: 16 }}>
+        <div style={{ fontWeight: 700, marginBottom: 8 }}><FaHistory /> Seneste ændringer</div>
+        {history.length === 0 ? (
+          <div style={{ fontSize: 13, color: "#64748b" }}>Ingen ændringer i denne session.</div>
+        ) : (
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
+            {history.map((h, i) => (
+              <li key={i}>
+                #{h.id} — {(LABEL[h.field] || h.field)}: <em style={{ color: "#64748b" }}>{String(h.old ?? "—")}</em> → <strong>{String(h.newVal ?? "—")}</strong>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );
