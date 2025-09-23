@@ -222,7 +222,10 @@ export default function RepairsPage() {
         g._rows.find(r => r?._raw?.customer_id || r?._raw?.customerId)?._raw?.customerId ??
         null,
       phone: g.phone,
-      contact: g.email || g.phone || "",
+      contact:
+        g._rows[0]?._raw?.contact ??
+        g._rows.find(r => r?._raw?.contact)?. _raw?.contact ??
+        "",
       status: g.status,
       payment_type: g.payment_type || "efter",
       payment_total: g.totalPrice,
