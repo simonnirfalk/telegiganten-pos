@@ -1,6 +1,6 @@
 // src/pages/SparePartsPage.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { FaUndo, FaTrash, FaPlus, FaHistory, FaHome, FaSlidersH, FaChevronDown } from "react-icons/fa";
+import { FaTrash, FaPlus, FaHistory, FaHome, FaSlidersH, FaChevronDown } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 
 /** === KONFIG === */
@@ -32,9 +32,7 @@ const chip = { fontSize: 13, color: "#64748b" };
 /** --- helpers --- */
 function withQuery(u, q = {}) {
   const url = new URL(u, window.location.origin);
-  Object.entries(q).forEach(([k, v]) => {
-    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, v);
-  });
+  Object.entries(q).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, v); });
   return url.toString();
 }
 function authHeaders(base = {}) {
@@ -74,18 +72,13 @@ async function apiPatch(id, patch, expectedUpdatedAt) {
   const out = await res.json().catch(() => ({}));
   if (res.status === 409) {
     const e = new Error(out?.message || "Conflict");
-    e.status = 409;
-    e.data = out;
-    throw e;
+    e.status = 409; e.data = out; throw e;
   }
   if (!res.ok) throw new Error(out?.message || `Update fejlede (${res.status})`);
   return out;
 }
 async function apiRemove(id) {
-  const res = await fetch(`${API_BASE}/${id}`, {
-    method: "DELETE",
-    headers: authHeaders({ Accept: "application/json" }),
-  });
+  const res = await fetch(`${API_BASE}/${id}`, { method: "DELETE", headers: authHeaders({ Accept: "application/json" }) });
   if (!res.ok) {
     const out = await res.json().catch(() => ({}));
     throw new Error(out?.message || `Delete fejlede (${res.status})`);
@@ -96,19 +89,6 @@ function useDebouncedValue(v, ms = 500) {
   const [out, setOut] = useState(v);
   useEffect(() => { const t = setTimeout(() => setOut(v), ms); return () => clearTimeout(t); }, [v, ms]);
   return out;
-}
-function useRowDebouncers() {
-  const mapRef = useRef(new Map());
-  return (key, fn, delay = 600) => {
-    const map = mapRef.current;
-    if (map.has(key)) clearTimeout(map.get(key));
-    const t = setTimeout(fn, delay);
-    map.set(key, t);
-  };
-}
-function useUpdateQueue() {
-  const q = useRef(Promise.resolve());
-  return (job) => { q.current = q.current.then(() => job()).catch(() => {}); return q.current; };
 }
 
 export default function SparePartsPage() {
@@ -124,9 +104,9 @@ export default function SparePartsPage() {
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 500);
 
-  const [locationFilter, setLocationFilter] = useState("");        // valgt lokation (filtrering)
-  const [locationOpen, setLocationOpen] = useState(false);         // dropdown åben/lukket
-  const [locationQuery, setLocationQuery] = useState("");          // søgetekst i lokations-dropdown
+  const [locationFilter, setLocationFilter] = useState("");
+  const [locationOpen, setLocationOpen] = useState(false);
+  const [locationQuery, setLocationQuery] = useState("");
 
   const [problem, setProblem] = useState("");
   const [loading, setLoading] = useState(false);
@@ -137,14 +117,14 @@ export default function SparePartsPage() {
   // kolonne-visibility (SKU, Pris, UpdatedAt skjult by default)
   const [visibleCols, setVisibleCols] = useState(() => ({
     model: true,
-    sku: false,          // skjult
-    price: false,        // skjult
+    sku: false,
+    price: false,
     stock: true,
     location: true,
     category: true,
     cost_price: true,
     repair: true,
-    updatedAt: false,    // skjult
+    updatedAt: false,
   }));
   const [colPickerOpen, setColPickerOpen] = useState(false);
 
@@ -157,12 +137,13 @@ export default function SparePartsPage() {
   const abortRef = useRef(null);
   const reqIdRef = useRef(0);
   const pageCacheRef = useRef(new Map());
-  const debounceRow = useRowDebouncers();
-  const enqueue = useUpdateQueue();
+
+  // 👉 her gemmer vi originalværdier pr. felt, når brugeren starter med at redigere
+  // key = `${id}:${field}`  value = originalValue
+  const originalRef = useRef(new Map());
 
   function cacheKey(q, loc, limit, p) { return `${q}::${loc}::${limit}::${p}`; }
 
-  // unikt sæt af lokationer (bruges i dropdown)
   const locationOptions = useMemo(() => {
     const set = new Set();
     parts.forEach(p => { if (p.location) set.add(String(p.location)); });
@@ -212,10 +193,7 @@ export default function SparePartsPage() {
         if (e.name === "AbortError") return;
         const serverErr = [0, 500, 502, 504].includes(e.status || 0);
         const isLast = lim === tryLimits[tryLimits.length - 1];
-        if (!serverErr || isLast) {
-          setProblem(e.message || "Kunne ikke hente data");
-          break;
-        }
+        if (!serverErr || isLast) { setProblem(e.message || "Kunne ikke hente data"); break; }
       }
     }
     if (myId === reqIdRef.current) setLoading(false);
@@ -230,40 +208,49 @@ export default function SparePartsPage() {
   // side ændrer
   useEffect(() => { fetchPage({ pageArg: page, query: debouncedSearch, loc: locationFilter }); /* eslint-disable-next-line */ }, [page]);
 
-  const saveChange = (id, field, value) => {
-    if (id == null) return;
-    const prevRow = parts.find((p) => p.id === id);
-    const old = prevRow ? prevRow[field] : undefined;
+  /** Gem på blur/Enter — sammenlign med ORIGINAL (ikke state) */
+  const saveField = async (id, field, finalValue) => {
+    const key = `${id}:${field}`;
+    const original = originalRef.current.get(key);
 
-    // optimistic UI
-    setParts((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
-    setHistory((h) => [{ id, field, old, newVal: value }, ...h.slice(0, 9)]);
+    // hvis vi ikke har en original (edge-case), hent den fra nuværende parts
+    const prevRow = parts.find((p) => p.id === id);
+    const fallbackOriginal = prevRow ? prevRow[field] : undefined;
+
+    const before = original !== undefined ? original : fallbackOriginal;
+
+    const normalized =
+      field === "price" || field === "cost_price" ? (Number(finalValue) || 0) :
+      field === "stock" ? (Number(finalValue) || 0) :
+      finalValue;
+
+    if (String(normalized) === String(before ?? "")) {
+      // ingen reel ændring
+      originalRef.current.delete(key);
+      return;
+    }
 
     const expectedUpdatedAt = prevRow?.updatedAt || prevRow?.updated_at || null;
-    const patch = {
-      [field]:
-        field === "price" || field === "cost_price" ? Number(value) || 0 :
-        field === "stock" ? Number(value) || 0 :
-        value
-    };
+    const patch = { [field]: normalized };
 
-    debounceRow(`${id}:${field}`, () =>
-      enqueue(async () => {
-        try {
-          const updated = await apiPatch(id, patch, expectedUpdatedAt);
-          setParts((prev) => prev.map((p) => (p.id === id ? { ...p, ...updated } : p)));
-        } catch (e) {
-          if (e.status === 409) {
-            alert("Rækken er ændret siden sidst. Indlæser igen.");
-            pageCacheRef.current.clear();
-            fetchPage({ pageArg: page, query: debouncedSearch, loc: locationFilter });
-          } else {
-            alert(e.message || "Kunne ikke gemme ændring");
-            setParts((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: old } : p)));
-          }
-        }
-      })
-    , 600);
+    try {
+      const updated = await apiPatch(id, patch, expectedUpdatedAt);
+      setParts((prev) => prev.map((p) => (p.id === id ? { ...p, ...updated } : p)));
+      setHistory((h) => [{ id, field, old: before, newVal: normalized }, ...h.slice(0, 49)]);
+    } catch (e) {
+      if (e.status === 409) {
+        alert("Rækken er ændret siden sidst. Indlæser igen.");
+        pageCacheRef.current.clear();
+        fetchPage({ pageArg: page, query: debouncedSearch, loc: locationFilter });
+      } else {
+        alert(e.message || "Kunne ikke gemme ændring");
+        // rull tilbage i UI
+        setParts((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: before } : p)));
+      }
+    } finally {
+      // ryd snapshot for dette felt
+      originalRef.current.delete(key);
+    }
   };
 
   const [newRow, setNewRow] = useState(() => COLS.reduce((acc, k) => ({ ...acc, [k]: "" }), {}));
@@ -285,9 +272,7 @@ export default function SparePartsPage() {
       pageCacheRef.current.clear();
       setPage(1);
       fetchPage({ pageArg: 1, query: debouncedSearch, loc: locationFilter });
-    } catch (e) {
-      alert(e.message || "Kunne ikke oprette række");
-    }
+    } catch (e) { alert(e.message || "Kunne ikke oprette række"); }
   }
   async function handleDelete(id) {
     if (!window.confirm("Slet denne reservedel?")) return;
@@ -296,27 +281,51 @@ export default function SparePartsPage() {
       setParts((prev) => prev.filter((p) => p.id !== id));
       pageCacheRef.current.clear();
       fetchPage({ pageArg: page, query: debouncedSearch, loc: locationFilter });
-    } catch (e) {
-      alert(e.message || "Kunne ikke slette række");
-    }
+    } catch (e) { alert(e.message || "Kunne ikke slette række"); }
   }
 
   /** --- UI helpers --- */
   function cellEditor(row, field) {
     const v = row[field] ?? "";
     const num = field === "price" || field === "stock" || field === "cost_price";
+
+    const toVal = (ev) => (num ? (ev.target.value === "" ? "" : ev.target.valueAsNumber) : ev.target.value);
+    const key = `${row.id}:${field}`;
+
     return (
       <input
         type={num ? "number" : "text"}
         step={num ? "0.01" : undefined}
         value={String(v)}
-        onChange={(e) => saveChange(row.id, field, num ? (e.target.value === "" ? "" : e.target.valueAsNumber) : e.target.value)}
-        onFocus={() => setEditingIndex(row.id)}
-        onBlur={() => setEditingIndex(null)}
+        onChange={(e) => {
+          // kun lokal UI opdatering
+          const val = toVal(e);
+          setParts((prev) => prev.map((p) => (p.id === row.id ? { ...p, [field]: val } : p)));
+        }}
+        onFocus={() => {
+          setEditingIndex(row.id);
+          if (!originalRef.current.has(key)) {
+            originalRef.current.set(key, row[field]); // snapshot originalen ved start
+          }
+        }}
+        onBlur={(e) => {
+          const val = toVal(e);
+          saveField(row.id, field, val); // gem på blur
+          setEditingIndex(null);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            const val = toVal(e);
+            saveField(row.id, field, val); // gem på Enter
+            e.currentTarget.blur();        // luk editoren visuelt
+          }
+        }}
         style={{ ...inputStyle, width: "100%" }}
       />
     );
   }
+
   const shownCols = useMemo(() => {
     const arr = [];
     COLS.forEach((c) => { if (visibleCols[c]) arr.push(c); });
@@ -324,7 +333,6 @@ export default function SparePartsPage() {
     return arr;
   }, [visibleCols]);
 
-  // simple popover til kolonnevælger
   function ColumnPicker() {
     return (
       <div style={{ position: "relative" }}>
@@ -339,11 +347,7 @@ export default function SparePartsPage() {
           }}>
             {[...COLS, "updatedAt"].map((key) => (
               <label key={key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 4px", cursor: "pointer" }}>
-                <input
-                  type="checkbox"
-                  checked={!!visibleCols[key]}
-                  onChange={(e) => setVisibleCols((prev) => ({ ...prev, [key]: e.target.checked }))}
-                />
+                <input type="checkbox" checked={!!visibleCols[key]} onChange={(e) => setVisibleCols((prev) => ({ ...prev, [key]: e.target.checked }))} />
                 <span>{LABEL[key] || key}</span>
               </label>
             ))}
@@ -353,15 +357,11 @@ export default function SparePartsPage() {
     );
   }
 
-  // Søgbar lokations-dropdown
   function LocationFilter() {
     const filt = locationOptions.filter(l => l.toLowerCase().includes(locationQuery.toLowerCase()));
     return (
       <div style={{ position: "relative" }}>
-        <button
-          style={{ ...btnGhost, display: "flex", alignItems: "center", gap: 8 }}
-          onClick={() => setLocationOpen((o) => !o)}
-        >
+        <button style={{ ...btnGhost, display: "flex", alignItems: "center", gap: 8 }} onClick={() => setLocationOpen((o) => !o)}>
           Lokation: {locationFilter || "Alle"} <FaChevronDown style={{ fontSize: 12 }} />
         </button>
         {locationOpen && (
@@ -370,25 +370,15 @@ export default function SparePartsPage() {
             background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 10, width: 260,
             boxShadow: "0 10px 24px rgba(0,0,0,0.08)"
           }}>
-            <input
-              value={locationQuery}
-              onChange={(e) => setLocationQuery(e.target.value)}
-              placeholder="Søg lokation…"
-              style={{ ...inputStyle, width: "100%", marginBottom: 8 }}
-            />
+            <input value={locationQuery} onChange={(e) => setLocationQuery(e.target.value)} placeholder="Søg lokation…" style={{ ...inputStyle, width: "100%", marginBottom: 8 }} />
             <div style={{ maxHeight: 220, overflowY: "auto" }}>
-              <div
-                onClick={() => { setLocationFilter(""); setLocationOpen(false); setLocationQuery(""); }}
-                style={{ padding: "6px 8px", borderRadius: 6, cursor: "pointer", background: locationFilter === "" ? "#f1f5f9" : "transparent" }}
-              >
+              <div onClick={() => { setLocationFilter(""); setLocationOpen(false); setLocationQuery(""); }}
+                   style={{ padding: "6px 8px", borderRadius: 6, cursor: "pointer", background: locationFilter === "" ? "#f1f5f9" : "transparent" }}>
                 Alle
               </div>
               {filt.map((loc) => (
-                <div
-                  key={loc}
-                  onClick={() => { setLocationFilter(loc); setLocationOpen(false); setLocationQuery(""); }}
-                  style={{ padding: "6px 8px", borderRadius: 6, cursor: "pointer", background: locationFilter === loc ? "#f1f5f9" : "transparent" }}
-                >
+                <div key={loc} onClick={() => { setLocationFilter(loc); setLocationOpen(false); setLocationQuery(""); }}
+                     style={{ padding: "6px 8px", borderRadius: 6, cursor: "pointer", background: locationFilter === loc ? "#f1f5f9" : "transparent" }}>
                   {loc}
                 </div>
               ))}
@@ -406,12 +396,7 @@ export default function SparePartsPage() {
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
         <button onClick={() => navigate("/")} style={btnGhost}><FaHome /> Forside</button>
         <div style={{ flex: 1 }} />
-        <input
-          placeholder="Søg fx 'Samsung S20 skærm'…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ ...inputStyle, width: 380 }}
-        />
+        <input placeholder="Søg fx 'Samsung S20 skærm'…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ ...inputStyle, width: 380 }} />
         <LocationFilter />
         <ColumnPicker />
       </div>
@@ -438,11 +423,7 @@ export default function SparePartsPage() {
         </div>
       </div>
 
-      {problem && (
-        <div style={{ marginBottom: 12, padding: 10, borderRadius: 8, background: "#fee2e2", color: "#7f1d1d" }}>
-          {problem}
-        </div>
-      )}
+      {problem && <div style={{ marginBottom: 12, padding: 10, borderRadius: 8, background: "#fee2e2", color: "#7f1d1d" }}>{problem}</div>}
 
       {/* Tabel */}
       <div style={{ overflowX: "auto", border: "1px solid #e5e7eb", borderRadius: 10 }}>
@@ -451,14 +432,7 @@ export default function SparePartsPage() {
             <tr style={{ background: "#f8fafc" }}>
               <th style={{ textAlign: "left", padding: 8, width: 90 }}>ID</th>
               {shownCols.map((c) => (
-                <th
-                  key={c}
-                  style={{
-                    textAlign: "left",
-                    padding: 8,
-                    ...(c === "model" ? { width: "40%", minWidth: 260 } : {})
-                  }}
-                >
+                <th key={c} style={{ textAlign: "left", padding: 8, ...(c === "model" ? { width: "30%", minWidth: 260 } : {}) }}>
                   {LABEL[c]}
                 </th>
               ))}
@@ -467,7 +441,7 @@ export default function SparePartsPage() {
           </thead>
           <tbody>
             {/* Opret-ny række */}
-            <tr style={{ background: "#F0F7FF" /* markant farve */, borderBottom: "2px solid #e2e8f0" }}>
+            <tr style={{ background: "#F0F7FF", borderBottom: "2px solid #e2e8f0" }}>
               <td style={{ padding: 8, color: "#334155", fontWeight: 700 }}>Opret ny</td>
               {shownCols.map((c) => {
                 const num = c === "price" || c === "stock" || c === "cost_price";
@@ -517,15 +491,7 @@ export default function SparePartsPage() {
         </table>
       </div>
 
-      {/* Pagination knapper */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
-        <span style={chip}>Side {page} / {totalPages} {loading ? " • Indlæser…" : ""}</span>
-        <div style={{ flex: 1 }} />
-        <button disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} style={btnGhost}>Forrige</button>
-        <button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)} style={btnGhost}>Næste</button>
-      </div>
-
-      {/* Seneste ændringer (klient) */}
+      {/* Seneste ændringer */}
       <div style={{ marginTop: 16 }}>
         <div style={{ fontWeight: 700, marginBottom: 8 }}><FaHistory /> Seneste ændringer</div>
         {history.length === 0 ? (
