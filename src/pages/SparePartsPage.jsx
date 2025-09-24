@@ -138,8 +138,7 @@ export default function SparePartsPage() {
   const reqIdRef = useRef(0);
   const pageCacheRef = useRef(new Map());
 
-  // 👉 her gemmer vi originalværdier pr. felt, når brugeren starter med at redigere
-  // key = `${id}:${field}`  value = originalValue
+  // 👉 snapshot originalværdi pr. felt ved redigering
   const originalRef = useRef(new Map());
 
   function cacheKey(q, loc, limit, p) { return `${q}::${loc}::${limit}::${p}`; }
@@ -213,7 +212,6 @@ export default function SparePartsPage() {
     const key = `${id}:${field}`;
     const original = originalRef.current.get(key);
 
-    // hvis vi ikke har en original (edge-case), hent den fra nuværende parts
     const prevRow = parts.find((p) => p.id === id);
     const fallbackOriginal = prevRow ? prevRow[field] : undefined;
 
@@ -225,7 +223,6 @@ export default function SparePartsPage() {
       finalValue;
 
     if (String(normalized) === String(before ?? "")) {
-      // ingen reel ændring
       originalRef.current.delete(key);
       return;
     }
@@ -244,11 +241,9 @@ export default function SparePartsPage() {
         fetchPage({ pageArg: page, query: debouncedSearch, loc: locationFilter });
       } else {
         alert(e.message || "Kunne ikke gemme ændring");
-        // rull tilbage i UI
         setParts((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: before } : p)));
       }
     } finally {
-      // ryd snapshot for dette felt
       originalRef.current.delete(key);
     }
   };
@@ -298,27 +293,26 @@ export default function SparePartsPage() {
         step={num ? "0.01" : undefined}
         value={String(v)}
         onChange={(e) => {
-          // kun lokal UI opdatering
           const val = toVal(e);
           setParts((prev) => prev.map((p) => (p.id === row.id ? { ...p, [field]: val } : p)));
         }}
         onFocus={() => {
           setEditingIndex(row.id);
           if (!originalRef.current.has(key)) {
-            originalRef.current.set(key, row[field]); // snapshot originalen ved start
+            originalRef.current.set(key, row[field]);
           }
         }}
         onBlur={(e) => {
           const val = toVal(e);
-          saveField(row.id, field, val); // gem på blur
+          saveField(row.id, field, val);
           setEditingIndex(null);
         }}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault();
             const val = toVal(e);
-            saveField(row.id, field, val); // gem på Enter
-            e.currentTarget.blur();        // luk editoren visuelt
+            saveField(row.id, field, val);
+            e.currentTarget.blur();
           }
         }}
         style={{ ...inputStyle, width: "100%" }}
@@ -401,7 +395,7 @@ export default function SparePartsPage() {
         <ColumnPicker />
       </div>
 
-      {/* Info / pagination */}
+      {/* Info / pagination (TOP) */}
       <div style={{ marginBottom: 8, display: "flex", gap: 12, alignItems: "center" }}>
         <div style={chip}>{loading ? "Henter…" : `Viser ${parts.length}${unknownTotal ? "" : ` / ${total}`} rækker`}</div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
@@ -489,6 +483,37 @@ export default function SparePartsPage() {
             )}
           </tbody>
         </table>
+      </div>
+
+      {/* Pagination (BOTTOM) */}
+      <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", justifyContent: "flex-end" }}>
+        <button
+          style={btnGhost}
+          onClick={() => setPage((p) => Math.max(1, p - 1))}
+          disabled={page <= 1}
+        >
+          Forrige
+        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <label>Gå til side</label>
+          <input
+            style={{ ...inputStyle, width: 70 }}
+            type="number"
+            min={1}
+            max={totalPages}
+            value={page}
+            onChange={(e) => setPage(Math.max(1, Math.min(totalPages, parseInt(e.target.value || "1", 10))))}
+            onBlur={() => fetchPage({ pageArg: page, query: debouncedSearch, loc: locationFilter })}
+          />
+          <span style={chip}>af {totalPages}</span>
+        </div>
+        <button
+          style={btnGhost}
+          onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+          disabled={page >= totalPages}
+        >
+          Næste
+        </button>
       </div>
 
       {/* Seneste ændringer */}
