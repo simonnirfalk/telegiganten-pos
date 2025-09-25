@@ -646,6 +646,27 @@ export const api = {
     return res.json();
   },
 
+    /* -------- Bestillinger -------- */
+    getOrders: () =>
+      proxyFetch({ path: "/wp-json/telegiganten/v1/orders" }),
+
+    getOrderById: (order_id) =>
+      proxyFetch({ path: `/wp-json/telegiganten/v1/orders/${order_id}` }),
+
+    createOrder: (payload) =>
+      proxyFetch({
+        path: "/wp-json/telegiganten/v1/orders",
+        method: "POST",
+        body: payload,
+      }),
+
+    updateOrder: ({ order_id, fields }) =>
+      proxyFetch({
+        path: `/wp-json/telegiganten/v1/orders/${order_id}`,
+        method: "POST",
+        body: { fields },
+      }),
+
   /* ---------------------- SMS ---------------------- */
   sendSMS: ({ to, body, repair_id }) =>
     proxyFetch({
