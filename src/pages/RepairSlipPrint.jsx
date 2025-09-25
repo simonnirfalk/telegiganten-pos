@@ -261,6 +261,7 @@ export default function RepairSlipPrint() {
        <div>${order?.customer?.name || "-"}</div>
        <div>${order?.customer?.phone || "-"}</div>
        <div>${order?.customer?.email || "-"}</div>
+       <div><strong>Kontakt:</strong> ${order?.contact || "—"}</div>
 
       <div class="hr"></div>
       <div class="info">
