@@ -14,25 +14,21 @@ function normalizeEntities(obj) {
   } else if (Array.isArray(obj)) {
     return obj.map(normalizeEntities);
   } else if (obj && typeof obj === "object") {
-    return Object.fromEntries(
-      Object.entries(obj).map(([k, v]) => [k, normalizeEntities(v)])
-    );
+    return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, normalizeEntities(v)]));
   }
   return obj;
 }
 
 // ===== Konfiguration =====
 const WP_ORIGIN =
-  (typeof import.meta !== "undefined" && import.meta.env?.VITE_WP_ORIGIN) ||
-  "https://telegiganten.dk";
+  (typeof import.meta !== "undefined" && import.meta.env?.VITE_WP_ORIGIN) || "https://telegiganten.dk";
 
 // Normaliser for sammenligning (fjern trailing slash)
 const WP_ORIGIN_NORM = (WP_ORIGIN || "").replace(/\/+$/, "");
 
 // Vercel-proxy ligger på samme origin som appen; brug RELATIV sti
 const PROXY_URL =
-  (typeof import.meta !== "undefined" && import.meta.env?.VITE_PROXY_URL) ||
-  "/wp-json/tg/v1/proxy";
+  (typeof import.meta !== "undefined" && import.meta.env?.VITE_PROXY_URL) || "/wp-json/tg/v1/proxy";
 
 const WP_API_BASE =
   (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE) ||
@@ -102,7 +98,11 @@ async function httpJson(url, options = {}) {
   });
   const ct = res.headers.get("content-type") || "";
   const payload = ct.includes("application/json") ? await res.json() : await res.text();
-  if (!res.ok) throw new Error(`HTTP ${res.status} - ${typeof payload === "string" ? payload : JSON.stringify(payload)}`);
+  if (!res.ok) {
+    throw new Error(
+      `HTTP ${res.status} - ${typeof payload === "string" ? payload : JSON.stringify(payload)}`
+    );
+  }
   return payload;
 }
 
@@ -148,6 +148,7 @@ export async function proxyFetch({ path, method = "GET", query, body, headers = 
     }
     throw new Error(`Proxy fejl: ${res.status} - ${errText}`);
   }
+
   const data = ct.includes("application/json") ? await res.json() : await res.text();
   return normalizeEntities(data);
 }
@@ -272,11 +273,10 @@ export async function createRepairFromBooking(booking) {
  * ================================ */
 
 // Kan bruges fra andre steder:
-const env = (k) =>
-  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env[k]) || undefined;
+const env = (k) => (typeof import.meta !== "undefined" && import.meta.env && import.meta.env[k]) || undefined;
 
 // (legacy) GAS fallback beholdes til nødstilfælde
-const ENV_GAS_URL  = env("VITE_GAS_URL");
+const ENV_GAS_URL = env("VITE_GAS_URL");
 const ENV_GAS_EXEC = env("VITE_GAS_EXEC");
 const SPAREPARTS_MODE =
   env("VITE_SPAREPARTS_MODE") ||
@@ -286,7 +286,8 @@ const SPAREPARTS_MODE =
 
 // Base til GAS (kun fallback)
 const GAS_BASE_URL =
-  ENV_GAS_EXEC || ENV_GAS_URL ||
+  ENV_GAS_EXEC ||
+  ENV_GAS_URL ||
   (typeof window !== "undefined" && (window.__GAS_URL || window.__SPAREPARTS_GAS_URL)) ||
   "";
 
@@ -303,7 +304,7 @@ function normSparepart(obj) {
     category: obj.category ?? obj.Kategori ?? "",
     cost_price: obj.cost_price ?? obj.Kostpris ?? "",
     repair: obj.repair ?? obj.Reparation ?? "",
-    updatedAt: obj.updatedAt ?? obj.updated_at ?? obj.UpdatedAt ?? "", // <-- NY
+    updatedAt: obj.updatedAt ?? obj.updated_at ?? obj.UpdatedAt ?? "",
   };
 }
 
@@ -315,6 +316,7 @@ async function gasList({ offset = 0, limit = 400, search = "", lokation = "" } =
   const rows = Array.isArray(data?.rows) ? data.rows : [];
   return rows.map(normSparepart);
 }
+
 async function gasCreate(part) {
   const url = withQuery(GAS_BASE_URL, { action: "create" });
   const payload = {
@@ -331,6 +333,7 @@ async function gasCreate(part) {
   const data = await httpJson(url, { method: "POST", body: JSON.stringify(payload) });
   return normSparepart(data?.item || data || payload);
 }
+
 async function gasUpdate(id, patch) {
   const url = withQuery(GAS_BASE_URL, { action: "update" });
   const payload = {
@@ -347,6 +350,7 @@ async function gasUpdate(id, patch) {
   const data = await httpJson(url, { method: "POST", body: JSON.stringify(payload) });
   return normSparepart(data?.item || { id, ...patch });
 }
+
 async function gasDelete(id) {
   const url = withQuery(GAS_BASE_URL, { action: "delete", id });
   await httpJson(url, { method: "POST" });
@@ -360,8 +364,7 @@ async function wpListV2({ offset = 0, limit = 100, search = "", lokation = "" } 
     method: "GET",
     query: { offset, limit, search, lokation },
   });
-  // Kan være {items,total} eller bare array
-  const items = Array.isArray(data) ? data : (data?.items || []);
+  const items = Array.isArray(data) ? data : data?.items || [];
   return {
     items: items.map(normSparepart),
     total: typeof data?.total === "number" ? data.total : items.length,
@@ -418,7 +421,9 @@ async function primaryThenFallback(primaryFn, fallbackFn) {
 // Hent top-N populære modeller fra backend
 async function getPopularModelsTop(limit = 20) {
   const urlFromEnv =
-    (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_POPULAR_MODELS_URL) ||
+    (typeof import.meta !== "undefined" &&
+      import.meta.env &&
+      import.meta.env.VITE_POPULAR_MODELS_URL) ||
     (typeof window !== "undefined" && window.__POPULAR_MODELS_URL) ||
     null;
 
@@ -434,7 +439,6 @@ async function getPopularModelsTop(limit = 20) {
   if (Array.isArray(data)) return data;
   if (Array.isArray(data.items)) return data.items;
   if (Array.isArray(data.models)) return data.models;
-
   if (Array.isArray(data.ids)) return data.ids.map((id) => ({ id }));
   if (Array.isArray(data.titles)) return data.titles.map((title) => ({ title }));
   return [];
@@ -459,9 +463,9 @@ export const api = {
   // updateModel: send kun eksplicit det vi vil ændre
   updateModel: ({ model_id, fields }) => {
     const f = {};
-    if (fields?.model != null)  f.model  = String(fields.model).trim();
+    if (fields?.model != null) f.model = String(fields.model).trim();
     if (fields?.active != null) f.active = fields.active ? 1 : 0;
-    if (fields?.slug != null)   f.slug   = String(fields.slug).trim();
+    if (fields?.slug != null) f.slug = String(fields.slug).trim();
     if (fields?.brand_id != null) f.brand_id = Number(fields.brand_id) || 0;
 
     return proxyFetch({
@@ -501,12 +505,14 @@ export const api = {
   getTopModels: () => proxyFetch({ path: "/wp-json/telegiganten/v1/top-models" }),
 
   getPopularModelsTop: async (limit = 25) => {
+    // NOTE: POPULAR_MODELS_URL constant eksisterer, men din oprindelige logik brugte top-models.
+    // Vi bevarer original opførsel.
     const data = await proxyFetch({
       path: "/wp-json/telegiganten/v1/top-models",
       method: "GET",
     });
     const arr = Array.isArray(data) ? data : [];
-    return arr.slice(0, limit).map(m => ({
+    return arr.slice(0, limit).map((m) => ({
       id: Number(m.id),
       title: String(m.title || ""),
     }));
@@ -519,44 +525,113 @@ export const api = {
     }),
 
   createRepairTemplate: (data) =>
-    proxyFetch({ path: "/wp-json/telegiganten/v1/create-repair-template", method: "POST", body: data }),
+    proxyFetch({
+      path: "/wp-json/telegiganten/v1/create-repair-template",
+      method: "POST",
+      body: data,
+    }),
 
   updateRepair: (data) =>
-    proxyFetch({ path: "/wp-json/telegiganten/v1/update-repair", method: "POST", body: data }),
+    proxyFetch({
+      path: "/wp-json/telegiganten/v1/update-repair",
+      method: "POST",
+      body: data,
+    }),
 
   applyRepairChanges: (data) =>
-    proxyFetch({ path: "/wp-json/telegiganten/v1/apply-repair-changes", method: "POST", body: data }),
+    proxyFetch({
+      path: "/wp-json/telegiganten/v1/apply-repair-changes",
+      method: "POST",
+      body: data,
+    }),
 
+  // Legacy navn (beholdes for kompatibilitet)
   deleteRepairTemplate: (repair_id) =>
-    proxyFetch({ path: "/wp-json/telegiganten/v1/delete-repair", method: "POST", body: { repair_id } }),
+    proxyFetch({
+      path: "/wp-json/telegiganten/v1/delete-repair",
+      method: "POST",
+      body: { repair_id },
+    }),
 
   incrementModelUsage: (modelId) =>
-    proxyFetch({ path: "/wp-json/telegiganten/v1/increment-model-usage", method: "POST", body: { model_id: modelId } }),
+    proxyFetch({
+      path: "/wp-json/telegiganten/v1/increment-model-usage",
+      method: "POST",
+      body: { model_id: modelId },
+    }),
 
   /* ---------------------- Kunder ---------------------- */
   getCustomers: () => proxyFetch({ path: "/wp-json/telegiganten/v1/customers" }),
   getCustomersWithRepairs: () => proxyFetch({ path: "/wp-json/telegiganten/v1/customers-with-repairs" }),
 
   createCustomer: (data) =>
-    proxyFetch({ path: "/wp-json/telegiganten/v1/create-customer", method: "POST", body: data }),
+    proxyFetch({
+      path: "/wp-json/telegiganten/v1/create-customer",
+      method: "POST",
+      body: data,
+    }),
 
   updateCustomer: (data) =>
-    proxyFetch({ path: "/wp-json/telegiganten/v1/update-customer", method: "POST", body: data }),
+    proxyFetch({
+      path: "/wp-json/telegiganten/v1/update-customer",
+      method: "POST",
+      body: data,
+    }),
 
   getCustomerById: (id) => proxyFetch({ path: `/wp-json/telegiganten/v1/customer/${id}`, method: "GET" }),
 
   getCustomerByPhone: (phone) =>
-    proxyFetch({ path: "/wp-json/telegiganten/v1/customer-by-phone", method: "GET", query: { phone } }),
+    proxyFetch({
+      path: "/wp-json/telegiganten/v1/customer-by-phone",
+      method: "GET",
+      query: { phone },
+    }),
 
   /* ---------------------- Ordrer (tg_repair) ---------------------- */
   getRepairOrders: () => proxyFetch({ path: "/wp-json/telegiganten/v1/repair-orders" }),
 
-  createRepair: (data) => proxyFetch({ path: "/wp-json/telegiganten/v1/create-repair", method: "POST", body: data }),
+  createRepair: (data) =>
+    proxyFetch({
+      path: "/wp-json/telegiganten/v1/create-repair",
+      method: "POST",
+      body: data,
+    }),
 
-  createRepairOrder: (data) => proxyFetch({ path: "/wp-json/telegiganten/v1/create-repair", method: "POST", body: data }),
+  createRepairOrder: (data) =>
+    proxyFetch({
+      path: "/wp-json/telegiganten/v1/create-repair",
+      method: "POST",
+      body: data,
+    }),
 
   updateRepairWithHistory: (data) =>
-    proxyFetch({ path: "/wp-json/telegiganten/v1/update-repair-with-history", method: "POST", body: data }),
+    proxyFetch({
+      path: "/wp-json/telegiganten/v1/update-repair-with-history",
+      method: "POST",
+      body: data,
+    }),
+
+  // ✅ Den “rigtige” delete, som RepairHistory (og andre) kan bruge ensartet
+  deleteRepair: ({ repair_id }) => {
+    const id = Number(repair_id) || 0;
+    if (!id) throw new Error("deleteRepair: repair_id mangler/ugyldigt");
+    return proxyFetch({
+      path: "/wp-json/telegiganten/v1/delete-repair",
+      method: "POST",
+      body: { repair_id: id },
+    });
+  },
+
+  // ✅ Alias: hvis noget UI kalder deleteRepairWithHistory
+  deleteRepairWithHistory: ({ repair_id }) => {
+    const id = Number(repair_id) || 0;
+    if (!id) throw new Error("deleteRepairWithHistory: repair_id mangler/ugyldigt");
+    return proxyFetch({
+      path: "/wp-json/telegiganten/v1/delete-repair",
+      method: "POST",
+      body: { repair_id: id },
+    });
+  },
 
   getNextOrderId: async () => {
     const res = await proxyFetch({
@@ -564,9 +639,7 @@ export const api = {
       method: "POST",
       body: {},
     });
-    if (!res || typeof res.id === "undefined") {
-      throw new Error("Ugyldigt svar fra order-id/reserve");
-    }
+    if (!res || typeof res.id === "undefined") throw new Error("Ugyldigt svar fra order-id/reserve");
     return res.id;
   },
 
@@ -574,21 +647,13 @@ export const api = {
   getBookings: (args = {}) => fetchBookings(args),
 
   /* ---------------------- Spareparts (v2 + GAS fallback) ---------------------- */
-  // List med søgning/pagination – returnerer { items, total }
   async getSpareParts(params = {}) {
     if (SPAREPARTS_MODE === "wp") {
-      return primaryThenFallback(
-        () => wpListV2(params),
-        () => gasList(params)
-      );
+      return primaryThenFallback(() => wpListV2(params), () => gasList(params));
     }
-    return primaryThenFallback(
-      () => gasList(params),
-      () => wpListV2(params)
-    );
+    return primaryThenFallback(() => gasList(params), () => wpListV2(params));
   },
 
-  // Create
   createSparePart: (part) => {
     if (SPAREPARTS_MODE === "wp") {
       return primaryThenFallback(() => wpCreateV2(part), () => gasCreate(part));
@@ -596,21 +661,13 @@ export const api = {
     return primaryThenFallback(() => gasCreate(part), () => wpCreateV2(part));
   },
 
-  // Update (PATCH v2 med expectedUpdatedAt — send den med hvis du har den)
   updateSparePart: (id, patch, expectedUpdatedAt = null) => {
     if (SPAREPARTS_MODE === "wp") {
-      return primaryThenFallback(
-        () => wpPatchV2(id, patch, expectedUpdatedAt),
-        () => gasUpdate(id, patch)
-      );
+      return primaryThenFallback(() => wpPatchV2(id, patch, expectedUpdatedAt), () => gasUpdate(id, patch));
     }
-    return primaryThenFallback(
-      () => gasUpdate(id, patch),
-      () => wpPatchV2(id, patch, expectedUpdatedAt)
-    );
+    return primaryThenFallback(() => gasUpdate(id, patch), () => wpPatchV2(id, patch, expectedUpdatedAt));
   },
 
-  // Delete
   deleteSparePart: (id) => {
     if (SPAREPARTS_MODE === "wp") {
       return primaryThenFallback(() => wpDeleteV2(id), () => gasDelete(id));
@@ -630,11 +687,13 @@ export const api = {
     const form = new FormData();
     form.append("type", type);
     form.append("file", file);
+
     const res = await fetch(`${WP_API_BASE}/import`, {
       method: "POST",
       credentials: "omit",
       body: form,
     });
+
     if (!res.ok) {
       let msg = `Serverfejl (${res.status})`;
       try {
@@ -643,29 +702,28 @@ export const api = {
       } catch {}
       throw new Error(msg);
     }
+
     return res.json();
   },
 
-    /* -------- Bestillinger -------- */
-    getOrders: () =>
-      proxyFetch({ path: "/wp-json/telegiganten/v1/orders" }),
+  /* -------- Bestillinger -------- */
+  getOrders: () => proxyFetch({ path: "/wp-json/telegiganten/v1/orders" }),
 
-    getOrderById: (order_id) =>
-      proxyFetch({ path: `/wp-json/telegiganten/v1/orders/${order_id}` }),
+  getOrderById: (order_id) => proxyFetch({ path: `/wp-json/telegiganten/v1/orders/${order_id}` }),
 
-    createOrder: (payload) =>
-      proxyFetch({
-        path: "/wp-json/telegiganten/v1/orders",
-        method: "POST",
-        body: payload,
-      }),
+  createOrder: (payload) =>
+    proxyFetch({
+      path: "/wp-json/telegiganten/v1/orders",
+      method: "POST",
+      body: payload,
+    }),
 
-    updateOrder: ({ order_id, fields }) =>
-      proxyFetch({
-        path: `/wp-json/telegiganten/v1/orders/${order_id}`,
-        method: "POST",
-        body: { fields },
-      }),
+  updateOrder: ({ order_id, fields }) =>
+    proxyFetch({
+      path: `/wp-json/telegiganten/v1/orders/${order_id}`,
+      method: "POST",
+      body: { fields },
+    }),
 
   /* ---------------------- SMS ---------------------- */
   sendSMS: ({ to, body, repair_id }) =>

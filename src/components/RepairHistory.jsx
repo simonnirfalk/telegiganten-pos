@@ -1,54 +1,9 @@
 // src/components/RepairHistory.jsx
 import React, { useEffect, useRef, useState, useMemo } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { FaTimes } from "react-icons/fa";
-import { api } from "../data/apiClient";
+import { api, proxyFetch } from "../data/apiClient";
 
-/* ---------------- Badge for reservedel ---------------- */
-function PartBadge({ meta, part }) {
-  const p = meta || part;
-  if (!p) return null;
-  const id = p.id ?? p.ID ?? p.spare_part_id ?? null;
-  const model = p.model ?? p.spare_part_model ?? "";
-  const location = p.location ?? p.spare_part_location ?? "";
-  const stock = p.stock ?? p.spare_part_stock ?? "";
-  const category = p.category ?? p.spare_part_category ?? "";
-  const repair = p.repair ?? p.spare_part_repair ?? "";
-
-  const chip = (text) => (
-    <span
-      style={{
-        display: "inline-block",
-        padding: "2px 6px",
-        borderRadius: 6,
-        border: "1px solid #e5e7eb",
-        background: "#f8fafc",
-        fontSize: 12,
-        marginRight: 6,
-        marginBottom: 4,
-      }}
-    >
-      {text}
-    </span>
-  );
-
-  return (
-    <div style={{ marginTop: 6 }}>
-      {model && chip(model)}
-      {location && chip(location)}
-      {(stock ?? "") !== "" && chip(`Lager: ${stock}`)}
-      {category && chip(category)}
-      {repair && chip(repair)}
-      {id && (
-        <span style={{ marginLeft: 8, fontSize: 12, color: "#6b7280" }}>
-          (del-ID: {id})
-        </span>
-      )}
-    </div>
-  );
-}
-
-/* ---------------- Helpers ---------------- */
 function formatDateTime(iso) {
   if (!iso) return "—";
   try {
@@ -65,70 +20,15 @@ const PAYMENT_OPTIONS = [
   { value: "garanti", label: "Garanti (ingen betaling)" },
 ];
 
-const STATUS_OPTIONS = ["under reparation", "klar til afhentning", "afsluttet", "annulleret"].map(
-  (s) => ({ value: s, label: s })
-);
+const STATUS_OPTIONS = ["under reparation", "klar til afhentning", "afsluttet", "annulleret"].map((s) => ({
+  value: s,
+  label: s,
+}));
 
-const sum = (arr, key) => (arr || []).reduce((acc, it) => acc + (Number(it?.[key]) || 0), 0);
-const safeParseJSON = (s) => {
-  if (typeof s !== "string") return null;
-  try {
-    return JSON.parse(s);
-  } catch {
-    return null;
-  }
-};
-
-/** Læs linjer i *alle* kendte former */
-function extractLinesFromAny(r) {
-  if (!r) return { lines: [], fromMeta: false };
-
-  // 1) direkte fra props (syntetisk samlet ordre)
-  if (Array.isArray(r.lines) && r.lines.length) {
-    const map = r.lines.map((ln) => ({
-      device: ln.device || r.model || r.device || "",
-      repair: ln.repair || ln.title || "",
-      price: Number(ln.price || 0),
-      time: Number(ln.time || 0),
-      part: ln.part || ln.meta || null,
-      source_id: ln.source_id ?? ln.id ?? null,
-    }));
-    return { lines: map, fromMeta: true };
-  }
-
-  // 2) WP meta som JSON-streng
-  const metaJson = r.meta_json || r.meta || r._meta || null;
-  const parsed = typeof metaJson === "string" ? safeParseJSON(metaJson) : metaJson;
-  const metaLines = parsed?.lines || parsed?.repairs || null;
-
-  if (Array.isArray(metaLines) && metaLines.length) {
-    return {
-      lines: metaLines.map((ln) => ({
-        device: ln.device || ln.model || r.model || r.device || "",
-        repair: ln.repair || ln.title || "",
-        price: Number(ln.price || 0),
-        time: Number(ln.time || 0),
-        part: ln.part || ln.meta || null,
-        source_id: ln.id ?? ln.source_id ?? null,
-      })),
-      fromMeta: true,
-    };
-  }
-
-  // 3) enkeltlinje-faldback
-  const single = {
-    device: r.model || r.device || "",
-    repair: r.repair || r.title || r.repair_title || "",
-    price: Number(r.price || r.amount || 0),
-    time: Number(r.time || r.duration || 0),
-    part: r.part || null,
-    source_id: r.id ?? r.repair_id ?? r.post_id ?? null,
-  };
-
-  return { lines: [single], fromMeta: false };
+function sum(arr, key) {
+  return (arr || []).reduce((acc, it) => acc + (Number(it?.[key]) || 0), 0);
 }
 
-/** Mapper UI-felter → WP meta keys */
 function mapPriceTime(fields = {}) {
   const f = { ...fields };
   if (Object.prototype.hasOwnProperty.call(f, "price")) {
@@ -142,23 +42,31 @@ function mapPriceTime(fields = {}) {
   return f;
 }
 
-/* Normaliser telefon til DK-format (Twilio kræver E.164) */
-function normalizePhoneLocalOrDK(phone) {
-  const digits = String(phone || "").replace(/\D+/g, "");
-  if (!digits) return "";
-  if (digits.length === 8) return `+45${digits}`;
-  if (digits.length >= 10) return `+${digits.replace(/^0+/, "")}`;
-  return phone;
-}
-
-/* ---------------- Component ---------------- */
 export default function RepairHistory({ repair, onClose, onAfterSave }) {
   const overlayRef = useRef(null);
-  const navigate = useNavigate();
 
-  const { lines, fromMeta } = useMemo(() => extractLinesFromAny(repair), [repair]);
+  const initialLines = useMemo(() => {
+    const arr = Array.isArray(repair?.lines) ? repair.lines : [];
+    return arr.map((ln, idx) => ({
+      idx,
+      device: ln.device || "",
+      repair: ln.repair || "",
+      price: Number(ln.price || 0),
+      time: Number(ln.time || 0),
+      source_id: ln.source_id ?? null,
+      model_id: Number(ln.model_id || 0) || 0,
+      _dirty: false,
+      _new: false,
+    }));
+  }, [repair]);
 
-  // top-level state
+  const fallbackModelId = useMemo(() => {
+    const fromOrder = Number(repair?.model_id || 0) || 0;
+    if (fromOrder) return fromOrder;
+    const first = initialLines.find((x) => Number(x.model_id || 0) > 0);
+    return Number(first?.model_id || 0) || 0;
+  }, [repair?.model_id, initialLines]);
+
   const [edited, setEdited] = useState(() => ({
     customer: repair.customer || "",
     phone: repair.phone || "",
@@ -167,50 +75,18 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
     note: repair.note || "",
     status: (repair.status || "").toLowerCase(),
     payment_type: (repair.payment_type || "").toLowerCase() || "efter",
-    payment_total: Number(repair.payment_total || 0) || (fromMeta ? sum(lines, "price") : 0),
+    payment_total: Number(repair.payment_total || 0) || sum(initialLines, "price"),
     deposit_amount: Number(repair.deposit_amount || 0) || 0,
     remaining_amount: Number(repair.remaining_amount || 0) || 0,
   }));
 
+  const [editableLines, setEditableLines] = useState(initialLines);
+
   useEffect(() => {
-    if (fromMeta && !edited.payment_total) {
-      setEdited((prev) => ({ ...prev, payment_total: sum(lines, "price") }));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fromMeta, lines]);
+    setEditableLines(initialLines);
+  }, [initialLines]);
 
   const handleChange = (key, val) => setEdited((e) => ({ ...e, [key]: val }));
-
-  // linjer
-  const [editableLines, setEditableLines] = useState(() =>
-    (lines || []).map((ln, idx) => ({
-      idx,
-      device: ln.device || "",
-      repair: ln.repair || "",
-      price: Number(ln.price || 0),
-      time: Number(ln.time || 0),
-      part: ln.part || ln.meta || null,
-      source_id: ln.source_id ?? ln.id ?? null,
-      _dirty: false,
-      _new: false,
-    }))
-  );
-
-  useEffect(() => {
-    setEditableLines(
-      (lines || []).map((ln, idx) => ({
-        idx,
-        device: ln.device || "",
-        repair: ln.repair || "",
-        price: Number(ln.price || 0),
-        time: Number(ln.time || 0),
-        part: ln.part || ln.meta || null,
-        source_id: ln.source_id ?? ln.id ?? null,
-        _dirty: false,
-        _new: false,
-      }))
-    );
-  }, [lines]);
 
   const setLineField = (idx, field, value) => {
     setEditableLines((prev) =>
@@ -240,8 +116,8 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
           repair: "",
           price: 0,
           time: 0,
-          part: null,
           source_id: null,
+          model_id: fallbackModelId, // arver model_id
           _dirty: true,
           _new: true,
         },
@@ -249,7 +125,7 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
     });
   }
 
-  // 🗑️ Slet en linje (med bekræftelse) - NU MED HÅRD FEJL-CHECK
+  // ✅ HARD delete via /delete-repair (så linjen reelt forsvinder)
   async function requestDeleteLine(line) {
     if (!line) return;
     const ok = window.confirm("Er du sikker på at du vil slette?");
@@ -266,29 +142,20 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
     try {
       const id = Number(line.source_id);
 
-      // Kald delete endpoint
-      let res = null;
-      if (api.deleteRepairWithHistory) {
-        res = await api.deleteRepairWithHistory({ repair_id: id });
-      } else if (api.deleteRepair) {
-        res = await api.deleteRepair({ repair_id: id });
-      } else {
-        // fallback: markér annulleret
-        res = await api.updateRepairWithHistory?.({
-          repair_id: id,
-          fields: { status: "annulleret" },
-          change_note: "Linje annulleret via RepairHistory",
-        });
-      }
+      // Brug proxyFetch, som vi ved virker i dit setup (CSP)
+      const res = api.deleteRepair
+        ? await api.deleteRepair({ repair_id: id })
+        : await proxyFetch({
+            path: "/wp-json/telegiganten/v1/delete-repair",
+            method: "POST",
+            body: { repair_id: id },
+          });
 
-      // 🔥 HARD CHECK: hvis API ikke svarer “deleted”, så stopper vi her
-      // (ellers får vi silent fail og linjen dukker op igen)
-      if (api.deleteRepairWithHistory || api.deleteRepair) {
-        if (!res || res.status !== "deleted") {
-          throw new Error(
-            `Slet mislykkedes (API). Forventede {status:"deleted"} men fik: ${JSON.stringify(res)}`
-          );
-        }
+
+      if (!res || res.status !== "deleted") {
+        throw new Error(
+          `Slet mislykkedes. Forventede {status:"deleted"} men fik: ${JSON.stringify(res)}`
+        );
       }
 
       // Fjern fra UI
@@ -296,7 +163,7 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
         prev.filter((l) => l.idx !== line.idx).map((l, i) => ({ ...l, idx: i }))
       );
 
-      // 🔁 Refresh parent list med det samme (så listen og totals opdaterer)
+      // 🔁 Opdater listen bagved (så pris/tid ændrer sig)
       await Promise.resolve(onAfterSave?.());
     } catch (e) {
       console.error(e);
@@ -304,7 +171,6 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
     }
   }
 
-  // totaler
   const totalsFromEdits = useMemo(
     () => ({
       price: (editableLines || []).reduce((s, l) => s + (Number(l.price) || 0), 0),
@@ -313,46 +179,15 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
     [editableLines]
   );
 
-  // ændrede topfelter
-  const changedFields = useMemo(() => {
-    const out = {};
-    const keys = [
-      "phone",
-      "contact",
-      "password",
-      "note",
-      "status",
-      "payment_type",
-      "payment_total",
-      "deposit_amount",
-      "remaining_amount",
-    ];
-    for (const k of keys) {
-      const v = edited[k];
-      const orig = repair[k];
-      const nv =
-        k === "payment_total" || k === "deposit_amount" || k === "remaining_amount"
-          ? Number(v || 0)
-          : v;
-      const ov =
-        k === "payment_total" || k === "deposit_amount" || k === "remaining_amount"
-          ? Number(orig || 0)
-          : orig;
-      if ((nv ?? "") !== (ov ?? "")) out[k] = nv;
-    }
-    return out;
-  }, [edited, repair]);
-
   const dirtyLines = useMemo(() => {
-    if (!fromMeta) return [];
     return editableLines.filter((ln) => ln._dirty && !!ln.source_id);
-  }, [fromMeta, editableLines]);
-
-  const newLinesForCreate = useMemo(() => {
-    return editableLines.filter((l) => !l.source_id && (l.device || l.repair || l.price || l.time));
   }, [editableLines]);
 
-  const noteChanged = useMemo(() => (edited.note ?? "") !== (repair.note ?? ""), [edited.note, repair.note]);
+  const newLinesForCreate = useMemo(() => {
+    return editableLines.filter(
+      (l) => !l.source_id && (l.device || l.repair || l.price || l.time)
+    );
+  }, [editableLines]);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -372,24 +207,16 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
   }, [repair?.id, editableLines]);
 
   const handleSave = async () => {
-    const hasTop = Object.keys(changedFields).length > 0;
-    const hasLines = dirtyLines.length > 0;
-    const hasNote = noteChanged;
-
-    if (!hasTop && !hasLines && !hasNote && newLinesForCreate.length === 0) {
-      onClose?.();
-      return;
-    }
-
     setSaving(true);
     setError("");
 
     try {
-      // 0) Opret nye linjer
+      // 0) Opret NYE linjer
       for (const ln of newLinesForCreate) {
+        const model_id = Number(ln.model_id || repair.model_id || fallbackModelId || 0) || 0;
         const fields = {
           title: String(ln.repair || "").trim(),
-          model_id: Number(repair.model_id || ln.model_id || 0) || 0,
+          model_id,
           order_id: repair.order_id,
           device: ln.device || "",
           repair: ln.repair || "",
@@ -401,7 +228,7 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
         };
 
         if (!fields.title || !fields.model_id) {
-          throw new Error("Kan ikke oprette linje: title eller model_id mangler.");
+          throw new Error("Kan ikke oprette linje: 'title' eller 'model_id' mangler. (API-krav)");
         }
 
         const created = api.createRepairWithHistory
@@ -411,7 +238,9 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
         const newId = created?.repair_id || created?.id || created?.post_id || created?.ID || null;
 
         setEditableLines((prev) =>
-          prev.map((x) => (x.idx === ln.idx ? { ...x, source_id: newId, _new: false, _dirty: false } : x))
+          prev.map((x) =>
+            x.idx === ln.idx ? { ...x, source_id: newId ? Number(newId) : null, _new: false, _dirty: false } : x
+          )
         );
       }
 
@@ -430,21 +259,24 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
       }
 
       // 2) Topfelter
-      if (primaryRepairId && Object.keys(changedFields).length) {
-        const top = { ...changedFields };
-
-        if (Object.prototype.hasOwnProperty.call(top, "phone")) {
-          top.phone = normalizePhoneLocalOrDK(top.phone);
-        }
-
+      if (primaryRepairId) {
         await api.updateRepairWithHistory({
           repair_id: primaryRepairId,
-          fields: top,
+          fields: {
+            payment_type: String(edited.payment_type || "efter").toLowerCase(),
+            payment_total: Number(edited.payment_total || 0),
+            deposit_amount: Number(edited.deposit_amount || 0),
+            remaining_amount: Number(edited.remaining_amount || 0),
+            phone: edited.phone ?? "",
+            contact: edited.contact ?? "",
+            password: edited.password ?? "",
+            note: edited.note ?? "",
+          },
           change_note: "Topfelter opdateret via RepairHistory",
         });
       }
 
-      // 3) Status broadcast til alle
+      // 3) Status broadcast til alle (stadig relevant)
       const statusVal = String(edited.status || "").toLowerCase();
       for (const id of allRepairIds) {
         await api.updateRepairWithHistory({
@@ -485,11 +317,11 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
           <div>
             <h2 style={{ margin: 0 }}>
               Redigér reparation – Ordre-ID #{repair.order_id}
-              {repair.id ? (
-                <span style={{ fontSize: "0.8rem", color: "#666" }}> (post #{repair.id})</span>
-              ) : null}
+              {repair.id ? <span style={{ fontSize: "0.8rem", color: "#666" }}> (post #{repair.id})</span> : null}
             </h2>
-            <div style={{ fontSize: "0.85rem", opacity: 0.9 }}>Oprettet: {formatDateTime(repair.created_at)}</div>
+            <div style={{ fontSize: "0.85rem", opacity: 0.9 }}>
+              Oprettet: {formatDateTime(repair.created_at)}
+            </div>
           </div>
           <button onClick={onClose} style={styles.close} title="Luk">
             <FaTimes />
@@ -516,7 +348,12 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
             <label style={{ marginBottom: 6 }}>
               <strong>Telefon:</strong>
             </label>
-            <input type="text" value={edited.phone ?? ""} onChange={(e) => handleChange("phone", e.target.value)} style={styles.input} />
+            <input
+              type="text"
+              value={edited.phone ?? ""}
+              onChange={(e) => handleChange("phone", e.target.value)}
+              style={styles.input}
+            />
           </div>
 
           <div style={styles.inputGroup}>
@@ -558,22 +395,51 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
                       width: "100%",
                     }}
                   >
-                    <input style={styles.input} value={ln.device} onChange={(e) => setLineField(ln.idx, "device", e.target.value)} placeholder="Model / enhed" />
-                    <input style={styles.input} value={ln.repair} onChange={(e) => setLineField(ln.idx, "repair", e.target.value)} placeholder="Reparation" />
-                    <input style={styles.input} type="text" inputMode="numeric" value={String(ln.price)} onChange={(e) => setLineField(ln.idx, "price", e.target.value)} placeholder="Pris" />
-                    <input style={styles.input} type="text" inputMode="numeric" value={String(ln.time)} onChange={(e) => setLineField(ln.idx, "time", e.target.value)} placeholder="Min." />
+                    <input
+                      style={styles.input}
+                      value={ln.device}
+                      onChange={(e) => setLineField(ln.idx, "device", e.target.value)}
+                      placeholder="Model / enhed"
+                    />
+                    <input
+                      style={styles.input}
+                      value={ln.repair}
+                      onChange={(e) => setLineField(ln.idx, "repair", e.target.value)}
+                      placeholder="Reparation"
+                    />
+                    <input
+                      style={styles.input}
+                      type="text"
+                      inputMode="numeric"
+                      value={String(ln.price)}
+                      onChange={(e) => setLineField(ln.idx, "price", e.target.value)}
+                      placeholder="Pris"
+                    />
+                    <input
+                      style={styles.input}
+                      type="text"
+                      inputMode="numeric"
+                      value={String(ln.time)}
+                      onChange={(e) => setLineField(ln.idx, "time", e.target.value)}
+                      placeholder="Min."
+                    />
                   </div>
 
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
                     <div style={{ fontSize: 12, color: "#6b7280" }}>
-                      <PartBadge meta={ln.part} />
+                      model_id: {Number(ln.model_id || fallbackModelId || 0) || "—"}
                     </div>
-
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <button onClick={() => requestDeleteLine(ln)} style={{ ...styles.cancel, padding: "6px 10px" }} title="Slet linje">
+                      <button
+                        onClick={() => requestDeleteLine(ln)}
+                        style={{ ...styles.cancel, padding: "6px 10px" }}
+                        title="Slet linje"
+                      >
                         Slet
                       </button>
-                      <div style={{ fontSize: 12, color: "#6b7280" }}>{ln.source_id ? `#${ln.source_id}` : "—"}</div>
+                      <div style={{ fontSize: 12, color: "#6b7280" }}>
+                        {ln.source_id ? `#${ln.source_id}` : "—"}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -593,7 +459,11 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
             <label style={{ marginBottom: 6 }}>
               <strong>Betaling:</strong>
             </label>
-            <select value={edited.payment_type} onChange={(e) => handleChange("payment_type", e.target.value)} style={{ ...styles.input, appearance: "auto" }}>
+            <select
+              value={edited.payment_type}
+              onChange={(e) => handleChange("payment_type", e.target.value)}
+              style={{ ...styles.input, appearance: "auto" }}
+            >
               {PAYMENT_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}
@@ -606,7 +476,11 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
             <label style={{ marginBottom: 6 }}>
               <strong>Status:</strong>
             </label>
-            <select value={edited.status || ""} onChange={(e) => handleChange("status", e.target.value)} style={{ ...styles.input, appearance: "auto" }}>
+            <select
+              value={edited.status || ""}
+              onChange={(e) => handleChange("status", e.target.value)}
+              style={{ ...styles.input, appearance: "auto" }}
+            >
               {STATUS_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}
@@ -620,13 +494,23 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
               <label style={{ marginBottom: 6 }}>
                 <strong>Kontakt:</strong>
               </label>
-              <input type="text" value={edited.contact ?? ""} onChange={(e) => handleChange("contact", e.target.value)} style={styles.input} />
+              <input
+                type="text"
+                value={edited.contact ?? ""}
+                onChange={(e) => handleChange("contact", e.target.value)}
+                style={styles.input}
+              />
             </div>
             <div>
               <label style={{ marginBottom: 6 }}>
                 <strong>Adgangskode:</strong>
               </label>
-              <input type="text" value={edited.password ?? ""} onChange={(e) => handleChange("password", e.target.value)} style={styles.input} />
+              <input
+                type="text"
+                value={edited.password ?? ""}
+                onChange={(e) => handleChange("password", e.target.value)}
+                style={styles.input}
+              />
             </div>
           </div>
 
@@ -634,7 +518,12 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
             <label style={{ marginBottom: 6 }}>
               <strong>Note:</strong>
             </label>
-            <textarea rows={3} value={edited.note ?? ""} onChange={(e) => handleChange("note", e.target.value)} style={{ ...styles.input, resize: "vertical" }} />
+            <textarea
+              rows={3}
+              value={edited.note ?? ""}
+              onChange={(e) => handleChange("note", e.target.value)}
+              style={{ ...styles.input, resize: "vertical" }}
+            />
           </div>
 
           <div style={styles.footer}>
@@ -670,7 +559,13 @@ const styles = {
     padding: "18px 18px 14px",
     boxShadow: "0 20px 60px rgba(0,0,0,.2)",
   },
-  header: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 10 },
+  header: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 10,
+  },
   close: {
     border: "none",
     background: "#eef2ff",
@@ -683,8 +578,22 @@ const styles = {
   body: { display: "grid", gap: 12 },
   inputGroup: { display: "grid", gap: 6 },
   inputRow2: { display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" },
-  input: { width: "100%", padding: "10px 12px", border: "1px solid #e5e7eb", borderRadius: 10, fontSize: 14, background: "#fff" },
-  readonlyBox: { width: "100%", padding: "10px 12px", border: "1px solid #e5e7eb", borderRadius: 10, fontSize: 14, background: "#f9fafb" },
+  input: {
+    width: "100%",
+    padding: "10px 12px",
+    border: "1px solid #e5e7eb",
+    borderRadius: 10,
+    fontSize: 14,
+    background: "#fff",
+  },
+  readonlyBox: {
+    width: "100%",
+    padding: "10px 12px",
+    border: "1px solid #e5e7eb",
+    borderRadius: 10,
+    fontSize: 14,
+    background: "#f9fafb",
+  },
   linkBox: {
     display: "inline-block",
     padding: "10px 12px",
@@ -695,10 +604,45 @@ const styles = {
     color: "#0c4a6e",
     fontWeight: 700,
   },
-  lineCard: { padding: 8, border: "1px solid #e5e7eb", borderRadius: 12, background: "#fff" },
+  lineCard: {
+    padding: 8,
+    border: "1px solid #e5e7eb",
+    borderRadius: 12,
+    background: "#fff",
+  },
   footer: { display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 },
-  cancel: { background: "#fff", color: "#374151", border: "1px solid #d1d5db", borderRadius: 10, padding: "10px 14px", cursor: "pointer", fontWeight: 700 },
-  save: { background: "#2166AC", color: "#fff", border: "none", borderRadius: 10, padding: "10px 14px", cursor: "pointer", fontWeight: 700 },
-  secondary: { background: "#f0f9ff", color: "#0369a1", border: "1px solid #bae6fd", borderRadius: 10, padding: "10px 14px", cursor: "pointer", fontWeight: 700 },
-  errorBox: { background: "#fee2e2", color: "#991b1b", padding: "8px 10px", borderRadius: 10, marginBottom: 10 },
+  cancel: {
+    background: "#fff",
+    color: "#374151",
+    border: "1px solid #d1d5db",
+    borderRadius: 10,
+    padding: "10px 14px",
+    cursor: "pointer",
+    fontWeight: 700,
+  },
+  save: {
+    background: "#2166AC",
+    color: "#fff",
+    border: "none",
+    borderRadius: 10,
+    padding: "10px 14px",
+    cursor: "pointer",
+    fontWeight: 700,
+  },
+  secondary: {
+    background: "#f0f9ff",
+    color: "#0369a1",
+    border: "1px solid #bae6fd",
+    borderRadius: 10,
+    padding: "10px 14px",
+    cursor: "pointer",
+    fontWeight: 700,
+  },
+  errorBox: {
+    background: "#fee2e2",
+    color: "#991b1b",
+    padding: "8px 10px",
+    borderRadius: 10,
+    marginBottom: 10,
+  },
 };
