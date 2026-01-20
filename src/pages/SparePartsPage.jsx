@@ -223,7 +223,7 @@ export default function SparePartsPage() {
   const originalRef = useRef(new Map());
   const pollRef = useRef(null);
 
-  // 🔽 til fixed-dropdown position
+  // 🔽 fixed-dropdown refs/pos
   const locBtnRef = useRef(null);
   const locMenuRef = useRef(null);
   const [locMenuPos, setLocMenuPos] = useState({ top: 0, left: 0, width: 260 });
@@ -394,17 +394,13 @@ export default function SparePartsPage() {
     };
   }, [editingIndex, page, debouncedSearch, locationFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** --- FIX: dropdown ovenpå alt (position: fixed) --- */
+  /** --- fixed dropdown pos --- */
   function computeLocMenuPos() {
     const btn = locBtnRef.current;
     if (!btn) return;
     const rect = btn.getBoundingClientRect();
     const width = Math.max(260, rect.width);
-    // højre-justér menuen til knappen
-    const left = Math.min(
-      window.innerWidth - width - 8,
-      rect.right - width
-    );
+    const left = Math.min(window.innerWidth - width - 8, rect.right - width);
     const top = Math.min(window.innerHeight - 16, rect.bottom + 8);
     setLocMenuPos({ top, left: Math.max(8, left), width });
   }
@@ -415,7 +411,13 @@ export default function SparePartsPage() {
     computeLocMenuPos();
 
     const onResize = () => computeLocMenuPos();
-    const onScroll = () => computeLocMenuPos();
+
+    // ✅ FIX: ignorér scroll der kommer fra dropdown-menuen selv
+    const onScroll = (e) => {
+      const menu = locMenuRef.current;
+      if (menu && e?.target && menu.contains(e.target)) return; // ignore internal menu scroll
+      computeLocMenuPos();
+    };
 
     const onKeyDown = (e) => {
       if (e.key === "Escape") {
@@ -438,7 +440,7 @@ export default function SparePartsPage() {
     };
 
     window.addEventListener("resize", onResize);
-    // capture scroll events (også i scroll-containere)
+    // capture scroll events (men vi filtrerer menu-scroll fra)
     window.addEventListener("scroll", onScroll, true);
     window.addEventListener("keydown", onKeyDown);
     document.addEventListener("mousedown", onMouseDown);
@@ -557,10 +559,15 @@ export default function SparePartsPage() {
 
   function cellEditor(row, field) {
     const v = row[field] ?? "";
-    const num = field === "price" || field === "stock" || field === "cost_price";
+    const num =
+      field === "price" || field === "stock" || field === "cost_price";
 
     const toVal = (ev) =>
-      num ? (ev.target.value === "" ? "" : ev.target.valueAsNumber) : ev.target.value;
+      num
+        ? ev.target.value === ""
+          ? ""
+          : ev.target.valueAsNumber
+        : ev.target.value;
 
     const key = `${row.id}:${field}`;
 
@@ -577,7 +584,8 @@ export default function SparePartsPage() {
         }}
         onFocus={() => {
           setEditingIndex(row.id);
-          if (!originalRef.current.has(key)) originalRef.current.set(key, row[field]);
+          if (!originalRef.current.has(key))
+            originalRef.current.set(key, row[field]);
         }}
         onBlur={(e) => {
           const val = toVal(e);
@@ -646,7 +654,10 @@ export default function SparePartsPage() {
                   type="checkbox"
                   checked={!!visibleCols[key]}
                   onChange={(e) =>
-                    setVisibleCols((prev) => ({ ...prev, [key]: e.target.checked }))
+                    setVisibleCols((prev) => ({
+                      ...prev,
+                      [key]: e.target.checked,
+                    }))
                   }
                 />
                 <span>{LABEL[key] || key}</span>
@@ -658,7 +669,7 @@ export default function SparePartsPage() {
     );
   }
 
-  /** LocationFilter: knappen er normal, menuen rendres som "fixed overlay" */
+  /** LocationFilter: menu renderes fixed + scroll works */
   function LocationFilter({ buttonStyle }) {
     const filt = locationOptions.filter((l) =>
       l.toLowerCase().includes(locationQuery.toLowerCase())
@@ -679,7 +690,6 @@ export default function SparePartsPage() {
           }}
           onClick={() => {
             setLocationOpen((o) => !o);
-            // sørg for korrekt position lige ved åbning
             setTimeout(() => computeLocMenuPos(), 0);
           }}
         >
@@ -702,6 +712,8 @@ export default function SparePartsPage() {
               padding: 10,
               boxShadow: "0 10px 24px rgba(0,0,0,0.16)",
             }}
+            // ✅ FIX: stop wheel bubbling så tabellen bagved ikke “stjæler” scroll
+            onWheel={(e) => e.stopPropagation()}
           >
             <input
               value={locationQuery}
@@ -709,8 +721,14 @@ export default function SparePartsPage() {
               placeholder="Søg lokation…"
               style={{ ...inputStyle, width: "100%", marginBottom: 8 }}
               autoFocus
+              onWheel={(e) => e.stopPropagation()}
             />
-            <div style={{ maxHeight: 260, overflowY: "auto" }}>
+            <div
+              style={{ maxHeight: 260, overflowY: "auto" }}
+              // ✅ FIX: stop scroll bubbling (nogle browsere sender scroll videre)
+              onScroll={(e) => e.stopPropagation()}
+              onWheel={(e) => e.stopPropagation()}
+            >
               <div
                 onClick={() => {
                   setLocationFilter("");
@@ -726,6 +744,7 @@ export default function SparePartsPage() {
               >
                 Alle
               </div>
+
               {filt.map((loc) => (
                 <div
                   key={loc}
@@ -744,6 +763,7 @@ export default function SparePartsPage() {
                   {loc}
                 </div>
               ))}
+
               {!filt.length && (
                 <div style={{ padding: "6px 8px", color: "#64748b" }}>
                   Ingen match
@@ -785,9 +805,7 @@ export default function SparePartsPage() {
 
   const searchGridStart = idxModel >= 0 ? gridColForShown(idxModel) : 2;
   const searchGridEnd =
-    idxCategory >= 0
-      ? gridColForShown(idxCategory) + 1
-      : 2 + shownCols.length;
+    idxCategory >= 0 ? gridColForShown(idxCategory) + 1 : 2 + shownCols.length;
 
   const locGridStart = idxCost >= 0 ? gridColForShown(idxCost) : 2;
   const locGridEnd =
@@ -946,7 +964,9 @@ export default function SparePartsPage() {
           <div style={{ gridColumn: `${locGridStart} / ${locGridEnd}` }}>
             <div style={fieldLabelStyle}>Filtrér</div>
             <LocationFilter buttonStyle={{ padding: "10px 12px", borderRadius: 12 }} />
-            <div style={fieldHelpStyle}>Tip: vælg “Alle” for at vise alle lokationer.</div>
+            <div style={fieldHelpStyle}>
+              Tip: vælg “Alle” for at vise alle lokationer.
+            </div>
           </div>
 
           <div style={{ gridColumn: `${shownCols.length + 2} / ${shownCols.length + 3}` }} />
