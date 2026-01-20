@@ -12,7 +12,8 @@ import {
 import { useNavigate } from "react-router-dom";
 
 /** === KONFIG === */
-const API_BASE = import.meta.env.VITE_SPAREPARTS_V2 || "/wp-json/telegiganten/v1/spareparts-v2";
+const API_BASE =
+  import.meta.env.VITE_SPAREPARTS_V2 || "/wp-json/telegiganten/v1/spareparts-v2";
 const AUTH_HEADER = (import.meta.env.VITE_WP_BASIC_AUTH || "").trim();
 
 // must-keep felter
@@ -61,6 +62,9 @@ const btnDanger = {
 const inputStyle = { padding: 8, borderRadius: 8, border: "1px solid #d1d5db" };
 const chip = { fontSize: 13, color: "#64748b" };
 
+const fieldLabelStyle = { fontSize: 12, color: "#64748b", marginBottom: 6 };
+const fieldHelpStyle = { marginTop: 6, fontSize: 12, color: "#64748b" };
+
 /** --- helpers --- */
 function withQuery(u, q = {}) {
   const url = new URL(u, window.location.origin);
@@ -77,7 +81,6 @@ function authHeaders(base = {}) {
   return h;
 }
 async function apiList({ offset = 0, limit = 100, search = "", lokation = "", cb = "" } = {}, signal) {
-  // cb = cache-buster (for at undgå WP/proxy caching)
   const res = await fetch(withQuery(API_BASE, { offset: String(offset), limit: String(limit), search, lokation, cb }), {
     method: "GET",
     headers: authHeaders({ Accept: "application/json" }),
@@ -154,13 +157,10 @@ export default function SparePartsPage() {
   const [history, setHistory] = useState([]);
   const [editingIndex, setEditingIndex] = useState(null);
 
-  // auto-refresh UI
   const [pausedNotice, setPausedNotice] = useState(false);
 
-  // Opret-ny toggle (NYT)
   const [createOpen, setCreateOpen] = useState(false);
 
-  // kolonne-visibility (SKU, Pris, UpdatedAt skjult by default)
   const [visibleCols, setVisibleCols] = useState(() => ({
     model: true,
     sku: false,
@@ -184,10 +184,8 @@ export default function SparePartsPage() {
   const reqIdRef = useRef(0);
   const pageCacheRef = useRef(new Map());
 
-  // 👉 snapshot originalværdi pr. felt ved redigering
   const originalRef = useRef(new Map());
 
-  // polling
   const pollRef = useRef(null);
 
   function cacheKey(q, loc, limit, p) {
@@ -202,7 +200,8 @@ export default function SparePartsPage() {
     return Array.from(set).sort((a, b) => a.localeCompare(b, "da"));
   }, [parts]);
 
-  const isPageVisible = () => (typeof document !== "undefined" ? document.visibilityState === "visible" : true);
+  const isPageVisible = () =>
+    typeof document !== "undefined" ? document.visibilityState === "visible" : true;
 
   async function fetchPage({ pageArg = page, query = debouncedSearch, loc = locationFilter, bustCache = false } = {}) {
     const key = cacheKey(query, loc, pageSize, pageArg);
@@ -265,41 +264,36 @@ export default function SparePartsPage() {
     fetchPage({ pageArg: page, query: debouncedSearch, loc: locationFilter, bustCache: true });
   }
 
-  // initial fetch
   useEffect(() => {
     fetchPage({ pageArg: 1, query: "", loc: "" }); // eslint-disable-next-line
   }, []);
-  // search ændrer
+
   useEffect(() => {
     setPage(1);
     pageCacheRef.current.clear();
     fetchPage({ pageArg: 1, query: debouncedSearch, loc: locationFilter, bustCache: true }); // eslint-disable-next-line
   }, [debouncedSearch]);
-  // lokationsfilter ændrer
+
   useEffect(() => {
     setPage(1);
     pageCacheRef.current.clear();
     fetchPage({ pageArg: 1, query: debouncedSearch, loc: locationFilter, bustCache: true }); // eslint-disable-next-line
   }, [locationFilter]);
-  // side ændrer
+
   useEffect(() => {
     fetchPage({ pageArg: page, query: debouncedSearch, loc: locationFilter }); // eslint-disable-next-line
   }, [page]);
 
-  // Auto-refresh: poll + focus/visibility
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current);
 
     pollRef.current = setInterval(() => {
       if (!isPageVisible()) return;
-
-      // pause hvis du redigerer en række
       if (editingIndex !== null) {
         setPausedNotice(true);
         return;
       }
       setPausedNotice(false);
-
       refreshNow();
     }, 30000);
 
@@ -332,7 +326,6 @@ export default function SparePartsPage() {
     };
   }, [editingIndex, page, debouncedSearch, locationFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** Gem på blur/Enter — sammenlign med ORIGINAL (ikke state) */
   const saveField = async (id, field, finalValue) => {
     const key = `${id}:${field}`;
     const original = originalRef.current.get(key);
@@ -377,6 +370,7 @@ export default function SparePartsPage() {
   };
 
   const [newRow, setNewRow] = useState(() => COLS.reduce((acc, k) => ({ ...acc, [k]: "" }), {}));
+
   async function handleCreate() {
     try {
       const clean = {
@@ -403,6 +397,7 @@ export default function SparePartsPage() {
       alert(e.message || "Kunne ikke oprette række");
     }
   }
+
   async function handleDelete(id) {
     if (!window.confirm("Slet denne reservedel?")) return;
     try {
@@ -415,7 +410,6 @@ export default function SparePartsPage() {
     }
   }
 
-  /** --- UI helpers --- */
   function cellEditor(row, field) {
     const v = row[field] ?? "";
     const num = field === "price" || field === "stock" || field === "cost_price";
@@ -591,14 +585,10 @@ export default function SparePartsPage() {
     );
   }
 
-  // Layout-grid over tabellen (så søg + lokation “føles som kolonne-aligned”)
-  // Vi matcher din tabel: ID + (shownCols) + Handling.
   const tableGridTemplate = useMemo(() => {
-    // Fast ID + Handling
     const idCol = "90px";
     const handlingCol = "140px";
 
-    // For resten, lav en “pæn” fordeling der minder om tabellen
     const cols = shownCols.map((c) => {
       if (c === "model") return "minmax(260px, 3fr)";
       if (c === "sku") return "minmax(140px, 1.2fr)";
@@ -615,18 +605,15 @@ export default function SparePartsPage() {
     return `${idCol} ${cols.join(" ")} ${handlingCol}`;
   }, [shownCols]);
 
-  // Grid-helpers til “spænd” (Model -> Kategori) og (Kostpris + Reparation)
   const idxModel = shownCols.indexOf("model");
   const idxCategory = shownCols.indexOf("category");
   const idxCost = shownCols.indexOf("cost_price");
   const idxRepair = shownCols.indexOf("repair");
 
-  // Husk: grid kolonner = [ID] + shownCols + [Handling]
-  // så shownCols kolonne c har grid index = 2 + idx
   const gridColForShown = (idx) => 2 + idx;
 
   const searchGridStart = idxModel >= 0 ? gridColForShown(idxModel) : 2;
-  const searchGridEnd = idxCategory >= 0 ? gridColForShown(idxCategory) + 1 : 2 + shownCols.length; // end is exclusive
+  const searchGridEnd = idxCategory >= 0 ? gridColForShown(idxCategory) + 1 : 2 + shownCols.length;
 
   const locGridStart = idxCost >= 0 ? gridColForShown(idxCost) : 2;
   const locGridEnd = idxRepair >= 0 ? gridColForShown(idxRepair) + 1 : locGridStart + 1;
@@ -685,7 +672,6 @@ export default function SparePartsPage() {
 
         <div style={{ flex: 1 }} />
 
-        {/* Opret ny toggle (NYT) */}
         <button
           onClick={() => setCreateOpen((o) => !o)}
           style={{
@@ -702,13 +688,14 @@ export default function SparePartsPage() {
           Opret ny
         </button>
 
-        {/* Kolonner til højre (som du bad om) */}
         <ColumnPicker />
       </div>
 
       {/* Info / pagination (TOP) */}
       <div style={{ marginBottom: 8, display: "flex", gap: 12, alignItems: "center" }}>
-        <div style={chip}>{loading ? "Henter…" : `Viser ${parts.length}${unknownTotal ? "" : ` / ${total}`} rækker`}</div>
+        <div style={chip}>
+          {loading ? "Henter…" : `Viser ${parts.length}${unknownTotal ? "" : ` / ${total}`} rækker`}
+        </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
           <label>Pr. side</label>
           <select style={inputStyle} value={pageSize} onChange={(e) => setPageSize(parseInt(e.target.value, 10))}>
@@ -738,7 +725,7 @@ export default function SparePartsPage() {
         </div>
       )}
 
-      {/* Filter-bar “aligned” med tabellen (NYT LAYOUT) */}
+      {/* Filter-bar “aligned” med tabellen */}
       <div
         style={{
           border: "1px solid #e5e7eb",
@@ -754,15 +741,16 @@ export default function SparePartsPage() {
             display: "grid",
             gridTemplateColumns: tableGridTemplate,
             gap: 8,
-            alignItems: "center",
+            alignItems: "start",
             minWidth: 900,
           }}
         >
-          {/* tom “ID” kolonne (bare for at align) */}
+          {/* tom “ID” kolonne */}
           <div style={{ gridColumn: "1 / 2" }} />
 
-          {/* STORT søgefelt: Model -> Kategori */}
+          {/* SØG (uniform: label + input + help) */}
           <div style={{ gridColumn: `${searchGridStart} / ${searchGridEnd}` }}>
+            <div style={fieldLabelStyle}>Søg</div>
             <input
               placeholder="Søg fx 'Samsung S20 skærm'…"
               value={search}
@@ -775,18 +763,17 @@ export default function SparePartsPage() {
                 borderRadius: 12,
               }}
             />
-            <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>
-              Tip: søg på model, SKU, reparation, kategori eller lokation.
-            </div>
+            <div style={fieldHelpStyle}>Tip: søg på model, SKU, reparation, kategori eller lokation.</div>
           </div>
 
-          {/* Lokation-filter: Kostpris + Reparation */}
-          <div style={{ gridColumn: `${locGridStart} / ${locGridEnd}`, alignSelf: "start" }}>
-            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Filtrér</div>
+          {/* FILTER (uniform: label + dropdown + help) */}
+          <div style={{ gridColumn: `${locGridStart} / ${locGridEnd}` }}>
+            <div style={fieldLabelStyle}>Filtrér</div>
             <LocationFilter buttonStyle={{ padding: "10px 12px", borderRadius: 12 }} />
+            <div style={fieldHelpStyle}>Tip: vælg “Alle” for at vise alle lokationer.</div>
           </div>
 
-          {/* tom “Handling” kolonne (align) */}
+          {/* tom “Handling” kolonne */}
           <div style={{ gridColumn: `${shownCols.length + 2} / ${shownCols.length + 3}` }} />
         </div>
       </div>
@@ -798,7 +785,14 @@ export default function SparePartsPage() {
             <tr style={{ background: "#f8fafc" }}>
               <th style={{ textAlign: "left", padding: 8, width: 90 }}>ID</th>
               {shownCols.map((c) => (
-                <th key={c} style={{ textAlign: "left", padding: 8, ...(c === "model" ? { width: "30%", minWidth: 260 } : {}) }}>
+                <th
+                  key={c}
+                  style={{
+                    textAlign: "left",
+                    padding: 8,
+                    ...(c === "model" ? { width: "30%", minWidth: 260 } : {}),
+                  }}
+                >
                   {LABEL[c]}
                 </th>
               ))}
@@ -807,7 +801,6 @@ export default function SparePartsPage() {
           </thead>
 
           <tbody>
-            {/* Opret-ny række (nu toggled) */}
             {createOpen && (
               <tr style={{ background: "#F0F7FF", borderBottom: "2px solid #e2e8f0" }}>
                 <td style={{ padding: 8, color: "#334155", fontWeight: 700 }}>Opret ny</td>
