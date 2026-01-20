@@ -51,6 +51,24 @@ function statusPill(statusRaw) {
   );
 }
 
+/** Signatur til at opdage "noget er ændret" uden at lave deep compare */
+function makeRepairSignature(items) {
+  const arr = Array.isArray(items) ? items : [];
+  let maxTs = 0;
+  for (const r of arr) {
+    const v =
+      r?.updated_at ??
+      r?.created_at ??
+      r?.date ??
+      r?.createdAt ??
+      r?.timestamp ??
+      null;
+    const t = new Date(v || 0).getTime();
+    if (Number.isFinite(t) && t > maxTs) maxTs = t;
+  }
+  return `${arr.length}|${maxTs}`;
+}
+
 export default function RepairsPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -66,25 +84,93 @@ export default function RepairsPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
+  // Auto-refresh UI
+  const [hasNewData, setHasNewData] = useState(false);
+  const lastSigRef = useRef("");
+  const pollingRef = useRef(null);
+
+  const isPageVisible = () =>
+    typeof document !== "undefined" ? document.visibilityState === "visible" : true;
+
+  const canAutoRefresh = useCallback(() => {
+    // Når modal er åben antager vi "redigering"/review → vi overskriver ikke listen automatisk
+    return !selectedRepair;
+  }, [selectedRepair]);
+
+  /** Ren fetch (ingen state) */
+  const fetchRepairs = useCallback(async () => {
+    const data = await api.getRepairOrders();
+    const items = Array.isArray(data) ? data : (data?.items ?? []);
+    return items;
+  }, []);
+
   /** Genbrugelig loader så vi kan refetch'e efter gem */
-  const loadRepairs = useCallback(async () => {
+  const loadRepairs = useCallback(async ({ silent = false, force = false } = {}) => {
     setLoadError("");
-    setLoading(true);
+    if (!silent) setLoading(true);
+
     try {
-      const data = await api.getRepairOrders();
-      const items = Array.isArray(data) ? data : (data?.items ?? []);
+      const items = await fetchRepairs();
+      const sig = makeRepairSignature(items);
+
+      // Første gang: sæt baseline
+      if (!lastSigRef.current || force) {
+        lastSigRef.current = sig;
+      }
+
+      // Hvis vi IKKE må auto-opdatere (modal åben), men data har ændret sig:
+      if (!canAutoRefresh() && sig !== lastSigRef.current) {
+        setHasNewData(true);
+        return;
+      }
+
+      // Normal: opdater state
       setRepairs(items);
+      lastSigRef.current = sig;
+      setHasNewData(false);
     } catch (err) {
       console.error("Fejl ved hentning af reparationer:", err);
       setLoadError("Kunne ikke hente reparationer.");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  }, []);
+  }, [fetchRepairs, canAutoRefresh]);
 
   /** Første load */
   useEffect(() => {
-    loadRepairs();
+    loadRepairs({ silent: false, force: true });
+  }, [loadRepairs]);
+
+  /** Auto refresh: polling + focus/visibility triggers */
+  useEffect(() => {
+    // ryd evt gammel
+    if (pollingRef.current) clearInterval(pollingRef.current);
+
+    // Poll hvert 20. sekund på listen
+    pollingRef.current = setInterval(() => {
+      if (!isPageVisible()) return;
+      // silent polling
+      loadRepairs({ silent: true });
+    }, 20000);
+
+    const onFocus = () => {
+      if (!isPageVisible()) return;
+      // ved fokus vil vi altid tjekke (silent)
+      loadRepairs({ silent: true });
+    };
+    const onVis = () => {
+      if (!isPageVisible()) return;
+      loadRepairs({ silent: true });
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVis);
+
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVis);
+    };
   }, [loadRepairs]);
 
   /** Normaliser topfelter (ingen API-ændringer) */
@@ -267,8 +353,49 @@ export default function RepairsPage() {
     gap: "0.5rem",
   };
 
+  const bannerStyle = {
+    position: "sticky",
+    top: 0,
+    zIndex: 50,
+    background: "#fff7ed",
+    border: "1px solid #fed7aa",
+    color: "#9a3412",
+    padding: "10px 12px",
+    borderRadius: 10,
+    marginBottom: 12,
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    justifyContent: "space-between",
+  };
+
   return (
     <div style={{ padding: "2rem" }}>
+      {/* Banner: nyere data mens modal er åben */}
+      {hasNewData && (
+        <div style={bannerStyle}>
+          <div style={{ fontWeight: 700 }}>
+            Der findes nyere ændringer på reparationer.
+          </div>
+          <button
+            onClick={() => loadRepairs({ silent: false, force: true })}
+            style={{
+              backgroundColor: "#2166AC",
+              color: "white",
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "none",
+              cursor: "pointer",
+              fontWeight: 700,
+              whiteSpace: "nowrap",
+            }}
+            title="Hent nyeste data fra serveren"
+          >
+            Opdater nu
+          </button>
+        </div>
+      )}
+
       {/* Global regel: Dashboard-knap */}
       <button onClick={() => navigate("/")} style={buttonStyle}>
         <FaHome /> Dashboard
@@ -349,7 +476,7 @@ export default function RepairsPage() {
         <RepairHistory
           repair={selectedRepair}
           onClose={() => setSelectedRepair(null)}
-          onAfterSave={loadRepairs}  // ⬅️ refresher listen efter gem
+          onAfterSave={() => loadRepairs({ silent: false, force: true })} // refresh efter gem + reset banner
         />
       )}
     </div>

@@ -5,6 +5,7 @@ import { RepairProvider } from "./context/RepairContext";
 import { api } from "./data/apiClient";
 import OrdersPage from "./pages/OrdersPage";
 import OrderPrint from "./pages/OrderPrint";
+import BuybackAdminPage from "./pages/BuybackAdminPage";
 
 // Lazy-load pages to avoid any top-level side-effects on import
 const Dashboard = lazy(() => import("./pages/Dashboard"));
@@ -56,6 +57,7 @@ export default function App() {
               <Route path="/import-export" element={<ImportExportPage />} />
               <Route path="/orders" element={<OrdersPage />} />
               <Route path="/orders/:id/print" element={<OrderPrint />} />
+              <Route path="/buyback-admin" element={<BuybackAdminPage />} />
               {/* 404 fallback */}
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
@@ -175,6 +177,13 @@ function HeaderFoldout() {
               onClick={() => {
                 setOpen(false);
                 navigate("/orders");
+              }}
+            />
+            <MenuItem
+              label="Sælg"
+              onClick={() => {
+                setOpen(false);
+                navigate("/buyback-admin");
               }}
             />
             <MenuItem

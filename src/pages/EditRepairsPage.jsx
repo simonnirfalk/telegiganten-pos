@@ -1,6 +1,6 @@
 // src/pages/EditRepairsPage.jsx
 import { useLocation } from "react-router-dom";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import Select from "react-select";
 import { FaHome } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
@@ -25,7 +25,7 @@ const safeModelSorter = (brandName) => {
   return defaultModelSort;
 };
 
-/* --------------------- Søgning helpers --------------------- */
+/* --------------------- Normalisering helpers --------------------- */
 const norm = (str = "") =>
   (str + "")
     .normalize("NFD")
@@ -35,28 +35,39 @@ const norm = (str = "") =>
     .replace(/\s+/g, " ")
     .trim();
 
+const normalizeTitle = (str = "") =>
+  (str + "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " "); // kollaps
+
 const makeModelHaystack = (brand, model) => norm(`${brand} ${model}`);
 
-/* --------------------- Gemmehjælper --------------------- */
+/* --------------------- Id helpers --------------------- */
 const normalizeId = (id) => {
   if (typeof id === "number") return id;
   const n = Number(id);
-  return Number.isNaN(n) ? id : n; // prøv tal, ellers behold original
+  return Number.isNaN(n) ? id : n;
 };
+
+// ÉT sted at afgøre model_id (virker også når modellen har 0 options)
+const getModelIdFromModel = (m) =>
+  m?.model_id ?? m?.options?.[0]?.model_id ?? null;
 
 /* --------------------- Komponent --------------------- */
 export default function EditRepairsPage() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
 
-  // debug for mount/unmount
   useEffect(() => {
     console.log("%c[EditRepairsPage] mounted on route:", "color:#2166AC;font-weight:bold;", pathname);
     console.trace();
     return () => console.log("%c[EditRepairsPage] unmounted", "color:#999;");
   }, [pathname]);
 
-  if (pathname !== "/edit-repairs") return null; // vis KUN på /edit-repairs
+  if (pathname !== "/edit-repairs") return null;
 
   /* ---------- Data & UI state ---------- */
   const [data, setData] = useState([]);
@@ -75,15 +86,15 @@ export default function EditRepairsPage() {
   const [globalTitle, setGlobalTitle] = useState("");
   const [globalPrice, setGlobalPrice] = useState("");
   const [globalDuration, setGlobalDuration] = useState("");
-  const [globalScope, setGlobalScope] = useState("all"); // 'all' | 'brands' | 'models'
+  const [globalScope, setGlobalScope] = useState("all");
   const [globalBrands, setGlobalBrands] = useState([]);
   const [globalModels, setGlobalModels] = useState([]);
   const [repairTitleOptions, setRepairTitleOptions] = useState([]);
   const [expandedBrands, setExpandedBrands] = useState([]);
-  const [modelsPerPage, setModelsPerPage] = useState(50); // 50 | 100 | 200
+  const [modelsPerPage, setModelsPerPage] = useState(50);
   const [currentPage, setCurrentPage] = useState(1);
 
-  const [editingModel, setEditingModel] = useState(null); // modelKey
+  const [editingModel, setEditingModel] = useState(null);
   const [modelNameDraft, setModelNameDraft] = useState("");
   const [savingModelName, setSavingModelName] = useState(false);
 
@@ -105,7 +116,7 @@ export default function EditRepairsPage() {
     if (!b) return [];
     const ids = [];
     (b.models || []).forEach((m) => {
-      const mid = m.options?.[0]?.model_id;
+      const mid = getModelIdFromModel(m);
       if (mid) ids.push(mid);
     });
     return ids;
@@ -113,15 +124,36 @@ export default function EditRepairsPage() {
   const getModelIdByModelName = (modelName) => {
     for (const b of data) {
       const m = b.models.find((mm) => mm.model === modelName);
-      if (m?.options?.[0]?.model_id) return m.options[0].model_id;
+      const mid = getModelIdFromModel(m);
+      if (mid) return mid;
     }
     return null;
   };
 
-  // ⇩⇩ NYT: status for kørende sync
+  // ⇩⇩ status for kørende sync
   const [syncingBrand, setSyncingBrand] = useState(null);
 
-  // ⇩⇩ NYT: skabelon-map for et brand: title -> { price, duration, active }
+  // Auto-refresh UI
+  const [autoPaused, setAutoPaused] = useState(false);
+  const pollRef = useRef(null);
+
+  const isPageVisible = () =>
+    typeof document !== "undefined" ? document.visibilityState === "visible" : true;
+
+  const hasUnsavedEdits = Object.keys(editedRepairs).length > 0;
+
+  const canAutoRefresh = useCallback(() => {
+    if (hasUnsavedEdits) return false;
+    if (savingAll) return false;
+    if (showGlobalModal) return false;
+    if (showCreateForm) return false;
+    if (editingModel) return false;
+    if (savingModelName) return false;
+    if (syncingBrand) return false;
+    return true;
+  }, [hasUnsavedEdits, savingAll, showGlobalModal, showCreateForm, editingModel, savingModelName, syncingBrand]);
+
+  // ⇩⇩ skabelon-map (kun unikke titler; værdier med price/duration/active fra "første forekomst")
   const getBrandTemplateMap = (brandName) => {
     const b = data.find((x) => x.brand === brandName);
     if (!b) return new Map();
@@ -142,11 +174,11 @@ export default function EditRepairsPage() {
     return map;
   };
 
-
   /* ---------- Toggle aktiv / slet / gem ---------- */
   const toggleRepairActive = async (repairId, isActive) => {
     try {
-      await api.updateRepair({ repair_id: normalizeId(repairId), fields: { repair_option_active: isActive ? 1 : 0 } });
+      const res = await api.updateRepair({ repair_id: normalizeId(repairId), fields: { repair_option_active: isActive ? 1 : 0 } });
+      console.log("[updateRepair active] server:", res);
       setData(prev =>
         prev.map(brand => ({
           ...brand,
@@ -167,7 +199,8 @@ export default function EditRepairsPage() {
   const handleDeleteTemplate = async (repairId) => {
     if (!window.confirm("Er du sikker på, at du vil slette denne skabelon?")) return;
     try {
-      await api.deleteRepairTemplate(normalizeId(repairId));
+      const res = await api.deleteRepairTemplate(normalizeId(repairId));
+      console.log("[deleteRepairTemplate] server:", res);
       setData(prev =>
         prev.map(brand => ({
           ...brand,
@@ -193,23 +226,19 @@ export default function EditRepairsPage() {
 
   const handleSave = async (repairId) => {
     const rid = normalizeId(repairId);
-
-    // robust opslag – keys er strings i state-objekter
     const rowEdit = editedRepairs[rid] ?? editedRepairs[String(rid)];
     if (!rowEdit) return;
 
     setSavingStatus((p) => ({ ...p, [rid]: "saving" }));
-
     try {
       const patch = {
         ...(rowEdit.title    !== undefined && { title: rowEdit.title }),
         ...(rowEdit.price    !== undefined && { _telegiganten_repair_repair_price: rowEdit.price }),
         ...(rowEdit.duration !== undefined && { _telegiganten_repair_repair_time:  rowEdit.duration }),
       };
+      const res = await api.updateRepair({ repair_id: rid, fields: patch });
+      console.log("[updateRepair] server:", res);
 
-      await api.updateRepair({ repair_id: rid, fields: patch });
-
-      // UI-opdatering – brug løs sammenligning for tal/string-keys
       setData((prev) =>
         prev.map((brand) => ({
           ...brand,
@@ -224,10 +253,8 @@ export default function EditRepairsPage() {
                   }
                 : opt
             );
-
             return {
               ...model,
-              // re-sortér kun hvis titlen blev ændret (påvirker prioritet/alfabetik)
               options: rowEdit.title !== undefined
                 ? nextOpts.slice().sort(sortRepairs)
                 : nextOpts,
@@ -235,7 +262,6 @@ export default function EditRepairsPage() {
           }),
         }))
       );
-
       setSavingStatus((p) => ({ ...p, [rid]: "success" }));
       setEditedRepairs((prev) => {
         const n = { ...prev };
@@ -249,14 +275,12 @@ export default function EditRepairsPage() {
   };
 
   const handleSaveAll = async () => {
-    // Stabil snapshot af ids (keys kan være strings, normaliser dem)
     const allIds = Object.keys(editedRepairs).map(normalizeId);
     if (allIds.length === 0) return;
 
     setSavingAll(true);
     try {
       for (const id of allIds) {
-        // Kør sekventielt for at undgå backend race conditions
         // eslint-disable-next-line no-await-in-loop
         await handleSave(id);
       }
@@ -270,7 +294,6 @@ export default function EditRepairsPage() {
       setEditingModel(null);
       return;
     }
-
     try {
       setSavingModelName(true);
       const model_id = getModelIdByModelName(oldName);
@@ -278,10 +301,8 @@ export default function EditRepairsPage() {
         alert("Kunne ikke finde model_id for denne model.");
         return;
       }
-
-      await api.updateModel({ model_id, fields: { model: modelNameDraft.trim() } });
-
-      // UI-opdatering
+      const res = await api.updateModel({ model_id, fields: { model: modelNameDraft.trim() } });
+      console.log("[updateModel] server:", res);
       setData(prev =>
         prev.map(b => {
           if (b.brand !== brand) return b;
@@ -293,7 +314,6 @@ export default function EditRepairsPage() {
           };
         })
       );
-
       setEditingModel(null);
     } catch (err) {
       console.error("Fejl ved opdatering af modelnavn:", err);
@@ -303,30 +323,83 @@ export default function EditRepairsPage() {
     }
   };
 
-  // ⇩⇩ NYT: Synkronisér skabelonens reparationer til alle modeller under et brand
+  // --- Hjælper: hent sandheden fra serveren (med cache-buster) ---
+  const reloadAllRepairs = useCallback(async () => {
+    const raw = await proxyFetch({
+      path: `/wp-json/telegiganten/v1/all-repairs`,
+      query: { cb: Date.now() }, // cache-buster
+    });
+
+    const normalized = (Array.isArray(raw) ? raw : []).map((brand) => ({
+      ...brand,
+      models: (brand.models || [])
+        .map((model) => {
+          const options = (model.options || []).map((opt) => ({
+            ...opt,
+            repair_option_active: String(opt.repair_option_active ?? "1") === "1" ? 1 : 0,
+          }));
+          const inferredModelId =
+            model.model_id ??
+            (options.find((o) => o?.model_id)?.model_id ?? null);
+          return {
+            ...model,
+            model_id: inferredModelId,
+            options: options.sort(sortRepairs),
+          };
+        })
+        .sort(makeModelSorter(brand.brand)),
+    }))
+    .sort(sortBrands);
+    setData(normalized);
+
+    // opdater titelliste til Global-opdatering
+    const titlesSet = new Set();
+    normalized.forEach((b) =>
+      b.models.forEach((m) =>
+        m.options.forEach((o) => o?.title && titlesSet.add(o.title))
+      )
+    );
+    setRepairTitleOptions(
+      Array.from(titlesSet).sort((a, b) => a.localeCompare(b, "da"))
+    );
+  }, []);
+
+  const manualReload = async () => {
+    if (hasUnsavedEdits) {
+      const ok = window.confirm(
+        "Du har ugemte ændringer.\n\nHvis du genindlæser nu, kan du miste dem.\n\nVil du fortsætte?"
+      );
+      if (!ok) return;
+    }
+    await reloadAllRepairs();
+  };
+
+  // Synk skabelon til alle modeller under brand (kun titel-match; valider server-succes; slut med reload)
   const handleSyncBrandMissingRepairs = async (brandName) => {
     const brandObj = data.find((b) => b.brand === brandName);
     if (!brandObj) { alert("Enheden blev ikke fundet."); return; }
 
-    const tpl = getBrandTemplateMap(brandName); // Map<title, {price, duration, active}>
-    const allTitles = Array.from(tpl.keys());
+    const tpl = getBrandTemplateMap(brandName);
+    const allTitles = Array.from(tpl.keys()); // eksakte titler fra skabelon
     if (allTitles.length === 0) { alert("Ingen skabelontitler fundet for denne enhed."); return; }
 
     setSyncingBrand(brandName);
     try {
-      // title -> model_ids der mangler den titel (til efterfølgende pris/tid-opdatering)
       const perTitleMissing = new Map();
 
-      // 1) Opret manglende titler på hver model (pris/tid sættes til 0 ved oprettelse)
+      // 1) Opret manglende titler pr. model – kun efter TITLE (robust normalisering)
       for (const m of brandObj.models || []) {
-        const model_id = m.options?.[0]?.model_id;
+        const model_id = getModelIdFromModel(m);
         if (!model_id) continue;
 
-        const have = new Set((m.options || []).map((o) => (o.title || "").trim()).filter(Boolean));
-        const missing = allTitles.filter((t) => !have.has(t));
+        const haveNorm = new Set(
+          (m.options || [])
+            .map((o) => normalizeTitle(o.title))
+            .filter(Boolean)
+        );
+        const missing = allTitles.filter((t) => !haveNorm.has(normalizeTitle(t)));
         if (missing.length === 0) continue;
 
-        // Opret alle manglende titler på én gang (0/0/inaktiv)
         // eslint-disable-next-line no-await-in-loop
         const bulkRes = await api.bulkCreateRepairTemplates({
           model_id,
@@ -336,15 +409,26 @@ export default function EditRepairsPage() {
           active: 0,
         });
         const createdIds = Array.isArray(bulkRes?.repair_ids) ? bulkRes.repair_ids : [];
+        const ok = bulkRes?.status === "created" && createdIds.length === missing.length;
 
-        // Husk hvilke modeller der mangler hvilke titler
+        if (!ok) {
+          console.warn("[sync] bulk mismatch for model", { model_id, missingCount: missing.length, createdIds });
+          alert(
+            `Kunne ikke oprette alle manglende reparationer for model #${model_id}.\n` +
+            `Forventede ${missing.length}, server skabte ${createdIds.length}.`
+          );
+          // Vi opdaterer IKKE UI optimistisk i dette tilfælde
+          continue;
+        }
+
+        // Husk til senere pris/tid-sætning pr. titel
         missing.forEach((title) => {
           const arr = perTitleMissing.get(title) || [];
           arr.push(model_id);
           perTitleMissing.set(title, arr);
         });
 
-        // Optimistisk UI: læg dem ind i state med skabelonens pris/tid (bliver også skubbet til server lige efter)
+        // Optimistisk UI for de der blev oprettet
         setData((prev) =>
           prev.map((b) => {
             if (b.brand !== brandName) return b;
@@ -355,7 +439,7 @@ export default function EditRepairsPage() {
                 const additions = missing.map((title, idx) => {
                   const spec = tpl.get(title) || { price: 0, duration: 0, active: 0 };
                   return {
-                    id: createdIds[idx] ?? `${model_id}_${title}`,
+                    id: createdIds[idx],
                     title,
                     price: spec.price,
                     duration: spec.duration,
@@ -363,14 +447,14 @@ export default function EditRepairsPage() {
                     repair_option_active: 0,
                   };
                 });
-                return { ...mm, options: [...(mm.options || []), ...additions].sort(sortRepairs) };
+                return { ...mm, options: [...(mm.options || []), ...additions].sort(sortRepairs), model_id };
               }),
             };
           })
         );
       }
 
-      // 2) Sæt pris/tid på de nyoprettede titler ift. skabelonen (gøres pr. titel for alle modeller)
+      // 2) Sæt pris/tid pr. titel for de NYE forekomster
       for (const [title, modelIdsRaw] of perTitleMissing.entries()) {
         const spec = tpl.get(title) || { price: 0, duration: 0 };
         const modelIds = Array.from(new Set(modelIdsRaw));
@@ -380,8 +464,12 @@ export default function EditRepairsPage() {
         if (Object.keys(fields).length === 0 || modelIds.length === 0) continue;
 
         // eslint-disable-next-line no-await-in-loop
-        await api.applyRepairChanges({ title, fields, models: modelIds });
+        const res = await api.applyRepairChanges({ title, fields, models: modelIds });
+        console.log("[applyRepairChanges]", title, res);
       }
+
+      // 3) Hent sandheden fra backend (for at undgå spøgelses-dubletter / fejloprettelser)
+      await reloadAllRepairs();
 
       alert(`Synkroniseret skabelon til alle modeller under “${brandName}”.`);
     } catch (err) {
@@ -392,14 +480,14 @@ export default function EditRepairsPage() {
     }
   };
 
-
   /* ---------- Opret ny template ---------- */
   const handleCreateRepair = async () => {
     const brand = data.find((b) => b.brand === newRepair.brand);
     const model = brand?.models.find((m) => m.model === newRepair.model);
     if (!model) return alert("Ugyldig model.");
 
-    const model_id = model.options?.[0]?.model_id;
+    // Brug model.model_id først; fald tilbage til første options’ model_id
+    const model_id = model?.model_id ?? model?.options?.[0]?.model_id ?? null;
     if (!model_id) return alert("Kunne ikke finde model_id.");
 
     try {
@@ -421,14 +509,20 @@ export default function EditRepairsPage() {
           repair_option_active: 1,
         };
 
-        setData(prev =>
-          prev.map(b =>
+        setData((prev) =>
+          prev.map((b) =>
             b.brand !== newRepair.brand
               ? b
               : {
                   ...b,
-                  models: b.models.map(m =>
-                    m.model !== newRepair.model ? m : { ...m, options: [...m.options, newOption].sort(sortRepairs) }
+                  models: b.models.map((m) =>
+                    m.model !== newRepair.model
+                      ? m
+                      : {
+                          ...m,
+                          model_id, // ← sikrer at modellen har id i state
+                          options: [...(m.options || []), newOption].sort(sortRepairs),
+                        }
                   ),
                 }
           )
@@ -453,46 +547,8 @@ export default function EditRepairsPage() {
 
     (async () => {
       try {
-        const raw = await proxyFetch({ path: "/wp-json/telegiganten/v1/all-repairs" });
-
-        const normalized = (Array.isArray(raw) ? raw : []).map((brand) => ({
-          ...brand,
-          models: (brand.models || [])
-            .map((model) => ({
-              ...model,
-              options: (model.options || [])
-                .map((opt) => ({
-                  ...opt,
-                  repair_option_active:
-                    String(opt.repair_option_active ?? "1") === "1" ? 1 : 0,
-                }))
-                .sort(sortRepairs),
-            }))
-            .sort(makeModelSorter(brand.brand)),
-
-        }));
-
-        const sorted = normalized.sort(sortBrands);
-
-        if (mounted) {
-          setData(sorted);
-
-          const titlesSet = new Set();
-          sorted.forEach((b) =>
-            b.models.forEach((m) =>
-              m.options.forEach((o) => o?.title && titlesSet.add(o.title))
-            )
-          );
-          setRepairTitleOptions(
-            Array.from(titlesSet).sort((a, b) => a.localeCompare(b, "da"))
-          );
-        }
-
-        console.log("Brands:", (normalized || []).map((b) => b.brand));
-        console.log(
-          "Total models:",
-          normalized.reduce((n, b) => n + (b.models?.length || 0), 0)
-        );
+        await reloadAllRepairs();
+        if (!mounted) return;
       } catch (err) {
         console.error("[EditRepairsPage] Fejl ved hentning:", err);
       } finally {
@@ -504,11 +560,49 @@ export default function EditRepairsPage() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [reloadAllRepairs]);
+
+  // Auto-refresh: poll + focus/visibility
+  useEffect(() => {
+    if (pollRef.current) clearInterval(pollRef.current);
+
+    pollRef.current = setInterval(() => {
+      if (!isPageVisible()) return;
+
+      const ok = canAutoRefresh();
+      setAutoPaused(!ok);
+
+      if (!ok) return;
+      // silent refresh
+      reloadAllRepairs().catch((e) => console.error("[EditRepairsPage] auto-refresh error", e));
+    }, 60000);
+
+    const onFocus = () => {
+      if (!isPageVisible()) return;
+      const ok = canAutoRefresh();
+      setAutoPaused(!ok);
+      if (!ok) return;
+      reloadAllRepairs().catch((e) => console.error("[EditRepairsPage] focus refresh error", e));
+    };
+    const onVis = () => {
+      if (!isPageVisible()) return;
+      const ok = canAutoRefresh();
+      setAutoPaused(!ok);
+      if (!ok) return;
+      reloadAllRepairs().catch((e) => console.error("[EditRepairsPage] vis refresh error", e));
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVis);
+
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [canAutoRefresh, reloadAllRepairs]);
 
   /* ---------- Filtrering + accordion-data ---------- */
-
-  // Søgning – model + reparation
   const searchTokens = useMemo(() => norm(searchTerm).split(" ").filter(Boolean), [searchTerm]);
   const repairWordset = useMemo(() => {
     const set = new Set();
@@ -574,18 +668,16 @@ export default function EditRepairsPage() {
       .filter((b) => (b.models || []).length > 0);
   }, [baseFiltered, searchTokens, modelTokens, repairTokens]);
 
-  // auto-åbn ved søgning
   useEffect(() => {
     if (searchTokens.length === 0) return;
     const next = new Set();
     accordionData.forEach(b => b.models.forEach(m => (m.options?.length > 0) && next.add(modelKey(b.brand, m.model))));
     setOpenModels(next);
-  }, [accordionData, searchTokens]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [accordionData, searchTokens]);
 
-  // Flad/paging
   const flatModels = useMemo(() => {
     const out = [];
-    (accordionData || []).forEach((b) => (b.models || []).forEach((m) => out.push({ brand: b.brand, model: m.model, options: m.options || [] })));
+    (accordionData || []).forEach((b) => (b.models || []).forEach((m) => out.push({ brand: b.brand, model: m.model, model_id: m.model_id, options: m.options || [] })));
     return out;
   }, [accordionData]);
 
@@ -606,7 +698,6 @@ export default function EditRepairsPage() {
   }, [pageSlice]);
 
   useEffect(() => setCurrentPage(1), [searchTerm, selectedBrand, selectedModel, data]);
-
   useEffect(() => { if (searchTerm.trim() === "") setOpenModels(new Set()); }, [searchTerm]);
   useEffect(() => { setOpenModels(new Set()); }, [selectedBrand, selectedModel]);
 
@@ -616,7 +707,6 @@ export default function EditRepairsPage() {
   const [cmModel, setCmModel] = useState("");
   const [creatingModel, setCreatingModel] = useState(false);
 
-  // Skabelon for valgt brand = unikke reparationstitler på tværs af brandets modeller
   const brandTemplateTitles = useMemo(() => {
     const b = data.find((x) => x.brand === cmBrand);
     if (!b) return [];
@@ -636,28 +726,25 @@ export default function EditRepairsPage() {
     if ((brandObj.models || []).some((m) => (m.model || "").toLowerCase() === modelName.toLowerCase())) {
       return alert("Modellen findes allerede under denne enhed.");
     }
-
     if (brandTemplateTitles.length === 0) {
       return alert("Denne enhed har ingen skabelon (ingen eksisterende reparationstitler).");
     }
 
     setCreatingModel(true);
     try {
-      // 1) Opret selve modellen og få model_id
+      // 1) Opret selve modellen
       const res = await api.createModel({ brand, model: modelName, active: 1 });
       if (!res || res.status === "error") {
         setCreatingModel(false);
         return alert(res?.message || "Kunne ikke oprette model.");
       }
-      if (res.status === "exists" && res.model_id) {
-        console.warn("[createModel] model fandtes allerede – bruger eksisterende id");
-      } else if (res.status !== "created") {
+      if (res.status !== "created" && res.status !== "exists") {
         setCreatingModel(false);
         return alert("Kunne ikke oprette model.");
       }
-      const model_id = res.model_id;
+      const model_id = res.model_id; // <- BRUG DETTE ID VIDERE
 
-      // 2) Opret ALLE reparationer i ét kald – pris=0, tid=0, aktiv=0
+      // 2) Opret ALLE reparationer (0/0/inaktiv)
       const bulk = await api.bulkCreateRepairTemplates({
         model_id,
         titles: brandTemplateTitles,
@@ -665,8 +752,16 @@ export default function EditRepairsPage() {
         time: 0,
         active: 0,
       });
-
       const createdIds = Array.isArray(bulk?.repair_ids) ? bulk.repair_ids : [];
+      const ok = bulk?.status === "created" && createdIds.length === brandTemplateTitles.length;
+      if (!ok) {
+        alert(`Kunne ikke oprette alle skabelonreparationer (forventede ${brandTemplateTitles.length}, fik ${createdIds.length}).`);
+        // henter serverens sandhed
+        await reloadAllRepairs();
+        setCreatingModel(false);
+        return;
+      }
+
       const createdOptions = brandTemplateTitles.map((title, idx) => ({
         id: createdIds[idx] ?? `${model_id}_${idx}`,
         title,
@@ -676,12 +771,13 @@ export default function EditRepairsPage() {
         repair_option_active: 0,
       }));
 
-      // 3) Opdater UI
+      // 3) Opdater UI – med model_id på model-niveau
       setData((prev) => {
         const next = prev.map((b) => {
           if (b.brand !== brand) return b;
           const newModel = {
             model: modelName,
+            model_id, // <- VIGTIGT
             options: createdOptions.sort(sortRepairs),
           };
           const models = [...(b.models || []), newModel].sort(makeModelSorter(b.brand));
@@ -690,7 +786,6 @@ export default function EditRepairsPage() {
         return next;
       });
 
-      // Fold modellen ud og scroll til top
       setSelectedBrand(brand);
       setSelectedModel("");
       setSearchTerm(modelName);
@@ -699,7 +794,6 @@ export default function EditRepairsPage() {
         window.scrollTo({ top: 0, behavior: "smooth" });
       }, 0);
 
-      // Luk modal og nulstil
       setShowCreateModel(false);
       setCmBrand("");
       setCmModel("");
@@ -712,8 +806,48 @@ export default function EditRepairsPage() {
   };
 
   /* ---------- Render ---------- */
+  const bannerStyle = {
+    position: "sticky",
+    top: 0,
+    zIndex: 50,
+    background: "#fff7ed",
+    border: "1px solid #fed7aa",
+    color: "#9a3412",
+    padding: "10px 12px",
+    borderRadius: 10,
+    marginBottom: 12,
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    justifyContent: "space-between",
+  };
+
   return (
     <div style={{ padding: "2rem" }}>
+      {(autoPaused || hasUnsavedEdits) && (
+        <div style={bannerStyle}>
+          <div style={{ fontWeight: 700 }}>
+            Auto-opdatering er sat på pause {hasUnsavedEdits ? "pga. ugemte ændringer." : "mens du arbejder i en modal/redigering."}
+          </div>
+          <button
+            onClick={manualReload}
+            style={{
+              backgroundColor: "#2166AC",
+              color: "white",
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "none",
+              cursor: "pointer",
+              fontWeight: 700,
+              whiteSpace: "nowrap",
+            }}
+            title="Hent nyeste data fra serveren"
+          >
+            Genindlæs nu
+          </button>
+        </div>
+      )}
+
       {/* Top-knap */}
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1.5rem" }}>
         <button
@@ -744,16 +878,23 @@ export default function EditRepairsPage() {
           {showCreateForm ? "Skjul opretformular" : "Opret reparation"}
         </button>
 
-        {/* NY: Opret model fra skabelon */}
         <button
           onClick={() => setShowCreateModel(true)}
           style={{ backgroundColor: "#2166AC", color: "white", padding: "10px 16px", border: "none", borderRadius: "6px", cursor: "pointer" }}
         >
           Opret model
         </button>
+
+        <button
+          onClick={manualReload}
+          style={{ backgroundColor: "#fff", color: "#2166AC", padding: "10px 16px", border: "1px solid #2166AC33", borderRadius: "6px", cursor: "pointer" }}
+          title="Hent nyeste data fra serveren"
+        >
+          Genindlæs
+        </button>
       </div>
 
-      {/* Opret reparation (eksisterende) */}
+      {/* Opret reparation */}
       {showCreateForm && (
         <div style={{ marginBottom: "2rem", border: "1px solid #ddd", padding: "1rem", borderRadius: "6px" }}>
           <h4 style={{ marginBottom: "1rem", fontSize: "1.1rem", fontWeight: "bold" }}>Opret ny reparation</h4>
@@ -882,7 +1023,7 @@ export default function EditRepairsPage() {
 
       {/* ACCORDION */}
       <div style={{ marginTop: "1rem" }}>
-        {totalModels === 0 ? (
+        {flatModels.length === 0 ? (
           <p>Ingen resultater.</p>
         ) : (
           paginatedBrands.map((brand) => (
@@ -936,7 +1077,7 @@ export default function EditRepairsPage() {
                       background: "#fff",
                     }}
                   >
-                    {/* HEADER – ikke en <button> længere, for at undgå nested button */}
+                    {/* HEADER */}
                     <div
                       role="button"
                       tabIndex={0}
@@ -1136,9 +1277,7 @@ export default function EditRepairsPage() {
         )}
       </div>
 
-
-
-      {/* Pagination controls */}
+      {/* Pagination */}
       <div
         style={{
           display: "flex",
@@ -1337,11 +1476,18 @@ export default function EditRepairsPage() {
                   let modelIds = [];
                   if (globalScope === "all") {
                     data.forEach((b) => b.models.forEach((m) => {
-                      const mid = m.options?.[0]?.model_id;
+                      const mid = getModelIdFromModel(m);
                       if (mid) modelIds.push(mid);
                     }));
                   } else if (globalScope === "brands") {
-                    globalBrands.forEach((bn) => { modelIds = modelIds.concat(getModelIdsForBrand(bn)); });
+                    data.forEach((b) => {
+                      if (globalBrands.includes(b.brand)) {
+                        b.models.forEach((m) => {
+                          const mid = getModelIdFromModel(m);
+                          if (mid) modelIds.push(mid);
+                        });
+                      }
+                    });
                   } else if (globalScope === "models") {
                     globalModels.forEach((mn) => {
                       const mid = getModelIdByModelName(mn);
@@ -1352,14 +1498,15 @@ export default function EditRepairsPage() {
                   if (modelIds.length === 0) return alert("Ingen modeller valgt.");
 
                   try {
-                    await api.applyRepairChanges({ title: globalTitle, fields, models: modelIds });
+                    const res = await api.applyRepairChanges({ title: globalTitle, fields, models: modelIds });
+                    console.log("[applyRepairChanges] server:", res);
 
                     // Optimistisk UI
                     setData(prev =>
                       prev.map((b) => ({
                         ...b,
                         models: b.models.map((m) => {
-                          const mid = m.options?.[0]?.model_id;
+                          const mid = getModelIdFromModel(m);
                           if (!modelIds.includes(mid)) return m;
                           return {
                             ...m,
@@ -1380,6 +1527,7 @@ export default function EditRepairsPage() {
                     setShowGlobalModal(false);
                     setGlobalTitle(""); setGlobalPrice(""); setGlobalDuration("");
                     setGlobalScope("all"); setGlobalBrands([]); setGlobalModels([]);
+                    await reloadAllRepairs(); // hent sandhed efter global ændring
                   } catch (err) {
                     console.error("Fejl ved global opdatering:", err);
                     alert("Global opdatering fejlede.");
@@ -1394,7 +1542,7 @@ export default function EditRepairsPage() {
         </div>
       )}
 
-      {/* NY: Opret model fra skabelon – modal */}
+      {/* Opret model fra skabelon – modal */}
       {showCreateModel && (
         <div
           style={{
@@ -1424,7 +1572,11 @@ export default function EditRepairsPage() {
                   disabled={creatingModel}
                 >
                   <option value="">Vælg enhed</option>
-                  {data.map((b) => (<option key={b.brand} value={b.brand}>{b.brand}</option>))}
+                  {data.map((b) => (
+                    <option key={b.brand} value={b.brand}>
+                      {b.brand}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -1440,10 +1592,25 @@ export default function EditRepairsPage() {
                 />
               </div>
 
-              <div style={{ fontSize: 13, color: "#374151", background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 6, padding: 10 }}>
-                {cmBrand
-                  ? <>Skabelonen for <strong>{cmBrand}</strong> indeholder <strong>{brandTemplateTitles.length}</strong> unikke reparationstitler. De oprettes alle med <em>pris = 0</em>, <em>tid = 0</em> og <em>aktiv = inaktiv</em>.</>
-                  : <>Vælg enhed for at se hvor mange reparationer der oprettes som skabelon.</>}
+              <div
+                style={{
+                  fontSize: 13,
+                  color: "#374151",
+                  background: "#f9fafb",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 6,
+                  padding: 10,
+                }}
+              >
+                {cmBrand ? (
+                  <>
+                    Skabelonen for <strong>{cmBrand}</strong> indeholder{" "}
+                    <strong>{brandTemplateTitles.length}</strong> unikke reparationstitler. De oprettes alle med{" "}
+                    <em>pris = 0</em>, <em>tid = 0</em> og <em>aktiv = inaktiv</em>.
+                  </>
+                ) : (
+                  <>Vælg enhed for at se hvor mange reparationer der oprettes som skabelon.</>
+                )}
               </div>
             </div>
 
@@ -1458,7 +1625,14 @@ export default function EditRepairsPage() {
               <button
                 onClick={handleCreateModelFromTemplate}
                 disabled={creatingModel || !cmBrand || !cmModel}
-                style={{ background: "#22b783", color: "white", border: "none", borderRadius: 6, padding: "8px 12px", cursor: creatingModel ? "wait" : "pointer" }}
+                style={{
+                  background: "#22b783",
+                  color: "white",
+                  border: "none",
+                  borderRadius: 6,
+                  padding: "8px 12px",
+                  cursor: creatingModel ? "wait" : "pointer",
+                }}
               >
                 {creatingModel ? "Opretter…" : "Opret model"}
               </button>

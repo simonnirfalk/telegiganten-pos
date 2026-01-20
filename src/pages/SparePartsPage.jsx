@@ -42,8 +42,9 @@ function authHeaders(base = {}) {
   if (nonce) h["X-WP-Nonce"] = nonce;
   return h;
 }
-async function apiList({ offset = 0, limit = 100, search = "", lokation = "" } = {}, signal) {
-  const res = await fetch(withQuery(API_BASE, { offset: String(offset), limit: String(limit), search, lokation }), {
+async function apiList({ offset = 0, limit = 100, search = "", lokation = "", cb = "" } = {}, signal) {
+  // cb = cache-buster (for at undgå WP/proxy caching)
+  const res = await fetch(withQuery(API_BASE, { offset: String(offset), limit: String(limit), search, lokation, cb }), {
     method: "GET",
     headers: authHeaders({ Accept: "application/json" }),
     signal,
@@ -114,6 +115,9 @@ export default function SparePartsPage() {
   const [history, setHistory] = useState([]);
   const [editingIndex, setEditingIndex] = useState(null);
 
+  // auto-refresh UI
+  const [pausedNotice, setPausedNotice] = useState(false);
+
   // kolonne-visibility (SKU, Pris, UpdatedAt skjult by default)
   const [visibleCols, setVisibleCols] = useState(() => ({
     model: true,
@@ -141,6 +145,9 @@ export default function SparePartsPage() {
   // 👉 snapshot originalværdi pr. felt ved redigering
   const originalRef = useRef(new Map());
 
+  // polling
+  const pollRef = useRef(null);
+
   function cacheKey(q, loc, limit, p) { return `${q}::${loc}::${limit}::${p}`; }
 
   const locationOptions = useMemo(() => {
@@ -149,10 +156,14 @@ export default function SparePartsPage() {
     return Array.from(set).sort((a, b) => a.localeCompare(b, "da"));
   }, [parts]);
 
-  async function fetchPage({ pageArg = page, query = debouncedSearch, loc = locationFilter } = {}) {
+  const isPageVisible = () =>
+    typeof document !== "undefined" ? document.visibilityState === "visible" : true;
+
+  async function fetchPage({ pageArg = page, query = debouncedSearch, loc = locationFilter, bustCache = false } = {}) {
     const key = cacheKey(query, loc, pageSize, pageArg);
     const cached = pageCacheRef.current.get(key);
-    if (cached) {
+
+    if (!bustCache && cached) {
       setParts(cached.items);
       setTotal(cached.total ?? 0);
       setUnknownTotal(cached.total == null);
@@ -174,7 +185,10 @@ export default function SparePartsPage() {
     for (const lim of tryLimits) {
       try {
         const offset = (pageArg - 1) * lim;
-        const data = await apiList({ offset, limit: lim, search: query, lokation: loc }, controller.signal);
+        const data = await apiList(
+          { offset, limit: lim, search: query, lokation: loc, cb: bustCache ? String(Date.now()) : "" },
+          controller.signal
+        );
         if (myId !== reqIdRef.current) return;
 
         const items = Array.isArray(data?.items) ? data.items : [];
@@ -198,14 +212,61 @@ export default function SparePartsPage() {
     if (myId === reqIdRef.current) setLoading(false);
   }
 
+  function refreshNow() {
+    pageCacheRef.current.clear();
+    fetchPage({ pageArg: page, query: debouncedSearch, loc: locationFilter, bustCache: true });
+  }
+
   // initial fetch
   useEffect(() => { fetchPage({ pageArg: 1, query: "", loc: "" }); /* eslint-disable-next-line */ }, []);
   // search ændrer
-  useEffect(() => { setPage(1); pageCacheRef.current.clear(); fetchPage({ pageArg: 1, query: debouncedSearch, loc: locationFilter }); /* eslint-disable-next-line */ }, [debouncedSearch]);
+  useEffect(() => { setPage(1); pageCacheRef.current.clear(); fetchPage({ pageArg: 1, query: debouncedSearch, loc: locationFilter, bustCache: true }); /* eslint-disable-next-line */ }, [debouncedSearch]);
   // lokationsfilter ændrer
-  useEffect(() => { setPage(1); pageCacheRef.current.clear(); fetchPage({ pageArg: 1, query: debouncedSearch, loc: locationFilter }); /* eslint-disable-next-line */ }, [locationFilter]);
+  useEffect(() => { setPage(1); pageCacheRef.current.clear(); fetchPage({ pageArg: 1, query: debouncedSearch, loc: locationFilter, bustCache: true }); /* eslint-disable-next-line */ }, [locationFilter]);
   // side ændrer
   useEffect(() => { fetchPage({ pageArg: page, query: debouncedSearch, loc: locationFilter }); /* eslint-disable-next-line */ }, [page]);
+
+  // Auto-refresh: poll + focus/visibility
+  useEffect(() => {
+    if (pollRef.current) clearInterval(pollRef.current);
+
+    pollRef.current = setInterval(() => {
+      if (!isPageVisible()) return;
+
+      // pause hvis du redigerer en række
+      if (editingIndex !== null) {
+        setPausedNotice(true);
+        return;
+      }
+      setPausedNotice(false);
+
+      // silent refresh (men vi bruger samme fetch, som selv sætter loading – det er ok, men kan føles “blink”)
+      // For at undgå UI-blink kan vi lade den være; i praksis er det ofte fint på spareparts.
+      refreshNow();
+    }, 30000);
+
+    const onFocus = () => {
+      if (!isPageVisible()) return;
+      if (editingIndex !== null) { setPausedNotice(true); return; }
+      setPausedNotice(false);
+      refreshNow();
+    };
+    const onVis = () => {
+      if (!isPageVisible()) return;
+      if (editingIndex !== null) { setPausedNotice(true); return; }
+      setPausedNotice(false);
+      refreshNow();
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVis);
+
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [editingIndex, page, debouncedSearch, locationFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Gem på blur/Enter — sammenlign med ORIGINAL (ikke state) */
   const saveField = async (id, field, finalValue) => {
@@ -234,11 +295,12 @@ export default function SparePartsPage() {
       const updated = await apiPatch(id, patch, expectedUpdatedAt);
       setParts((prev) => prev.map((p) => (p.id === id ? { ...p, ...updated } : p)));
       setHistory((h) => [{ id, field, old: before, newVal: normalized }, ...h.slice(0, 49)]);
+      pageCacheRef.current.clear();
     } catch (e) {
       if (e.status === 409) {
         alert("Rækken er ændret siden sidst. Indlæser igen.");
         pageCacheRef.current.clear();
-        fetchPage({ pageArg: page, query: debouncedSearch, loc: locationFilter });
+        fetchPage({ pageArg: page, query: debouncedSearch, loc: locationFilter, bustCache: true });
       } else {
         alert(e.message || "Kunne ikke gemme ændring");
         setParts((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: before } : p)));
@@ -266,7 +328,7 @@ export default function SparePartsPage() {
       setNewRow(COLS.reduce((acc, k) => ({ ...acc, [k]: "" }), {}));
       pageCacheRef.current.clear();
       setPage(1);
-      fetchPage({ pageArg: 1, query: debouncedSearch, loc: locationFilter });
+      fetchPage({ pageArg: 1, query: debouncedSearch, loc: locationFilter, bustCache: true });
     } catch (e) { alert(e.message || "Kunne ikke oprette række"); }
   }
   async function handleDelete(id) {
@@ -275,7 +337,7 @@ export default function SparePartsPage() {
       await apiRemove(id);
       setParts((prev) => prev.filter((p) => p.id !== id));
       pageCacheRef.current.clear();
-      fetchPage({ pageArg: page, query: debouncedSearch, loc: locationFilter });
+      fetchPage({ pageArg: page, query: debouncedSearch, loc: locationFilter, bustCache: true });
     } catch (e) { alert(e.message || "Kunne ikke slette række"); }
   }
 
@@ -306,6 +368,7 @@ export default function SparePartsPage() {
           const val = toVal(e);
           saveField(row.id, field, val);
           setEditingIndex(null);
+          setPausedNotice(false);
         }}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
@@ -384,11 +447,54 @@ export default function SparePartsPage() {
     );
   }
 
+  const bannerStyle = {
+    position: "sticky",
+    top: 0,
+    zIndex: 50,
+    background: "#fff7ed",
+    border: "1px solid #fed7aa",
+    color: "#9a3412",
+    padding: "10px 12px",
+    borderRadius: 10,
+    marginBottom: 12,
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    justifyContent: "space-between",
+  };
+
   return (
     <div style={{ padding: 16 }}>
+      {pausedNotice && (
+        <div style={bannerStyle}>
+          <div style={{ fontWeight: 700 }}>
+            Auto-opdatering er sat på pause mens du redigerer.
+          </div>
+          <button
+            onClick={() => { setPausedNotice(false); refreshNow(); }}
+            style={{
+              backgroundColor: "#2166AC",
+              color: "white",
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "none",
+              cursor: "pointer",
+              fontWeight: 700,
+              whiteSpace: "nowrap",
+            }}
+            title="Hent nyeste data (når du er færdig med at redigere)"
+          >
+            Opdater nu
+          </button>
+        </div>
+      )}
+
       {/* Topbar */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
         <button onClick={() => navigate("/")} style={btnGhost}><FaHome /> Forside</button>
+        <button onClick={refreshNow} style={btnGhost} title="Hent nyeste data nu">
+          Opdater
+        </button>
         <div style={{ flex: 1 }} />
         <input placeholder="Søg fx 'Samsung S20 skærm'…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ ...inputStyle, width: 380 }} />
         <LocationFilter />
