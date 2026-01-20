@@ -51,24 +51,6 @@ function statusPill(statusRaw) {
   );
 }
 
-/** Signatur til at opdage "noget er ændret" uden at lave deep compare */
-function makeRepairSignature(items) {
-  const arr = Array.isArray(items) ? items : [];
-  let maxTs = 0;
-  for (const r of arr) {
-    const v =
-      r?.updated_at ??
-      r?.created_at ??
-      r?.date ??
-      r?.createdAt ??
-      r?.timestamp ??
-      null;
-    const t = new Date(v || 0).getTime();
-    if (Number.isFinite(t) && t > maxTs) maxTs = t;
-  }
-  return `${arr.length}|${maxTs}`;
-}
-
 export default function RepairsPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -84,93 +66,25 @@ export default function RepairsPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
-  // Auto-refresh UI
-  const [hasNewData, setHasNewData] = useState(false);
-  const lastSigRef = useRef("");
-  const pollingRef = useRef(null);
-
-  const isPageVisible = () =>
-    typeof document !== "undefined" ? document.visibilityState === "visible" : true;
-
-  const canAutoRefresh = useCallback(() => {
-    // Når modal er åben antager vi "redigering"/review → vi overskriver ikke listen automatisk
-    return !selectedRepair;
-  }, [selectedRepair]);
-
-  /** Ren fetch (ingen state) */
-  const fetchRepairs = useCallback(async () => {
-    const data = await api.getRepairOrders();
-    const items = Array.isArray(data) ? data : (data?.items ?? []);
-    return items;
-  }, []);
-
   /** Genbrugelig loader så vi kan refetch'e efter gem */
-  const loadRepairs = useCallback(async ({ silent = false, force = false } = {}) => {
+  const loadRepairs = useCallback(async () => {
     setLoadError("");
-    if (!silent) setLoading(true);
-
+    setLoading(true);
     try {
-      const items = await fetchRepairs();
-      const sig = makeRepairSignature(items);
-
-      // Første gang: sæt baseline
-      if (!lastSigRef.current || force) {
-        lastSigRef.current = sig;
-      }
-
-      // Hvis vi IKKE må auto-opdatere (modal åben), men data har ændret sig:
-      if (!canAutoRefresh() && sig !== lastSigRef.current) {
-        setHasNewData(true);
-        return;
-      }
-
-      // Normal: opdater state
+      const data = await api.getRepairOrders();
+      const items = Array.isArray(data) ? data : (data?.items ?? []);
       setRepairs(items);
-      lastSigRef.current = sig;
-      setHasNewData(false);
     } catch (err) {
       console.error("Fejl ved hentning af reparationer:", err);
       setLoadError("Kunne ikke hente reparationer.");
     } finally {
-      if (!silent) setLoading(false);
+      setLoading(false);
     }
-  }, [fetchRepairs, canAutoRefresh]);
+  }, []);
 
   /** Første load */
   useEffect(() => {
-    loadRepairs({ silent: false, force: true });
-  }, [loadRepairs]);
-
-  /** Auto refresh: polling + focus/visibility triggers */
-  useEffect(() => {
-    // ryd evt gammel
-    if (pollingRef.current) clearInterval(pollingRef.current);
-
-    // Poll hvert 20. sekund på listen
-    pollingRef.current = setInterval(() => {
-      if (!isPageVisible()) return;
-      // silent polling
-      loadRepairs({ silent: true });
-    }, 20000);
-
-    const onFocus = () => {
-      if (!isPageVisible()) return;
-      // ved fokus vil vi altid tjekke (silent)
-      loadRepairs({ silent: true });
-    };
-    const onVis = () => {
-      if (!isPageVisible()) return;
-      loadRepairs({ silent: true });
-    };
-
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVis);
-
-    return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVis);
-    };
+    loadRepairs();
   }, [loadRepairs]);
 
   /** Normaliser topfelter (ingen API-ændringer) */
@@ -184,6 +98,7 @@ export default function RepairsPage() {
       phone: r.phone ?? r.customer_phone ?? "",
       email: (r.email ?? r.customer_email ?? (r.contact?.includes("@") ? r.contact : "")),
       model: r.model_name ?? r.model ?? r.device ?? "",
+      model_id: Number(r.model_id ?? r?._raw?.model_id ?? 0) || 0, // ✅ vigtigt
       repair: r.repair_title ?? r.repair ?? r.title ?? "",
       price: Number(r.price ?? r.amount ?? 0),
       time: Number(r.time ?? r.duration ?? 0),
@@ -197,8 +112,10 @@ export default function RepairsPage() {
   /** Gruppér pr. ordre-ID med totaler */
   const grouped = useMemo(() => {
     const map = new Map();
+
     for (const r of normalizedRepairs) {
       const key = r.order_id || r.id;
+
       if (!map.has(key)) {
         map.set(key, {
           order_id: key,
@@ -207,6 +124,7 @@ export default function RepairsPage() {
           phone: r.phone,
           email: r.email,
           model: r.model,
+          model_id: r.model_id || 0, // ✅
           status: r.status,
           payment_type: r.payment_type,
           payment: r.payment,
@@ -216,14 +134,22 @@ export default function RepairsPage() {
           _rows: [],
         });
       }
+
       const g = map.get(key);
       g._rows.push(r);
+
+      // earliest created_at
       if (r.created_at && (!g.created_at || new Date(r.created_at) < new Date(g.created_at))) {
         g.created_at = r.created_at;
       }
+
+      // latest status
       const gLatestTs = new Date(g._rows[g._rows.length - 1]?.created_at || 0).getTime();
       const rTs = new Date(r.created_at || 0).getTime();
       if (rTs >= gLatestTs && r.status) g.status = r.status;
+
+      // prefer a real model_id if present
+      if (!g.model_id && r.model_id) g.model_id = r.model_id;
 
       const sourceId = r?._raw?.id ?? r?.id ?? r?._raw?.post_id ?? r?.post_id ?? null;
 
@@ -234,7 +160,9 @@ export default function RepairsPage() {
         time: Number(r.time || 0),
         part: r.part || null,
         source_id: sourceId,
+        model_id: r.model_id || 0, // ✅ pr linje
       });
+
       g.totalPrice += Number(r.price || 0);
       g.totalTime += Number(r.time || 0);
     }
@@ -242,12 +170,11 @@ export default function RepairsPage() {
     return Array.from(map.values());
   }, [normalizedRepairs]);
 
-  // --- Åbn specifik ordre fra Dashboard/state (placeret EFTER grouped er defineret) ---
+  // --- Åbn specifik ordre fra Dashboard/state ---
   const consumedOpenRef = useRef(false);
   useEffect(() => {
     const opener = location.state?.openRepair;
     if (!opener || consumedOpenRef.current) return;
-
     if (!Array.isArray(grouped) || grouped.length === 0) return;
 
     const key = String(opener.order_id ?? opener.id ?? "");
@@ -256,7 +183,7 @@ export default function RepairsPage() {
     if (g) {
       consumedOpenRef.current = true;
       openGroupedInHistory(g);
-      navigate(location.pathname, { replace: true, state: null }); // ryd state
+      navigate(location.pathname, { replace: true, state: null });
     }
   }, [location, grouped, navigate]);
 
@@ -319,6 +246,7 @@ export default function RepairsPage() {
       remaining_amount: null,
       note: g._rows[0]?._raw?.note || "",
       password: g._rows[0]?._raw?.password || "",
+      model_id: g.model_id || 0, // ✅ vigtigt
       lines: g.lines,
       history: g._rows[0]?._raw?.history || [],
     };
@@ -344,139 +272,95 @@ export default function RepairsPage() {
     backgroundColor: "#2166AC",
     color: "white",
     padding: "0.6rem 1rem",
-    borderRadius: "6px",
     border: "none",
-    marginBottom: "1.5rem",
+    borderRadius: "6px",
     cursor: "pointer",
-    display: "flex",
+    fontWeight: "bold",
+    display: "inline-flex",
     alignItems: "center",
     gap: "0.5rem",
   };
 
-  const bannerStyle = {
-    position: "sticky",
-    top: 0,
-    zIndex: 50,
-    background: "#fff7ed",
-    border: "1px solid #fed7aa",
-    color: "#9a3412",
-    padding: "10px 12px",
-    borderRadius: 10,
-    marginBottom: 12,
-    display: "flex",
-    alignItems: "center",
-    gap: 12,
-    justifyContent: "space-between",
-  };
-
   return (
-    <div style={{ padding: "2rem" }}>
-      {/* Banner: nyere data mens modal er åben */}
-      {hasNewData && (
-        <div style={bannerStyle}>
-          <div style={{ fontWeight: 700 }}>
-            Der findes nyere ændringer på reparationer.
-          </div>
-          <button
-            onClick={() => loadRepairs({ silent: false, force: true })}
-            style={{
-              backgroundColor: "#2166AC",
-              color: "white",
-              padding: "8px 12px",
-              borderRadius: 8,
-              border: "none",
-              cursor: "pointer",
-              fontWeight: 700,
-              whiteSpace: "nowrap",
-            }}
-            title="Hent nyeste data fra serveren"
-          >
-            Opdater nu
-          </button>
-        </div>
-      )}
-
-      {/* Global regel: Dashboard-knap */}
-      <button onClick={() => navigate("/")} style={buttonStyle}>
-        <FaHome /> Dashboard
-      </button>
-
-      <h2 style={{ textTransform: "uppercase", fontWeight: "bold" }}>Reparationer</h2>
-
-      {/* Filterlinje */}
-      <div style={{ display: "flex", gap: "1rem", marginBottom: "1rem", flexWrap: "wrap" }}>
-        <input
-          type="text"
-          placeholder="Søg navn, telefon, model, reparation eller ordre-id…"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          style={{ ...inputStyle, flex: 1, minWidth: 240 }}
-        />
-        <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} style={{ ...inputStyle, width: 180 }} />
-        <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} style={{ ...inputStyle, width: 180 }} />
+    <div style={{ padding: "1rem" }}>
+      {/* Top bar */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+        <button style={buttonStyle} onClick={() => navigate("/")}>
+          <FaHome /> Dashboard
+        </button>
+        <h1 style={{ margin: 0 }}>REPARATIONER</h1>
+        <div style={{ width: 120 }} />
       </div>
 
-      {/* Statusfilter */}
-      <div style={{ marginBottom: "1rem" }}>
-        {STATUS_OPTIONS.map((status) => (
-          <button key={status} onClick={() => setSelectedStatus(status)} style={statusButtonStyle(status)}>
-            {status.charAt(0).toUpperCase() + status.slice(1)}
+      {/* Search */}
+      <input
+        style={inputStyle}
+        type="text"
+        placeholder="Søg navn, telefon, model, reparation eller ordre-id..."
+        value={searchTerm}
+        onChange={(e) => setSearchTerm(e.target.value)}
+      />
+
+      {/* Status buttons */}
+      <div style={{ marginTop: "0.5rem" }}>
+        {STATUS_OPTIONS.map((s) => (
+          <button key={s} style={statusButtonStyle(s)} onClick={() => setSelectedStatus(s)}>
+            {s}
           </button>
         ))}
       </div>
 
-      {/* Loading / Error */}
-      {loading && <p>Indlæser reparationer…</p>}
-      {loadError && <p style={{ color: "crimson" }}>{loadError}</p>}
+      {/* Date filters */}
+      <div style={{ display: "flex", gap: "0.5rem", margin: "0.5rem 0" }}>
+        <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+        <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+      </div>
 
-      {/* Tabel – én række pr. ordre */}
-      {!loading && !loadError && (
-        <>
+      {loading ? (
+        <p>Indlæser...</p>
+      ) : loadError ? (
+        <p style={{ color: "red" }}>{loadError}</p>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
-              <tr style={{ background: "#f0f0f0" }}>
-                <th style={{ padding: "0.5rem", border: "1px solid #ddd" }}>Ordre ID</th>
-                <th style={{ padding: "0.5rem", border: "1px solid #ddd" }}>Oprettet</th>
-                <th style={{ padding: "0.5rem", border: "1px solid #ddd" }}>Kunde</th>
-                <th style={{ padding: "0.5rem", border: "1px solid #ddd" }}>Model</th>
-                <th style={{ padding: "0.5rem", border: "1px solid #ddd" }}>Reparation(er)</th>
-                <th style={{ padding: "0.5rem", border: "1px solid #ddd" }}>Pris + Tid (total)</th>
-                <th style={{ padding: "0.5rem", border: "1px solid #ddd" }}>Betaling</th>
-                <th style={{ padding: "0.5rem", border: "1px solid #ddd" }}>Status</th>
+              <tr style={{ background: "#f3f4f6" }}>
+                <th style={{ padding: "0.75rem", textAlign: "left" }}>Ordre ID</th>
+                <th style={{ padding: "0.75rem", textAlign: "left" }}>Oprettet</th>
+                <th style={{ padding: "0.75rem", textAlign: "left" }}>Kunde</th>
+                <th style={{ padding: "0.75rem", textAlign: "left" }}>Pris + Tid (total)</th>
+                <th style={{ padding: "0.75rem", textAlign: "left" }}>Betaling</th>
+                <th style={{ padding: "0.75rem", textAlign: "left" }}>Status</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((g) => (
-                <tr key={g.order_id} onClick={() => openGroupedInHistory(g)} style={{ cursor: "pointer" }}>
-                  <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>{g.order_id}</td>
-                  <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>{formatDkDateTime(g.created_at)}</td>
-                  <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>{g.customer || "—"}</td>
-                  <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>{g.model || (g.lines[0]?.device || "—")}</td>
-                  <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>
-                    {g.lines.map((ln) => ln.repair).filter(Boolean).join(", ") || "—"}
-                  </td>
-                  <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>
+                <tr
+                  key={g.order_id}
+                  style={{ borderBottom: "1px solid #e5e7eb", cursor: "pointer" }}
+                  onClick={() => openGroupedInHistory(g)}
+                >
+                  <td style={{ padding: "0.75rem" }}>{g.order_id}</td>
+                  <td style={{ padding: "0.75rem" }}>{formatDkDateTime(g.created_at)}</td>
+                  <td style={{ padding: "0.75rem" }}>{g.customer || "—"}</td>
+                  <td style={{ padding: "0.75rem" }}>
                     {formatPrice(g.totalPrice)} • {g.totalTime ? `${g.totalTime} min` : "—"}
                   </td>
-                  <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>
-                    {g.payment || `Betaling efter reparation: ${g.totalPrice.toLocaleString("da-DK")} kr`}
-                  </td>
-                  <td style={{ padding: "0.5rem", border: "1px solid #ddd" }}>{statusPill(g.status)}</td>
+                  <td style={{ padding: "0.75rem" }}>{g.payment || `Betaling efter reparation: ${g.totalPrice} kr`}</td>
+                  <td style={{ padding: "0.75rem" }}>{statusPill(g.status)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-
-          {filtered.length === 0 && <p style={{ marginTop: "1rem" }}>Ingen reparationer fundet.</p>}
-        </>
+        </div>
       )}
 
-      {/* Modal med historik / visning (syntetisk samlet ordre) */}
+      {/* Modal */}
       {selectedRepair && (
         <RepairHistory
           repair={selectedRepair}
           onClose={() => setSelectedRepair(null)}
-          onAfterSave={() => loadRepairs({ silent: false, force: true })} // refresh efter gem + reset banner
+          onAfterSave={loadRepairs}
         />
       )}
     </div>
