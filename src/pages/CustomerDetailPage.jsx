@@ -4,6 +4,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { FaHome } from "react-icons/fa";
 import { api } from "../data/apiClient";
 import RepairHistory from "../components/RepairHistory";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 
 /** Utils */
 const monthsDk = [
@@ -36,34 +37,49 @@ export default function CustomerDetailPage() {
   const [customer, setCustomer] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  const [selectedRepair, setSelectedRepair] = useState(null); // <-- modal
+  const [selectedRepair, setSelectedRepair] = useState(null); // modal
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+
+  async function loadCustomer({ silent = false } = {}) {
+    try {
+      if (!silent) setLoading(true);
+      else setIsRefreshing(true);
+
+      setLoadError("");
+      const data = await api.getCustomerById(id);
+
+      const normalized = {
+        id: data?.id ?? data?.ID ?? "",
+        name: data?.name ?? data?.customer_name ?? "",
+        phone: data?.phone ?? data?.customer_phone ?? "",
+        email: data?.email ?? "",
+        repairs: Array.isArray(data?.repairs) ? data.repairs : [],
+      };
+      setCustomer(normalized);
+      setLastUpdatedAt(new Date());
+    } catch (err) {
+      console.error("Fejl ved hentning af kunde:", err);
+      setLoadError("Kunne ikke hente kunden.");
+    } finally {
+      if (!silent) setLoading(false);
+      setIsRefreshing(false);
+    }
+  }
 
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        setLoading(true);
-        setLoadError("");
-        const data = await api.getCustomerById(id);
-        if (!mounted) return;
-
-        const normalized = {
-          id: data?.id ?? data?.ID ?? "",
-          name: data?.name ?? data?.customer_name ?? "",
-          phone: data?.phone ?? data?.customer_phone ?? "",
-          email: data?.email ?? "",
-          repairs: Array.isArray(data?.repairs) ? data.repairs : [],
-        };
-        setCustomer(normalized);
-      } catch (err) {
-        console.error("Fejl ved hentning af kunde:", err);
-        if (mounted) setLoadError("Kunne ikke hente kunden.");
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    })();
-    return () => { mounted = false; };
+    loadCustomer({ silent: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // Auto-refresh: pause mens modal er åben (undgå conflicts under redigering)
+  useAutoRefresh({
+    enabled: !selectedRepair,
+    intervalMs: 60000,
+    refresh: async () => {
+      await loadCustomer({ silent: true });
+    },
+  });
 
   // Normaliser og sorter reparationer nyeste først
   const repairs = useMemo(() => {
@@ -79,7 +95,6 @@ export default function CustomerDetailPage() {
       order_id: r.order_id ?? r.id ?? "",
       status: r.status ?? "",
       payment: r.payment ?? "",
-      // history, password, contact osv. følger evt. senere fra update
     }));
     arr.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
     return arr;
@@ -98,30 +113,28 @@ export default function CustomerDetailPage() {
   };
 
   function openRepair(r) {
-    // Byg et komplet repair-objekt til modallen
     const forModal = {
       ...r,
       customer: customer?.name || "",
       customer_id: customer?.id || 0,
       phone: customer?.phone || "",
-      // Sikrer felter som modallen forventer findes:
-      payment_type: r.payment_type, // hvis vi har det
+      payment_type: r.payment_type,
       note: r.note ?? "",
       password: r.password ?? "",
       contact: r.contact ?? "",
-      history: r.history || [], // kan være tom – modallen håndterer det
+      history: r.history || [],
     };
     setSelectedRepair(forModal);
   }
 
   function closeModal() {
     setSelectedRepair(null);
+    // Når modalen lukker, vil hook’en auto-refresh’e igen
   }
 
   async function handleSaveFromModal(payload) {
-    // payload: { repair_id, fields }
     const res = await api.updateRepairWithHistory(payload);
-    // Optimistisk opdatering af kundens reparationsliste
+
     setCustomer((prev) => {
       if (!prev) return prev;
       const updated = prev.repairs.map((row) => {
@@ -132,7 +145,7 @@ export default function CustomerDetailPage() {
       });
       return { ...prev, repairs: updated };
     });
-    // Opdater også den valgte reparation i modallen med nye værdier + history fra API
+
     if (res?.history && Array.isArray(res.history)) {
       setSelectedRepair((old) => (old ? { ...old, ...payload.fields, history: res.history } : old));
     } else {
@@ -154,6 +167,19 @@ export default function CustomerDetailPage() {
         <button onClick={() => navigate("/customers")} style={buttonStyle}>
           Tilbage til kunder
         </button>
+      </div>
+
+      {/* Diskret refresh-status */}
+      <div style={{ marginBottom: "1rem", color: "#6b7280", fontSize: "0.9rem" }}>
+        {selectedRepair ? (
+          "Auto-opdatering er pauset mens du redigerer i modalen."
+        ) : isRefreshing ? (
+          "Opdaterer…"
+        ) : lastUpdatedAt ? (
+          `Sidst opdateret: ${lastUpdatedAt.toLocaleTimeString("da-DK")}`
+        ) : (
+          ""
+        )}
       </div>
 
       {/* Kundeinfo */}

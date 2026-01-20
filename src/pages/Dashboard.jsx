@@ -4,6 +4,7 @@ import DashboardStats from "../components/DashboardStats";
 import DashboardRecentBookings from "../components/DashboardRecentBookings";
 import { useNavigate } from "react-router-dom";
 import { api } from "../data/apiClient";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 
 // ---------------- Helpers ----------------
 function isCancelledStatus(s) {
@@ -105,6 +106,32 @@ export default function Dashboard() {
   const [repairs, setRepairs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+
+  async function loadRepairs({ silent = false } = {}) {
+    let cancelled = false;
+    try {
+      if (!silent) setLoading(true);
+      else setIsRefreshing(true);
+
+      setErrorMsg("");
+      const res = await api.getRepairOrders(); // tg_repair
+      const items = Array.isArray(res) ? res : (res?.items ?? []);
+      if (!cancelled) {
+        setRepairs(items);
+        setLastUpdatedAt(new Date());
+      }
+    } catch (err) {
+      if (!cancelled) setErrorMsg(err?.message || "Kunne ikke hente reparationer.");
+    } finally {
+      if (!cancelled) {
+        if (!silent) setLoading(false);
+        setIsRefreshing(false);
+      }
+    }
+    return () => { cancelled = true; };
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -112,9 +139,12 @@ export default function Dashboard() {
       try {
         setLoading(true);
         setErrorMsg("");
-        const res = await api.getRepairOrders(); // tg_repair
+        const res = await api.getRepairOrders();
         const items = Array.isArray(res) ? res : (res?.items ?? []);
-        if (!cancelled) setRepairs(items);
+        if (!cancelled) {
+          setRepairs(items);
+          setLastUpdatedAt(new Date());
+        }
       } catch (err) {
         if (!cancelled) setErrorMsg(err?.message || "Kunne ikke hente reparationer.");
       } finally {
@@ -124,7 +154,16 @@ export default function Dashboard() {
     return () => { cancelled = true; };
   }, []);
 
-  // ---- NYT: Gruppér pr. order_id, beregn totaler og saml titler ----
+  // Auto-refresh (Niveau 1): poll + focus/visibility
+  useAutoRefresh({
+    enabled: true,
+    intervalMs: 20000,
+    refresh: async () => {
+      await loadRepairs({ silent: true });
+    },
+  });
+
+  // ---- Gruppér pr. order_id, beregn totaler og saml titler ----
   const groupedLatest = useMemo(() => {
     const list = (Array.isArray(repairs) ? repairs : []).filter((r) => !isCancelledStatus(r?.status));
     const m = new Map();
@@ -143,12 +182,11 @@ export default function Dashboard() {
           titles: [],
           totalPrice: 0,
           totalTime: 0,
-          firstRow: r, // gem til klik
+          firstRow: r,
         });
       }
       const g = m.get(orderId);
 
-      // ældste created_at til visning
       const t = new Date(r?.updated_at || r?.created_at || r?.date || r?.createdAt || 0).getTime();
       const gt = new Date(g.created_at || 0).getTime();
       if (!g.created_at || t < gt) g.created_at = r?.updated_at || r?.created_at || r?.date || r?.createdAt || null;
@@ -173,14 +211,13 @@ export default function Dashboard() {
   const hasData = groupedLatest.length > 0;
 
   const openOrder = (g) => {
-    // Åbn i RepairsPage med state → derfra åbner vi historik for ordren
     navigate("/repairs", { state: { openRepair: { order_id: g.order_id } } });
   };
 
   return (
     <div>
       {/* Top-knapper */}
-      <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap", marginBottom: "2rem" }}>
+      <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap", marginBottom: "1rem" }}>
         {[
           { label: "Opret reparation", to: "/opret" },
           { label: "Reparationer", to: "/repairs" },
@@ -199,6 +236,11 @@ export default function Dashboard() {
             {b.label}
           </div>
         ))}
+      </div>
+
+      {/* Diskret refresh-status */}
+      <div style={{ marginBottom: "1.25rem", color: "#6b7280", fontSize: "0.9rem" }}>
+        {isRefreshing ? "Opdaterer…" : lastUpdatedAt ? `Sidst opdateret: ${lastUpdatedAt.toLocaleTimeString("da-DK")}` : ""}
       </div>
 
       {/* Reparationer */}
@@ -278,7 +320,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ✅ Seneste bookinger */}
+      {/* Seneste bookinger */}
       <h2 style={{ fontFamily: "Archivo Black", textTransform: "uppercase", margin: "1rem 0" }}>
         Seneste bookinger
       </h2>

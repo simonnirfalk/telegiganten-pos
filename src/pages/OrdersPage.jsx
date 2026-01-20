@@ -1,7 +1,8 @@
 // src/pages/OrdersPage.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api } from "../data/apiClient"; // <-- korrekt sti
+import { api } from "../data/apiClient";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 
 const blue = "#2166AC";
 
@@ -35,7 +36,7 @@ function Button({ children, onClick, style, type = "button" }) {
         fontWeight: 600,
         cursor: "pointer",
         transition: "all .15s ease",
-        ...(style || {}), // <-- korrekt spread
+        ...(style || {}),
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.background = "#fff";
@@ -102,23 +103,37 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [q, setQ] = useState("");
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
   const navigate = useNavigate();
 
-  async function load() {
-    setLoading(true);
+  async function load({ silent = false } = {}) {
     try {
+      if (!silent) setLoading(true);
+      else setIsRefreshing(true);
+
       const data = await api.getOrders();
       setOrders(Array.isArray(data) ? data : data?.orders || []);
+      setLastUpdatedAt(new Date());
     } catch (e) {
       console.error("Failed to load orders", e);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
+      setIsRefreshing(false);
     }
   }
 
   useEffect(() => {
-    load();
+    load({ silent: false });
   }, []);
+
+  useAutoRefresh({
+    enabled: !showCreate, // pause mens modal er åben
+    intervalMs: 30000,
+    refresh: async () => {
+      await load({ silent: true });
+    },
+  });
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -139,7 +154,7 @@ export default function OrdersPage() {
 
   return (
     <div style={{ padding: 20, maxWidth: 1200, margin: "0 auto" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 10 }}>
         <h1 style={{ margin: 0 }}>Bestillinger</h1>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <input
@@ -157,6 +172,16 @@ export default function OrdersPage() {
           />
           <Button onClick={() => setShowCreate(true)}>Opret bestilling</Button>
         </div>
+      </div>
+
+      <div style={{ marginBottom: 16, color: "#6b7280", fontSize: "0.9rem" }}>
+        {showCreate
+          ? "Auto-opdatering er pauset mens du opretter en bestilling."
+          : isRefreshing
+          ? "Opdaterer…"
+          : lastUpdatedAt
+          ? `Sidst opdateret: ${lastUpdatedAt.toLocaleTimeString("da-DK")}`
+          : ""}
       </div>
 
       {loading ? (
@@ -229,7 +254,7 @@ export default function OrdersPage() {
           onClose={() => setShowCreate(false)}
           onCreated={async () => {
             setShowCreate(false);
-            await load();
+            await load({ silent: false });
           }}
         />
       )}
@@ -258,7 +283,7 @@ function CreateOrderModal({ onClose, onCreated }) {
     setSaving(true);
     try {
       const payload = {
-        ...form, // <-- korrekt spread
+        ...form,
         price: Number(form.price || 0),
         deposit_amount: Number(form.deposit_amount || 0),
       };
@@ -274,7 +299,7 @@ function CreateOrderModal({ onClose, onCreated }) {
   }
 
   function set(field, value) {
-    setForm((f) => ({ ...f, [field]: value })); // <-- korrekt
+    setForm((f) => ({ ...f, [field]: value }));
   }
 
   return (
@@ -283,7 +308,7 @@ function CreateOrderModal({ onClose, onCreated }) {
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.35)", // <-- korrekt alpha
+        background: "rgba(0,0,0,0.35)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",

@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaHome } from "react-icons/fa";
 import { api } from "../data/apiClient";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 
 /** Utils */
 const monthsDk = [
@@ -25,35 +26,47 @@ export default function CustomersPage() {
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+
+  async function loadCustomers({ silent = false } = {}) {
+    try {
+      if (!silent) setLoading(true);
+      else setIsRefreshing(true);
+
+      setLoadError("");
+      const data = await api.getCustomersWithRepairs();
+
+      const normalized = (Array.isArray(data) ? data : []).map((c) => ({
+        id: c.id ?? c.ID ?? c.customer_id ?? Math.random().toString(36).slice(2),
+        name: c.name ?? c.customer_name ?? "",
+        phone: c.phone ?? c.customer_phone ?? "",
+        email: c.email ?? "",
+        repairs: Array.isArray(c.repairs) ? c.repairs : [],
+      }));
+
+      setCustomers(normalized);
+      setLastUpdatedAt(new Date());
+    } catch (err) {
+      console.error("Fejl ved hentning af kunder:", err);
+      setLoadError("Kunne ikke hente kunder.");
+    } finally {
+      if (!silent) setLoading(false);
+      setIsRefreshing(false);
+    }
+  }
 
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        setLoading(true);
-        setLoadError("");
-        const data = await api.getCustomersWithRepairs();
-        if (!mounted) return;
-
-        // Defensive: sørg for array og at repairs altid er et array
-        const normalized = (Array.isArray(data) ? data : []).map((c) => ({
-          id: c.id ?? c.ID ?? c.customer_id ?? Math.random().toString(36).slice(2),
-          name: c.name ?? c.customer_name ?? "",
-          phone: c.phone ?? c.customer_phone ?? "",
-          email: c.email ?? "",
-          repairs: Array.isArray(c.repairs) ? c.repairs : [],
-        }));
-
-        setCustomers(normalized);
-      } catch (err) {
-        console.error("Fejl ved hentning af kunder:", err);
-        if (mounted) setLoadError("Kunne ikke hente kunder.");
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    })();
-    return () => { mounted = false; };
+    loadCustomers({ silent: false });
   }, []);
+
+  useAutoRefresh({
+    enabled: true,
+    intervalMs: 60000,
+    refresh: async () => {
+      await loadCustomers({ silent: true });
+    },
+  });
 
   // Søgning + sortering (seneste reparation først)
   const filteredCustomers = useMemo(() => {
@@ -61,17 +74,10 @@ export default function CustomersPage() {
 
     const list = (customers || []).filter((c) => {
       if (!term) return true;
-      const hay = [
-        c.name || "",
-        c.phone || "",
-        c.email || "",
-      ]
-        .join(" ")
-        .toLowerCase();
+      const hay = [c.name || "", c.phone || "", c.email || ""].join(" ").toLowerCase();
       return hay.includes(term);
     });
 
-    // Sortér efter seneste repair.created_at
     list.sort((a, b) => {
       const lastA = a.repairs?.length ? a.repairs[a.repairs.length - 1] : null;
       const lastB = b.repairs?.length ? b.repairs[b.repairs.length - 1] : null;
@@ -106,6 +112,10 @@ export default function CustomersPage() {
       </div>
 
       <h2 style={{ textTransform: "uppercase", fontWeight: "bold" }}>Kunder</h2>
+
+      <div style={{ marginBottom: "0.75rem", color: "#6b7280", fontSize: "0.9rem" }}>
+        {isRefreshing ? "Opdaterer…" : lastUpdatedAt ? `Sidst opdateret: ${lastUpdatedAt.toLocaleTimeString("da-DK")}` : ""}
+      </div>
 
       <input
         type="text"
