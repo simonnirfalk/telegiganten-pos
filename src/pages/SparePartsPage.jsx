@@ -1,6 +1,14 @@
 // src/pages/SparePartsPage.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { FaTrash, FaPlus, FaHistory, FaHome, FaSlidersH, FaChevronDown } from "react-icons/fa";
+import {
+  FaTrash,
+  FaPlus,
+  FaHistory,
+  FaHome,
+  FaSlidersH,
+  FaChevronDown,
+  FaTimes,
+} from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 
 /** === KONFIG === */
@@ -23,16 +31,42 @@ const LABEL = {
 
 /** --- UI styles --- */
 const BLUE = "#2166AC";
-const btnPrimary = { backgroundColor: BLUE, color: "#fff", padding: "10px 14px", border: "none", borderRadius: 8, cursor: "pointer" };
-const btnGhost   = { background: "#fff", color: BLUE, border: `1px solid ${BLUE}33`, padding: "8px 12px", borderRadius: 8, cursor: "pointer" };
-const btnDanger  = { backgroundColor: "#cc0000", color: "#fff", padding: "6px 10px", border: "none", borderRadius: 8, cursor: "pointer" };
+const btnPrimary = {
+  backgroundColor: BLUE,
+  color: "#fff",
+  padding: "10px 14px",
+  border: "none",
+  borderRadius: 8,
+  cursor: "pointer",
+  fontWeight: 700,
+};
+const btnGhost = {
+  background: "#fff",
+  color: BLUE,
+  border: `1px solid ${BLUE}33`,
+  padding: "8px 12px",
+  borderRadius: 8,
+  cursor: "pointer",
+  fontWeight: 700,
+};
+const btnDanger = {
+  backgroundColor: "#cc0000",
+  color: "#fff",
+  padding: "6px 10px",
+  border: "none",
+  borderRadius: 8,
+  cursor: "pointer",
+  fontWeight: 700,
+};
 const inputStyle = { padding: 8, borderRadius: 8, border: "1px solid #d1d5db" };
 const chip = { fontSize: 13, color: "#64748b" };
 
 /** --- helpers --- */
 function withQuery(u, q = {}) {
   const url = new URL(u, window.location.origin);
-  Object.entries(q).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, v); });
+  Object.entries(q).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, v);
+  });
   return url.toString();
 }
 function authHeaders(base = {}) {
@@ -73,7 +107,9 @@ async function apiPatch(id, patch, expectedUpdatedAt) {
   const out = await res.json().catch(() => ({}));
   if (res.status === 409) {
     const e = new Error(out?.message || "Conflict");
-    e.status = 409; e.data = out; throw e;
+    e.status = 409;
+    e.data = out;
+    throw e;
   }
   if (!res.ok) throw new Error(out?.message || `Update fejlede (${res.status})`);
   return out;
@@ -88,7 +124,10 @@ async function apiRemove(id) {
 }
 function useDebouncedValue(v, ms = 500) {
   const [out, setOut] = useState(v);
-  useEffect(() => { const t = setTimeout(() => setOut(v), ms); return () => clearTimeout(t); }, [v, ms]);
+  useEffect(() => {
+    const t = setTimeout(() => setOut(v), ms);
+    return () => clearTimeout(t);
+  }, [v, ms]);
   return out;
 }
 
@@ -117,6 +156,9 @@ export default function SparePartsPage() {
 
   // auto-refresh UI
   const [pausedNotice, setPausedNotice] = useState(false);
+
+  // Opret-ny toggle (NYT)
+  const [createOpen, setCreateOpen] = useState(false);
 
   // kolonne-visibility (SKU, Pris, UpdatedAt skjult by default)
   const [visibleCols, setVisibleCols] = useState(() => ({
@@ -148,16 +190,19 @@ export default function SparePartsPage() {
   // polling
   const pollRef = useRef(null);
 
-  function cacheKey(q, loc, limit, p) { return `${q}::${loc}::${limit}::${p}`; }
+  function cacheKey(q, loc, limit, p) {
+    return `${q}::${loc}::${limit}::${p}`;
+  }
 
   const locationOptions = useMemo(() => {
     const set = new Set();
-    parts.forEach(p => { if (p.location) set.add(String(p.location)); });
+    parts.forEach((p) => {
+      if (p.location) set.add(String(p.location));
+    });
     return Array.from(set).sort((a, b) => a.localeCompare(b, "da"));
   }, [parts]);
 
-  const isPageVisible = () =>
-    typeof document !== "undefined" ? document.visibilityState === "visible" : true;
+  const isPageVisible = () => (typeof document !== "undefined" ? document.visibilityState === "visible" : true);
 
   async function fetchPage({ pageArg = page, query = debouncedSearch, loc = locationFilter, bustCache = false } = {}) {
     const key = cacheKey(query, loc, pageSize, pageArg);
@@ -206,7 +251,10 @@ export default function SparePartsPage() {
         if (e.name === "AbortError") return;
         const serverErr = [0, 500, 502, 504].includes(e.status || 0);
         const isLast = lim === tryLimits[tryLimits.length - 1];
-        if (!serverErr || isLast) { setProblem(e.message || "Kunne ikke hente data"); break; }
+        if (!serverErr || isLast) {
+          setProblem(e.message || "Kunne ikke hente data");
+          break;
+        }
       }
     }
     if (myId === reqIdRef.current) setLoading(false);
@@ -218,13 +266,25 @@ export default function SparePartsPage() {
   }
 
   // initial fetch
-  useEffect(() => { fetchPage({ pageArg: 1, query: "", loc: "" }); /* eslint-disable-next-line */ }, []);
+  useEffect(() => {
+    fetchPage({ pageArg: 1, query: "", loc: "" }); // eslint-disable-next-line
+  }, []);
   // search ændrer
-  useEffect(() => { setPage(1); pageCacheRef.current.clear(); fetchPage({ pageArg: 1, query: debouncedSearch, loc: locationFilter, bustCache: true }); /* eslint-disable-next-line */ }, [debouncedSearch]);
+  useEffect(() => {
+    setPage(1);
+    pageCacheRef.current.clear();
+    fetchPage({ pageArg: 1, query: debouncedSearch, loc: locationFilter, bustCache: true }); // eslint-disable-next-line
+  }, [debouncedSearch]);
   // lokationsfilter ændrer
-  useEffect(() => { setPage(1); pageCacheRef.current.clear(); fetchPage({ pageArg: 1, query: debouncedSearch, loc: locationFilter, bustCache: true }); /* eslint-disable-next-line */ }, [locationFilter]);
+  useEffect(() => {
+    setPage(1);
+    pageCacheRef.current.clear();
+    fetchPage({ pageArg: 1, query: debouncedSearch, loc: locationFilter, bustCache: true }); // eslint-disable-next-line
+  }, [locationFilter]);
   // side ændrer
-  useEffect(() => { fetchPage({ pageArg: page, query: debouncedSearch, loc: locationFilter }); /* eslint-disable-next-line */ }, [page]);
+  useEffect(() => {
+    fetchPage({ pageArg: page, query: debouncedSearch, loc: locationFilter }); // eslint-disable-next-line
+  }, [page]);
 
   // Auto-refresh: poll + focus/visibility
   useEffect(() => {
@@ -240,20 +300,24 @@ export default function SparePartsPage() {
       }
       setPausedNotice(false);
 
-      // silent refresh (men vi bruger samme fetch, som selv sætter loading – det er ok, men kan føles “blink”)
-      // For at undgå UI-blink kan vi lade den være; i praksis er det ofte fint på spareparts.
       refreshNow();
     }, 30000);
 
     const onFocus = () => {
       if (!isPageVisible()) return;
-      if (editingIndex !== null) { setPausedNotice(true); return; }
+      if (editingIndex !== null) {
+        setPausedNotice(true);
+        return;
+      }
       setPausedNotice(false);
       refreshNow();
     };
     const onVis = () => {
       if (!isPageVisible()) return;
-      if (editingIndex !== null) { setPausedNotice(true); return; }
+      if (editingIndex !== null) {
+        setPausedNotice(true);
+        return;
+      }
       setPausedNotice(false);
       refreshNow();
     };
@@ -279,9 +343,11 @@ export default function SparePartsPage() {
     const before = original !== undefined ? original : fallbackOriginal;
 
     const normalized =
-      field === "price" || field === "cost_price" ? (Number(finalValue) || 0) :
-      field === "stock" ? (Number(finalValue) || 0) :
-      finalValue;
+      field === "price" || field === "cost_price"
+        ? Number(finalValue) || 0
+        : field === "stock"
+        ? Number(finalValue) || 0
+        : finalValue;
 
     if (String(normalized) === String(before ?? "")) {
       originalRef.current.delete(key);
@@ -323,13 +389,19 @@ export default function SparePartsPage() {
         cost_price: Number(newRow.cost_price) || 0,
         repair: String(newRow.repair || ""),
       };
-      if (!clean.model) { alert("Model skal udfyldes."); return; }
+      if (!clean.model) {
+        alert("Model skal udfyldes.");
+        return;
+      }
       await apiCreate(clean);
       setNewRow(COLS.reduce((acc, k) => ({ ...acc, [k]: "" }), {}));
       pageCacheRef.current.clear();
       setPage(1);
+      setCreateOpen(false);
       fetchPage({ pageArg: 1, query: debouncedSearch, loc: locationFilter, bustCache: true });
-    } catch (e) { alert(e.message || "Kunne ikke oprette række"); }
+    } catch (e) {
+      alert(e.message || "Kunne ikke oprette række");
+    }
   }
   async function handleDelete(id) {
     if (!window.confirm("Slet denne reservedel?")) return;
@@ -338,7 +410,9 @@ export default function SparePartsPage() {
       setParts((prev) => prev.filter((p) => p.id !== id));
       pageCacheRef.current.clear();
       fetchPage({ pageArg: page, query: debouncedSearch, loc: locationFilter, bustCache: true });
-    } catch (e) { alert(e.message || "Kunne ikke slette række"); }
+    } catch (e) {
+      alert(e.message || "Kunne ikke slette række");
+    }
   }
 
   /** --- UI helpers --- */
@@ -385,7 +459,9 @@ export default function SparePartsPage() {
 
   const shownCols = useMemo(() => {
     const arr = [];
-    COLS.forEach((c) => { if (visibleCols[c]) arr.push(c); });
+    COLS.forEach((c) => {
+      if (visibleCols[c]) arr.push(c);
+    });
     if (visibleCols.updatedAt) arr.push("updatedAt");
     return arr;
   }, [visibleCols]);
@@ -393,18 +469,37 @@ export default function SparePartsPage() {
   function ColumnPicker() {
     return (
       <div style={{ position: "relative" }}>
-        <button style={{ ...btnGhost, display: "flex", alignItems: "center", gap: 8 }} onClick={() => setColPickerOpen((o) => !o)}>
+        <button
+          style={{ ...btnGhost, display: "flex", alignItems: "center", gap: 8 }}
+          onClick={() => setColPickerOpen((o) => !o)}
+        >
           <FaSlidersH /> Kolonner <FaChevronDown style={{ fontSize: 12 }} />
         </button>
         {colPickerOpen && (
-          <div style={{
-            position: "absolute", zIndex: 20, marginTop: 8, right: 0,
-            background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 10, minWidth: 220,
-            boxShadow: "0 10px 24px rgba(0,0,0,0.08)"
-          }}>
+          <div
+            style={{
+              position: "absolute",
+              zIndex: 20,
+              marginTop: 8,
+              right: 0,
+              background: "#fff",
+              border: "1px solid #e2e8f0",
+              borderRadius: 10,
+              padding: 10,
+              minWidth: 220,
+              boxShadow: "0 10px 24px rgba(0,0,0,0.08)",
+            }}
+          >
             {[...COLS, "updatedAt"].map((key) => (
-              <label key={key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 4px", cursor: "pointer" }}>
-                <input type="checkbox" checked={!!visibleCols[key]} onChange={(e) => setVisibleCols((prev) => ({ ...prev, [key]: e.target.checked }))} />
+              <label
+                key={key}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 4px", cursor: "pointer" }}
+              >
+                <input
+                  type="checkbox"
+                  checked={!!visibleCols[key]}
+                  onChange={(e) => setVisibleCols((prev) => ({ ...prev, [key]: e.target.checked }))}
+                />
                 <span>{LABEL[key] || key}</span>
               </label>
             ))}
@@ -414,28 +509,77 @@ export default function SparePartsPage() {
     );
   }
 
-  function LocationFilter() {
-    const filt = locationOptions.filter(l => l.toLowerCase().includes(locationQuery.toLowerCase()));
+  function LocationFilter({ buttonStyle }) {
+    const filt = locationOptions.filter((l) => l.toLowerCase().includes(locationQuery.toLowerCase()));
     return (
-      <div style={{ position: "relative" }}>
-        <button style={{ ...btnGhost, display: "flex", alignItems: "center", gap: 8 }} onClick={() => setLocationOpen((o) => !o)}>
-          Lokation: {locationFilter || "Alle"} <FaChevronDown style={{ fontSize: 12 }} />
+      <div style={{ position: "relative", width: "100%" }}>
+        <button
+          style={{
+            ...btnGhost,
+            ...buttonStyle,
+            width: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 8,
+          }}
+          onClick={() => setLocationOpen((o) => !o)}
+        >
+          <span>Lokation: {locationFilter || "Alle"}</span>
+          <FaChevronDown style={{ fontSize: 12 }} />
         </button>
         {locationOpen && (
-          <div style={{
-            position: "absolute", zIndex: 20, marginTop: 8,
-            background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 10, width: 260,
-            boxShadow: "0 10px 24px rgba(0,0,0,0.08)"
-          }}>
-            <input value={locationQuery} onChange={(e) => setLocationQuery(e.target.value)} placeholder="Søg lokation…" style={{ ...inputStyle, width: "100%", marginBottom: 8 }} />
+          <div
+            style={{
+              position: "absolute",
+              zIndex: 20,
+              marginTop: 8,
+              right: 0,
+              background: "#fff",
+              border: "1px solid #e2e8f0",
+              borderRadius: 10,
+              padding: 10,
+              width: 260,
+              boxShadow: "0 10px 24px rgba(0,0,0,0.08)",
+            }}
+          >
+            <input
+              value={locationQuery}
+              onChange={(e) => setLocationQuery(e.target.value)}
+              placeholder="Søg lokation…"
+              style={{ ...inputStyle, width: "100%", marginBottom: 8 }}
+            />
             <div style={{ maxHeight: 220, overflowY: "auto" }}>
-              <div onClick={() => { setLocationFilter(""); setLocationOpen(false); setLocationQuery(""); }}
-                   style={{ padding: "6px 8px", borderRadius: 6, cursor: "pointer", background: locationFilter === "" ? "#f1f5f9" : "transparent" }}>
+              <div
+                onClick={() => {
+                  setLocationFilter("");
+                  setLocationOpen(false);
+                  setLocationQuery("");
+                }}
+                style={{
+                  padding: "6px 8px",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  background: locationFilter === "" ? "#f1f5f9" : "transparent",
+                }}
+              >
                 Alle
               </div>
               {filt.map((loc) => (
-                <div key={loc} onClick={() => { setLocationFilter(loc); setLocationOpen(false); setLocationQuery(""); }}
-                     style={{ padding: "6px 8px", borderRadius: 6, cursor: "pointer", background: locationFilter === loc ? "#f1f5f9" : "transparent" }}>
+                <div
+                  key={loc}
+                  onClick={() => {
+                    setLocationFilter(loc);
+                    setLocationOpen(false);
+                    setLocationQuery("");
+                  }}
+                  style={{
+                    padding: "6px 8px",
+                    borderRadius: 6,
+                    cursor: "pointer",
+                    background: locationFilter === loc ? "#f1f5f9" : "transparent",
+                  }}
+                >
                   {loc}
                 </div>
               ))}
@@ -446,6 +590,46 @@ export default function SparePartsPage() {
       </div>
     );
   }
+
+  // Layout-grid over tabellen (så søg + lokation “føles som kolonne-aligned”)
+  // Vi matcher din tabel: ID + (shownCols) + Handling.
+  const tableGridTemplate = useMemo(() => {
+    // Fast ID + Handling
+    const idCol = "90px";
+    const handlingCol = "140px";
+
+    // For resten, lav en “pæn” fordeling der minder om tabellen
+    const cols = shownCols.map((c) => {
+      if (c === "model") return "minmax(260px, 3fr)";
+      if (c === "sku") return "minmax(140px, 1.2fr)";
+      if (c === "price") return "minmax(110px, 1fr)";
+      if (c === "stock") return "minmax(90px, 1fr)";
+      if (c === "location") return "minmax(120px, 1fr)";
+      if (c === "category") return "minmax(140px, 1.2fr)";
+      if (c === "cost_price") return "minmax(120px, 1fr)";
+      if (c === "repair") return "minmax(140px, 1.2fr)";
+      if (c === "updatedAt") return "minmax(160px, 1fr)";
+      return "minmax(120px, 1fr)";
+    });
+
+    return `${idCol} ${cols.join(" ")} ${handlingCol}`;
+  }, [shownCols]);
+
+  // Grid-helpers til “spænd” (Model -> Kategori) og (Kostpris + Reparation)
+  const idxModel = shownCols.indexOf("model");
+  const idxCategory = shownCols.indexOf("category");
+  const idxCost = shownCols.indexOf("cost_price");
+  const idxRepair = shownCols.indexOf("repair");
+
+  // Husk: grid kolonner = [ID] + shownCols + [Handling]
+  // så shownCols kolonne c har grid index = 2 + idx
+  const gridColForShown = (idx) => 2 + idx;
+
+  const searchGridStart = idxModel >= 0 ? gridColForShown(idxModel) : 2;
+  const searchGridEnd = idxCategory >= 0 ? gridColForShown(idxCategory) + 1 : 2 + shownCols.length; // end is exclusive
+
+  const locGridStart = idxCost >= 0 ? gridColForShown(idxCost) : 2;
+  const locGridEnd = idxRepair >= 0 ? gridColForShown(idxRepair) + 1 : locGridStart + 1;
 
   const bannerStyle = {
     position: "sticky",
@@ -467,11 +651,12 @@ export default function SparePartsPage() {
     <div style={{ padding: 16 }}>
       {pausedNotice && (
         <div style={bannerStyle}>
-          <div style={{ fontWeight: 700 }}>
-            Auto-opdatering er sat på pause mens du redigerer.
-          </div>
+          <div style={{ fontWeight: 700 }}>Auto-opdatering er sat på pause mens du redigerer.</div>
           <button
-            onClick={() => { setPausedNotice(false); refreshNow(); }}
+            onClick={() => {
+              setPausedNotice(false);
+              refreshNow();
+            }}
             style={{
               backgroundColor: "#2166AC",
               color: "white",
@@ -489,15 +674,35 @@ export default function SparePartsPage() {
         </div>
       )}
 
-      {/* Topbar */}
+      {/* Topbar (primære actions) */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-        <button onClick={() => navigate("/")} style={btnGhost}><FaHome /> Forside</button>
+        <button onClick={() => navigate("/")} style={btnGhost}>
+          <FaHome /> Forside
+        </button>
         <button onClick={refreshNow} style={btnGhost} title="Hent nyeste data nu">
           Opdater
         </button>
+
         <div style={{ flex: 1 }} />
-        <input placeholder="Søg fx 'Samsung S20 skærm'…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ ...inputStyle, width: 380 }} />
-        <LocationFilter />
+
+        {/* Opret ny toggle (NYT) */}
+        <button
+          onClick={() => setCreateOpen((o) => !o)}
+          style={{
+            ...btnGhost,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            borderColor: createOpen ? `${BLUE}77` : `${BLUE}33`,
+            background: createOpen ? "#F0F7FF" : "#fff",
+          }}
+          title="Åbn/luk opret-ny rækken"
+        >
+          {createOpen ? <FaTimes /> : <FaPlus />}
+          Opret ny
+        </button>
+
+        {/* Kolonner til højre (som du bad om) */}
         <ColumnPicker />
       </div>
 
@@ -507,7 +712,11 @@ export default function SparePartsPage() {
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
           <label>Pr. side</label>
           <select style={inputStyle} value={pageSize} onChange={(e) => setPageSize(parseInt(e.target.value, 10))}>
-            {LIMITS.map((n) => <option key={n} value={n}>{n}</option>)}
+            {LIMITS.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
           </select>
           <label>Side</label>
           <input
@@ -523,7 +732,64 @@ export default function SparePartsPage() {
         </div>
       </div>
 
-      {problem && <div style={{ marginBottom: 12, padding: 10, borderRadius: 8, background: "#fee2e2", color: "#7f1d1d" }}>{problem}</div>}
+      {problem && (
+        <div style={{ marginBottom: 12, padding: 10, borderRadius: 8, background: "#fee2e2", color: "#7f1d1d" }}>
+          {problem}
+        </div>
+      )}
+
+      {/* Filter-bar “aligned” med tabellen (NYT LAYOUT) */}
+      <div
+        style={{
+          border: "1px solid #e5e7eb",
+          borderRadius: 10,
+          padding: 10,
+          marginBottom: 10,
+          background: "#fff",
+          overflowX: "auto",
+        }}
+      >
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: tableGridTemplate,
+            gap: 8,
+            alignItems: "center",
+            minWidth: 900,
+          }}
+        >
+          {/* tom “ID” kolonne (bare for at align) */}
+          <div style={{ gridColumn: "1 / 2" }} />
+
+          {/* STORT søgefelt: Model -> Kategori */}
+          <div style={{ gridColumn: `${searchGridStart} / ${searchGridEnd}` }}>
+            <input
+              placeholder="Søg fx 'Samsung S20 skærm'…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{
+                ...inputStyle,
+                width: "100%",
+                padding: "12px 14px",
+                fontSize: 16,
+                borderRadius: 12,
+              }}
+            />
+            <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>
+              Tip: søg på model, SKU, reparation, kategori eller lokation.
+            </div>
+          </div>
+
+          {/* Lokation-filter: Kostpris + Reparation */}
+          <div style={{ gridColumn: `${locGridStart} / ${locGridEnd}`, alignSelf: "start" }}>
+            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Filtrér</div>
+            <LocationFilter buttonStyle={{ padding: "10px 12px", borderRadius: 12 }} />
+          </div>
+
+          {/* tom “Handling” kolonne (align) */}
+          <div style={{ gridColumn: `${shownCols.length + 2} / ${shownCols.length + 3}` }} />
+        </div>
+      </div>
 
       {/* Tabel */}
       <div style={{ overflowX: "auto", border: "1px solid #e5e7eb", borderRadius: 10 }}>
@@ -539,38 +805,66 @@ export default function SparePartsPage() {
               <th style={{ textAlign: "left", padding: 8, width: 110 }}>Handling</th>
             </tr>
           </thead>
+
           <tbody>
-            {/* Opret-ny række */}
-            <tr style={{ background: "#F0F7FF", borderBottom: "2px solid #e2e8f0" }}>
-              <td style={{ padding: 8, color: "#334155", fontWeight: 700 }}>Opret ny</td>
-              {shownCols.map((c) => {
-                const num = c === "price" || c === "stock" || c === "cost_price";
-                return (
-                  <td key={c} style={{ padding: 6 }}>
-                    <input
-                      type={num ? "number" : "text"}
-                      step={num ? "0.01" : undefined}
-                      value={String(newRow[c] ?? "")}
-                      onChange={(e) => setNewRow((prev) => ({ ...prev, [c]: num ? (e.target.value === "" ? "" : e.target.valueAsNumber) : e.target.value }))}
-                      style={{ ...inputStyle, width: "100%" }}
-                      placeholder={LABEL[c]}
-                    />
-                  </td>
-                );
-              })}
-              <td style={{ padding: 6 }}>
-                <button onClick={handleCreate} style={btnPrimary}><FaPlus /> Opret</button>
-              </td>
-            </tr>
+            {/* Opret-ny række (nu toggled) */}
+            {createOpen && (
+              <tr style={{ background: "#F0F7FF", borderBottom: "2px solid #e2e8f0" }}>
+                <td style={{ padding: 8, color: "#334155", fontWeight: 700 }}>Opret ny</td>
+                {shownCols.map((c) => {
+                  const num = c === "price" || c === "stock" || c === "cost_price";
+                  return (
+                    <td key={c} style={{ padding: 6 }}>
+                      <input
+                        type={num ? "number" : "text"}
+                        step={num ? "0.01" : undefined}
+                        value={String(newRow[c] ?? "")}
+                        onChange={(e) =>
+                          setNewRow((prev) => ({
+                            ...prev,
+                            [c]: num ? (e.target.value === "" ? "" : e.target.valueAsNumber) : e.target.value,
+                          }))
+                        }
+                        style={{ ...inputStyle, width: "100%" }}
+                        placeholder={LABEL[c]}
+                      />
+                    </td>
+                  );
+                })}
+                <td style={{ padding: 6, display: "flex", gap: 8, alignItems: "center" }}>
+                  <button onClick={handleCreate} style={btnPrimary}>
+                    <FaPlus /> Opret
+                  </button>
+                  <button
+                    onClick={() => {
+                      setCreateOpen(false);
+                      setNewRow(COLS.reduce((acc, k) => ({ ...acc, [k]: "" }), {}));
+                    }}
+                    style={btnGhost}
+                    title="Luk opret-rækken"
+                  >
+                    <FaTimes /> Luk
+                  </button>
+                </td>
+              </tr>
+            )}
 
             {parts.map((row) => {
               const rowUpdatedAt = row.updatedAt || row.updated_at || "—";
               return (
-                <tr key={row.id} style={{ borderTop: "1px solid #f1f5f9", background: editingIndex === row.id ? "#fffbeb" : "#fff" }}>
+                <tr
+                  key={row.id}
+                  style={{
+                    borderTop: "1px solid #f1f5f9",
+                    background: editingIndex === row.id ? "#fffbeb" : "#fff",
+                  }}
+                >
                   <td style={{ padding: 6, color: "#64748b" }}>{row.id}</td>
                   {shownCols.map((c) =>
                     c === "updatedAt" ? (
-                      <td key="updatedAt" style={{ padding: 6, fontFamily: "monospace", fontSize: 12 }}>{rowUpdatedAt}</td>
+                      <td key="updatedAt" style={{ padding: 6, fontFamily: "monospace", fontSize: 12 }}>
+                        {rowUpdatedAt}
+                      </td>
                     ) : (
                       <td key={c} style={{ padding: 6, ...(c === "model" ? { width: "30%", minWidth: 260 } : {}) }}>
                         {cellEditor(row, c)}
@@ -578,14 +872,20 @@ export default function SparePartsPage() {
                     )
                   )}
                   <td style={{ padding: 6 }}>
-                    <button onClick={() => handleDelete(row.id)} style={btnDanger}><FaTrash /> Slet</button>
+                    <button onClick={() => handleDelete(row.id)} style={btnDanger}>
+                      <FaTrash /> Slet
+                    </button>
                   </td>
                 </tr>
               );
             })}
 
             {!parts.length && !loading && (
-              <tr><td colSpan={shownCols.length + 2} style={{ padding: 16, color: "#64748b" }}>Ingen rækker</td></tr>
+              <tr>
+                <td colSpan={shownCols.length + 2} style={{ padding: 16, color: "#64748b" }}>
+                  Ingen rækker
+                </td>
+              </tr>
             )}
           </tbody>
         </table>
@@ -593,11 +893,7 @@ export default function SparePartsPage() {
 
       {/* Pagination (BOTTOM) */}
       <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", justifyContent: "flex-end" }}>
-        <button
-          style={btnGhost}
-          onClick={() => setPage((p) => Math.max(1, p - 1))}
-          disabled={page <= 1}
-        >
+        <button style={btnGhost} onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
           Forrige
         </button>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -613,25 +909,24 @@ export default function SparePartsPage() {
           />
           <span style={chip}>af {totalPages}</span>
         </div>
-        <button
-          style={btnGhost}
-          onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-          disabled={page >= totalPages}
-        >
+        <button style={btnGhost} onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>
           Næste
         </button>
       </div>
 
       {/* Seneste ændringer */}
       <div style={{ marginTop: 16 }}>
-        <div style={{ fontWeight: 700, marginBottom: 8 }}><FaHistory /> Seneste ændringer</div>
+        <div style={{ fontWeight: 700, marginBottom: 8 }}>
+          <FaHistory /> Seneste ændringer
+        </div>
         {history.length === 0 ? (
           <div style={{ fontSize: 13, color: "#64748b" }}>Ingen ændringer i denne session.</div>
         ) : (
           <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
             {history.map((h, i) => (
               <li key={i}>
-                #{h.id} — {(LABEL[h.field] || h.field)}: <em style={{ color: "#64748b" }}>{String(h.old ?? "—")}</em> → <strong>{String(h.newVal ?? "—")}</strong>
+                #{h.id} — {LABEL[h.field] || h.field}: <em style={{ color: "#64748b" }}>{String(h.old ?? "—")}</em> →{" "}
+                <strong>{String(h.newVal ?? "—")}</strong>
               </li>
             ))}
           </ul>
