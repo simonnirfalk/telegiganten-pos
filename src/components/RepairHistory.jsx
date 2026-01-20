@@ -51,7 +51,11 @@ function PartBadge({ meta, part }) {
 /* ---------------- Helpers ---------------- */
 function formatDateTime(iso) {
   if (!iso) return "—";
-  try { return new Date(iso).toLocaleString("da-DK"); } catch { return iso; }
+  try {
+    return new Date(iso).toLocaleString("da-DK");
+  } catch {
+    return iso;
+  }
 }
 const PAYMENT_OPTIONS = [
   { value: "efter", label: "Betaling efter reparation" },
@@ -59,13 +63,19 @@ const PAYMENT_OPTIONS = [
   { value: "depositum", label: "Delvis betalt (depositum)" },
   { value: "garanti", label: "Garanti (ingen betaling)" },
 ];
-const STATUS_OPTIONS = ["under reparation", "klar til afhentning", "afsluttet", "annulleret"]
-  .map((s) => ({ value: s, label: s }));
+const STATUS_OPTIONS = ["under reparation", "klar til afhentning", "afsluttet", "annulleret"].map((s) => ({
+  value: s,
+  label: s,
+}));
 
 const sum = (arr, key) => (arr || []).reduce((acc, it) => acc + (Number(it?.[key]) || 0), 0);
 const safeParseJSON = (s) => {
   if (typeof s !== "string") return null;
-  try { return JSON.parse(s); } catch { return null; }
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
 };
 
 /** Læs linjer i *alle* kendte former */
@@ -119,12 +129,47 @@ function extractLinesFromAny(r) {
 function mapPriceTime(fields = {}) {
   const f = { ...fields };
   if (Object.prototype.hasOwnProperty.call(f, "price")) {
-    f._telegiganten_repair_repair_price = Number(f.price); delete f.price;
+    f._telegiganten_repair_repair_price = Number(f.price);
+    delete f.price;
   }
   if (Object.prototype.hasOwnProperty.call(f, "time")) {
-    f._telegiganten_repair_repair_time = Number(f.time); delete f.time;
+    f._telegiganten_repair_repair_time = Number(f.time);
+    delete f.time;
   }
   return f;
+}
+
+/** Robust create-fields: send både "almindelige" keys + WP meta keys + alias keys */
+function buildCreateFields({ repair, edited, ln }) {
+  const price = Number(ln.price || 0);
+  const time = Number(ln.time || 0);
+  const device = ln.device || "";
+  const repairTitle = ln.repair || "";
+
+  return {
+    // Primære
+    order_id: repair.order_id,
+    device,
+    repair: repairTitle,
+    price,
+    time,
+
+    // Alias-felter (gør create mere kompatibel hvis backend bruger andre navne)
+    model: device,
+    model_name: device,
+    repair_title: repairTitle,
+    title: repairTitle,
+
+    // WP meta keys (så vi matcher update-logikken)
+    _telegiganten_repair_repair_price: price,
+    _telegiganten_repair_repair_time: time,
+
+    ...(edited.status ? { status: String(edited.status || "").toLowerCase() } : {}),
+    ...(edited.contact ? { contact: edited.contact } : {}),
+    ...(edited.password ? { password: edited.password } : {}),
+    ...(edited.note ? { note: edited.note } : {}),
+    ...(repair.customer_id ? { customer_id: repair.customer_id } : {}),
+  };
 }
 
 /* Normaliser telefon til DK-format (Twilio kræver E.164) */
@@ -157,6 +202,7 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
     deposit_amount: Number(repair.deposit_amount || 0) || 0,
     remaining_amount: Number(repair.remaining_amount || 0) || 0,
   }));
+
   useEffect(() => {
     if (fromMeta && !edited.payment_total) {
       setEdited((prev) => ({ ...prev, payment_total: sum(lines, "price") }));
@@ -180,23 +226,26 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
       _new: false,
     }))
   );
+
   useEffect(() => {
-    setEditableLines((lines || []).map((ln, idx) => ({
-      idx,
-      device: ln.device || "",
-      repair: ln.repair || "",
-      price: Number(ln.price || 0),
-      time: Number(ln.time || 0),
-      part: ln.part || ln.meta || null,
-      source_id: ln.source_id ?? ln.id ?? null,
-      _dirty: false,
-      _new: false,
-    })));
+    setEditableLines(
+      (lines || []).map((ln, idx) => ({
+        idx,
+        device: ln.device || "",
+        repair: ln.repair || "",
+        price: Number(ln.price || 0),
+        time: Number(ln.time || 0),
+        part: ln.part || ln.meta || null,
+        source_id: ln.source_id ?? ln.id ?? null,
+        _dirty: false,
+        _new: false,
+      }))
+    );
   }, [lines]);
 
   const setLineField = (idx, field, value) => {
-    setEditableLines(prev =>
-      prev.map(l =>
+    setEditableLines((prev) =>
+      prev.map((l) =>
         l.idx === idx
           ? {
               ...l,
@@ -213,8 +262,8 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
 
   // ➕ Tilføj ny (tom) reparationslinje
   function addNewLine() {
-    setEditableLines(prev => {
-      const nextIdx = (prev?.length || 0);
+    setEditableLines((prev) => {
+      const nextIdx = prev?.length || 0;
       return [
         ...prev,
         {
@@ -224,9 +273,9 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
           price: 0,
           time: 0,
           part: null,
-          source_id: null,   // ny/ikke oprettet i WP endnu
-          _dirty: true,      // totals opdaterer
-          _new: true,        // markør: skal oprettes ved gem
+          source_id: null, // ny/ikke oprettet i WP endnu
+          _dirty: true,
+          _new: true,
         },
       ];
     });
@@ -240,7 +289,11 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
 
     // Ny/ikke-gemt linje → fjern lokalt
     if (!line.source_id) {
-      setEditableLines(prev => prev.filter(l => l.idx !== line.idx).map((l, i) => ({ ...l, idx: i })));
+      setEditableLines((prev) =>
+        prev
+          .filter((l) => l.idx !== line.idx)
+          .map((l, i) => ({ ...l, idx: i }))
+      );
       return;
     }
 
@@ -250,15 +303,18 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
       } else if (api.deleteRepair) {
         await api.deleteRepair({ repair_id: Number(line.source_id) });
       } else {
-        // fallback: markér annulleret
         await api.updateRepairWithHistory?.({
           repair_id: Number(line.source_id),
           fields: { status: "annulleret" },
           change_note: "Linje annulleret via RepairHistory",
         });
       }
-      // Fjern fra UI
-      setEditableLines(prev => prev.filter(l => l.idx !== line.idx).map((l, i) => ({ ...l, idx: i })));
+
+      setEditableLines((prev) =>
+        prev
+          .filter((l) => l.idx !== line.idx)
+          .map((l, i) => ({ ...l, idx: i }))
+      );
     } catch (e) {
       console.error(e);
       alert(e?.message || "Kunne ikke slette linjen.");
@@ -266,34 +322,54 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
   }
 
   // totaler fra edits
-  const totalsFromEdits = useMemo(() => ({
-    price: (editableLines || []).reduce((s, l) => s + (Number(l.price) || 0), 0),
-    time:  (editableLines || []).reduce((s, l) => s + (Number(l.time)  || 0), 0),
-  }), [editableLines]);
+  const totalsFromEdits = useMemo(
+    () => ({
+      price: (editableLines || []).reduce((s, l) => s + (Number(l.price) || 0), 0),
+      time: (editableLines || []).reduce((s, l) => s + (Number(l.time) || 0), 0),
+    }),
+    [editableLines]
+  );
 
   // hvilke topfelter er ændret?
   const changedFields = useMemo(() => {
     const out = {};
-    const keys = ["phone", "contact", "password", "note", "status", "payment_type", "payment_total", "deposit_amount", "remaining_amount"];
+    const keys = [
+      "phone",
+      "contact",
+      "password",
+      "note",
+      "status",
+      "payment_type",
+      "payment_total",
+      "deposit_amount",
+      "remaining_amount",
+    ];
     for (const k of keys) {
       const v = edited[k];
       const orig = repair[k];
-      const nv = (k === "payment_total" || k === "deposit_amount" || k === "remaining_amount") ? Number(v || 0) : v;
-      const ov = (k === "payment_total" || k === "deposit_amount" || k === "remaining_amount") ? Number(orig || 0) : orig;
+      const nv =
+        k === "payment_total" || k === "deposit_amount" || k === "remaining_amount"
+          ? Number(v || 0)
+          : v;
+      const ov =
+        k === "payment_total" || k === "deposit_amount" || k === "remaining_amount"
+          ? Number(orig || 0)
+          : orig;
       if ((nv ?? "") !== (ov ?? "")) out[k] = nv;
     }
     return out;
   }, [edited, repair]);
 
-  // beregn dirty linjer + note-ændring
+  // beregn dirty linjer
   const dirtyLines = useMemo(() => {
     if (!fromMeta) return [];
     return editableLines.filter((ln) => ln._dirty && !!ln.source_id);
   }, [fromMeta, editableLines]);
 
   const newLinesForCreate = useMemo(() => {
-    // nye (uden source_id) og med mindst ét udfyldt felt
-    return editableLines.filter(l => !l.source_id && (l.device || l.repair || l.price || l.time));
+    return editableLines.filter(
+      (l) => !l.source_id && (l.device || l.repair || l.price || l.time)
+    );
   }, [editableLines]);
 
   const noteChanged = useMemo(() => {
@@ -337,44 +413,36 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
     try {
       // 0) Opret NYE linjer (uden source_id)
       const createdIds = [];
+
       for (const ln of newLinesForCreate) {
-        try {
-          const payload = {
-            order_id: repair.order_id,
-            device: ln.device || "",
-            repair: ln.repair || "",
-            price: Number(ln.price || 0),
-            time: Number(ln.time || 0),
-            ...(edited.status ? { status: (edited.status || "").toLowerCase() } : {}),
-            ...(edited.contact ? { contact: edited.contact } : {}),
-            ...(edited.password ? { password: edited.password } : {}),
-            ...(edited.note ? { note: edited.note } : {}),
-            ...(repair.customer_id ? { customer_id: repair.customer_id } : {}),
-          };
+        const fields = buildCreateFields({ repair, edited, ln });
 
-          let created;
-          if (api.createRepairWithHistory) {
-            created = await api.createRepairWithHistory({ fields: payload, change_note: "Ny linje tilføjet via RepairHistory" });
-          } else if (api.createRepair) {
-            created = await api.createRepair(payload);
-          } else {
-            throw new Error("Intet create-endpoint tilgængeligt (createRepair[WithHistory]).");
-          }
-
-          const newId = created?.id || created?.repair_id || created?.post_id || created?.ID || null;
-          if (newId) createdIds.push(Number(newId));
-
-          setEditableLines(prev =>
-            prev.map(x =>
-              x === ln
-                ? { ...x, source_id: newId ? Number(newId) : null, _new: false, _dirty: false }
-                : x
-            )
-          );
-        } catch (e) {
-          console.error(e);
-          setError(e?.message || "Kunne ikke oprette ny linje.");
+        let created;
+        if (api.createRepairWithHistory) {
+          created = await api.createRepairWithHistory({
+            fields,
+            change_note: "Ny linje tilføjet via RepairHistory",
+          });
+        } else if (api.createRepair) {
+          // hvis createRepair forventer "flade felter", sender vi både meta og almindelige keys
+          created = await api.createRepair(fields);
+        } else {
+          throw new Error("Intet create-endpoint tilgængeligt (createRepair[WithHistory]).");
         }
+
+        const newId =
+          created?.id || created?.repair_id || created?.post_id || created?.ID || null;
+
+        if (newId) createdIds.push(Number(newId));
+
+        // VIGTIGT: match på idx (stabilt), ikke på objekt-reference
+        setEditableLines((prev) =>
+          prev.map((x) =>
+            x.idx === ln.idx
+              ? { ...x, source_id: newId ? Number(newId) : null, _new: false, _dirty: false }
+              : x
+          )
+        );
       }
 
       // 1) Gem linjer (pris/tid mappes til WP meta-nøgler)
@@ -422,12 +490,10 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
         }
       }
 
-      // 4) 🔁 Broadcaster status til ALLE rækker i ordren (inkl. de nye)
+      // 4) Broadcaster status til ALLE rækker i ordren (inkl. de nye)
       if (statusChanged) {
         const statusVal = (edited.status || "").toLowerCase();
-        const idsForBroadcast = Array.from(new Set([...allRepairIds, ...newLinesForCreate.map(l => l.source_id).filter(Boolean)]));
-        // Hvis nogle blev oprettet i dette run, men vi ikke nåede at sætte source_id i map (asynkront), brug createdIds:
-        const finalIds = Array.from(new Set([...idsForBroadcast, ...createdIds].filter(Boolean)));
+        const finalIds = Array.from(new Set([...allRepairIds, ...createdIds].filter(Boolean)));
         for (const id of finalIds) {
           await api.updateRepairWithHistory({
             repair_id: id,
@@ -447,9 +513,11 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
     }
   };
 
-  // klik udenfor for at lukke
+  // klik udenfor for at lukke + Escape
   useEffect(() => {
-    const onKey = (e) => { if (e.key === "Escape") onClose?.(); };
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose?.();
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
@@ -462,8 +530,7 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
   const [smsError, setSmsError] = useState("");
 
   function defaultSmsText() {
-    return (
-`Kære ${repair.customer || "kunde"},
+    return `Kære ${repair.customer || "kunde"},
 
 Din reparation #${repair.order_id} er klar til afhentning. 
 
@@ -471,8 +538,7 @@ Telegiganten
 Taastrup hovedgade 66
 2630 Taastrup
 Tlf. 70 70 78 56
-Åbningstider: Man - Fre 10-18, Lør 10-14`
-    );
+Åbningstider: Man - Fre 10-18, Lør 10-14`;
   }
   function openSmsBox() {
     const phonePrefill = edited.contact?.trim() || edited.phone?.trim() || "";
@@ -517,20 +583,30 @@ Tlf. 70 70 78 56
 
   /* ---------- UI ---------- */
   return (
-    <div ref={overlayRef} style={styles.overlay} onClick={(e) => { if (e.target === overlayRef.current) onClose?.(); }}>
+    <div
+      ref={overlayRef}
+      style={styles.overlay}
+      onClick={(e) => {
+        if (e.target === overlayRef.current) onClose?.();
+      }}
+    >
       <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div style={styles.header}>
           <div>
             <h2 style={{ margin: 0 }}>
               Redigér reparation – Ordre-ID #{repair.order_id}
-              {repair.id ? <span style={{ fontSize: "0.8rem", color: "#666" }}> (post #{repair.id})</span> : null}
+              {repair.id ? (
+                <span style={{ fontSize: "0.8rem", color: "#666" }}> (post #{repair.id})</span>
+              ) : null}
             </h2>
             <div style={{ fontSize: "0.85rem", opacity: 0.9 }}>
               Oprettet: {formatDateTime(repair.created_at)}
             </div>
           </div>
-          <button onClick={onClose} style={styles.close} title="Luk"><FaTimes /></button>
+          <button onClick={onClose} style={styles.close} title="Luk">
+            <FaTimes />
+          </button>
         </div>
 
         {error && <div style={styles.errorBox}>{error}</div>}
@@ -538,7 +614,9 @@ Tlf. 70 70 78 56
         <div style={styles.body}>
           {/* Kunde */}
           <div style={styles.inputGroup}>
-            <label style={{ marginBottom: 6 }}><strong>Kunde:</strong></label>
+            <label style={{ marginBottom: 6 }}>
+              <strong>Kunde:</strong>
+            </label>
             {repair.customer_id ? (
               <Link to={`/customers/${repair.customer_id}`} style={styles.linkBox} title="Åbn kundens side">
                 {repair.customer || "—"}
@@ -550,24 +628,40 @@ Tlf. 70 70 78 56
 
           {/* Telefon */}
           <div style={styles.inputGroup}>
-            <label style={{ marginBottom: 6 }}><strong>Telefon:</strong></label>
-            <input type="text" value={edited.phone ?? ""} onChange={(e) => handleChange("phone", e.target.value)} style={styles.input} />
+            <label style={{ marginBottom: 6 }}>
+              <strong>Telefon:</strong>
+            </label>
+            <input
+              type="text"
+              value={edited.phone ?? ""}
+              onChange={(e) => handleChange("phone", e.target.value)}
+              style={styles.input}
+            />
           </div>
 
           {/* Reparationslinjer */}
           {fromMeta ? (
             <div style={styles.inputGroup}>
-              <label style={{ marginBottom: 6 }}><strong>Reparationslinjer</strong></label>
+              <label style={{ marginBottom: 6 }}>
+                <strong>Reparationslinjer</strong>
+              </label>
               <div style={{ display: "grid", gap: 10 }}>
-                {/* Header for kolonner */}
-                <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1.2fr .6fr .6fr", gap: 8, fontWeight: 700, fontSize: 14, color: "#374151" }}>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1.2fr 1.2fr .6fr .6fr",
+                    gap: 8,
+                    fontWeight: 700,
+                    fontSize: 14,
+                    color: "#374151",
+                  }}
+                >
                   <div>Model</div>
                   <div>Reparation</div>
                   <div>Pris (kr)</div>
                   <div>Tid (min)</div>
                 </div>
 
-                {/* Toolbar */}
                 <div style={{ display: "flex", justifyContent: "flex-end", margin: "6px 0 2px" }}>
                   <button onClick={addNewLine} style={styles.secondary} title="Tilføj ny linje">
                     + Tilføj linje
@@ -576,7 +670,15 @@ Tlf. 70 70 78 56
 
                 {editableLines.map((ln) => (
                   <div key={ln.idx} style={styles.lineCard}>
-                    <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1.2fr .6fr .6fr", gap: 8, alignItems: "center", width: "100%" }}>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1.2fr 1.2fr .6fr .6fr",
+                        gap: 8,
+                        alignItems: "center",
+                        width: "100%",
+                      }}
+                    >
                       <input
                         style={styles.input}
                         value={ln.device}
@@ -617,15 +719,12 @@ Tlf. 70 70 78 56
                         >
                           Slet
                         </button>
-                        <div style={{ fontSize: 12, color: "#6b7280" }}>
-                          {ln.source_id ? `#${ln.source_id}` : "—"}
-                        </div>
+                        <div style={{ fontSize: 12, color: "#6b7280" }}>{ln.source_id ? `#${ln.source_id}` : "—"}</div>
                       </div>
                     </div>
                   </div>
                 ))}
 
-                {/* Total */}
                 <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontWeight: 700 }}>
                   <span>Samlet</span>
                   <span>
@@ -638,21 +737,51 @@ Tlf. 70 70 78 56
           ) : (
             <>
               <div style={styles.inputGroup}>
-                <label style={{ marginBottom: 6 }}><strong>Model:</strong></label>
-                <input type="text" value={edited.model ?? repair.model ?? ""} onChange={(e) => handleChange("model", e.target.value)} style={styles.input} />
+                <label style={{ marginBottom: 6 }}>
+                  <strong>Model:</strong>
+                </label>
+                <input
+                  type="text"
+                  value={edited.model ?? repair.model ?? ""}
+                  onChange={(e) => handleChange("model", e.target.value)}
+                  style={styles.input}
+                />
               </div>
               <div style={styles.inputRow2}>
                 <div>
-                  <label style={{ marginBottom: 6 }}><strong>Reparation:</strong></label>
-                  <input type="text" value={edited.repair ?? repair.repair ?? ""} onChange={(e) => handleChange("repair", e.target.value)} style={styles.input} />
+                  <label style={{ marginBottom: 6 }}>
+                    <strong>Reparation:</strong>
+                  </label>
+                  <input
+                    type="text"
+                    value={edited.repair ?? repair.repair ?? ""}
+                    onChange={(e) => handleChange("repair", e.target.value)}
+                    style={styles.input}
+                  />
                 </div>
                 <div>
-                  <label style={{ marginBottom: 6 }}><strong>Pris (kr):</strong></label>
-                  <input type="text" inputMode="numeric" value={edited.price ?? repair.price ?? ""} onChange={(e) => handleChange("price", e.target.value)} style={styles.input} />
+                  <label style={{ marginBottom: 6 }}>
+                    <strong>Pris (kr):</strong>
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={edited.price ?? repair.price ?? ""}
+                    onChange={(e) => handleChange("price", e.target.value)}
+                    style={styles.input}
+                  />
                 </div>
                 <div>
-                  <label style={{ marginBottom: 6 }}><strong>Tid (min):</strong></label>
-                  <input type="text" inputMode="numeric" value={edited.time ?? repair.time ?? ""} onChange={(e) => handleChange("time", e.target.value)} style={styles.input} />
+                  <label style={{ marginBottom: 6 }}>
+                    <strong>Tid (min):</strong>
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={edited.time ?? repair.time ?? ""}
+                    onChange={(e) => handleChange("time", e.target.value)}
+                    style={styles.input}
+                  />
                 </div>
               </div>
             </>
@@ -660,21 +789,28 @@ Tlf. 70 70 78 56
 
           {/* Betaling */}
           <div style={styles.inputGroup}>
-            <label style={{ marginBottom: 6 }}><strong>Betaling:</strong></label>
+            <label style={{ marginBottom: 6 }}>
+              <strong>Betaling:</strong>
+            </label>
             <select
               value={edited.payment_type}
               onChange={(e) => handleChange("payment_type", e.target.value)}
               style={{ ...styles.input, appearance: "auto" }}
             >
-              {PAYMENT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              {PAYMENT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
             </select>
           </div>
 
-          {/* Depositum felter */}
           {edited.payment_type === "depositum" && (
             <div style={styles.inputRow2}>
               <div>
-                <label style={{ marginBottom: 6 }}><strong>Total (kr):</strong></label>
+                <label style={{ marginBottom: 6 }}>
+                  <strong>Total (kr):</strong>
+                </label>
                 <input
                   type="text"
                   inputMode="numeric"
@@ -684,7 +820,9 @@ Tlf. 70 70 78 56
                 />
               </div>
               <div>
-                <label style={{ marginBottom: 6 }}><strong>Depositum (kr):</strong></label>
+                <label style={{ marginBottom: 6 }}>
+                  <strong>Depositum (kr):</strong>
+                </label>
                 <input
                   type="text"
                   inputMode="numeric"
@@ -694,13 +832,16 @@ Tlf. 70 70 78 56
                 />
               </div>
               <div>
-                <label style={{ marginBottom: 6 }}><strong>Mangler (kr):</strong></label>
+                <label style={{ marginBottom: 6 }}>
+                  <strong>Mangler (kr):</strong>
+                </label>
                 <input
                   type="text"
                   inputMode="numeric"
                   value={Math.max(
                     0,
-                    Number(edited.payment_total ?? (fromMeta ? totalsFromEdits.price : sum(lines, "price")) ?? 0) - Number(edited.deposit_amount ?? 0)
+                    Number(edited.payment_total ?? (fromMeta ? totalsFromEdits.price : sum(lines, "price")) ?? 0) -
+                      Number(edited.deposit_amount ?? 0)
                   )}
                   readOnly
                   style={{ ...styles.input, background: "#f9fafb" }}
@@ -711,30 +852,57 @@ Tlf. 70 70 78 56
 
           {/* Status */}
           <div style={styles.inputGroup}>
-            <label style={{ marginBottom: 6 }}><strong>Status:</strong></label>
+            <label style={{ marginBottom: 6 }}>
+              <strong>Status:</strong>
+            </label>
             <select
               value={edited.status || ""}
               onChange={(e) => handleChange("status", e.target.value)}
               style={{ ...styles.input, appearance: "auto" }}
             >
-              {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              {STATUS_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
             </select>
           </div>
 
           {/* Kontakt + password + note */}
           <div style={styles.inputRow2}>
             <div>
-              <label style={{ marginBottom: 6 }}><strong>Kontakt:</strong></label>
-              <input type="text" value={edited.contact ?? ""} onChange={(e) => handleChange("contact", e.target.value)} style={styles.input} />
+              <label style={{ marginBottom: 6 }}>
+                <strong>Kontakt:</strong>
+              </label>
+              <input
+                type="text"
+                value={edited.contact ?? ""}
+                onChange={(e) => handleChange("contact", e.target.value)}
+                style={styles.input}
+              />
             </div>
             <div>
-              <label style={{ marginBottom: 6 }}><strong>Adgangskode:</strong></label>
-              <input type="text" value={edited.password ?? ""} onChange={(e) => handleChange("password", e.target.value)} style={styles.input} />
+              <label style={{ marginBottom: 6 }}>
+                <strong>Adgangskode:</strong>
+              </label>
+              <input
+                type="text"
+                value={edited.password ?? ""}
+                onChange={(e) => handleChange("password", e.target.value)}
+                style={styles.input}
+              />
             </div>
           </div>
           <div style={styles.inputGroup}>
-            <label style={{ marginBottom: 6 }}><strong>Note:</strong></label>
-            <textarea rows={3} value={edited.note ?? ""} onChange={(e) => handleChange("note", e.target.value)} style={{ ...styles.input, resize: "vertical" }} />
+            <label style={{ marginBottom: 6 }}>
+              <strong>Note:</strong>
+            </label>
+            <textarea
+              rows={3}
+              value={edited.note ?? ""}
+              onChange={(e) => handleChange("note", e.target.value)}
+              style={{ ...styles.input, resize: "vertical" }}
+            />
           </div>
 
           {/* Footer */}
@@ -746,30 +914,30 @@ Tlf. 70 70 78 56
               >
                 Print slip
               </button>
-              <button
-                style={styles.secondary}
-                onClick={openSmsBox}
-                title="Send SMS til kunden"
-              >
+              <button style={styles.secondary} onClick={openSmsBox} title="Send SMS til kunden">
                 Send SMS
               </button>
             </div>
 
             <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={onClose} disabled={saving} style={styles.cancel}>Annullér</button>
+              <button onClick={onClose} disabled={saving} style={styles.cancel}>
+                Annullér
+              </button>
               <button
                 onClick={handleSave}
                 style={styles.save}
                 disabled={
-                  saving || (
-                    Object.keys(changedFields).length === 0 &&
+                  saving ||
+                  (Object.keys(changedFields).length === 0 &&
                     dirtyLines.length === 0 &&
                     newLinesForCreate.length === 0 &&
-                    !noteChanged
-                  )
+                    !noteChanged)
                 }
                 title={
-                  (Object.keys(changedFields).length === 0 && dirtyLines.length === 0 && newLinesForCreate.length === 0 && !noteChanged)
+                  Object.keys(changedFields).length === 0 &&
+                  dirtyLines.length === 0 &&
+                  newLinesForCreate.length === 0 &&
+                  !noteChanged
                     ? "Ingen ændringer"
                     : "Gem"
                 }
@@ -787,8 +955,7 @@ Tlf. 70 70 78 56
                 {history.map((entry, idx) => (
                   <li key={idx} style={{ marginBottom: "0.4rem" }}>
                     <small>
-                      {formatDateTime(entry.timestamp)} – <strong>{entry.field}</strong>: "
-                      {entry.old ?? ""}" → "{entry.new ?? ""}"
+                      {formatDateTime(entry.timestamp)} – <strong>{entry.field}</strong>: "{entry.old ?? ""}" → "{entry.new ?? ""}"
                     </small>
                   </li>
                 ))}
@@ -802,15 +969,23 @@ Tlf. 70 70 78 56
       {smsOpen && (
         <div
           style={styles.smsOverlay}
-          onClick={(e) => { if (e.target === e.currentTarget) setSmsOpen(false); }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setSmsOpen(false);
+          }}
         >
           <div style={styles.smsModal} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ marginTop: 0, marginBottom: 8 }}>Send SMS</h3>
 
-            {smsError && <div style={styles.errorBox} role="alert">{smsError}</div>}
+            {smsError && (
+              <div style={styles.errorBox} role="alert">
+                {smsError}
+              </div>
+            )}
 
             <div style={{ display: "grid", gap: 8 }}>
-              <label><strong>Telefon</strong></label>
+              <label>
+                <strong>Telefon</strong>
+              </label>
               <input
                 style={styles.input}
                 value={smsPhone}
@@ -818,7 +993,9 @@ Tlf. 70 70 78 56
                 placeholder="+45xxxxxxxx"
               />
 
-              <label><strong>Besked</strong></label>
+              <label>
+                <strong>Besked</strong>
+              </label>
               <textarea
                 rows={8}
                 style={{ ...styles.input, resize: "vertical" }}
@@ -828,8 +1005,12 @@ Tlf. 70 70 78 56
             </div>
 
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}>
-              <button onClick={() => setSmsOpen(false)} style={styles.cancel}>Luk</button>
-              <button onClick={copySmsToClipboard} style={styles.secondary}>Kopiér</button>
+              <button onClick={() => setSmsOpen(false)} style={styles.cancel}>
+                Luk
+              </button>
+              <button onClick={copySmsToClipboard} style={styles.secondary}>
+                Kopiér
+              </button>
               <button
                 onClick={handleSmsSend}
                 style={styles.save}
@@ -917,8 +1098,24 @@ const styles = {
     background: "#fff",
   },
   footer: { display: "flex", gap: 8, justifyContent: "space-between", marginTop: 12 },
-  cancel: { background: "#fff", color: "#374151", border: "1px solid #d1d5db", borderRadius: 10, padding: "10px 14px", cursor: "pointer", fontWeight: 700 },
-  save: { background: "#2166AC", color: "#fff", border: "none", borderRadius: 10, padding: "10px 14px", cursor: "pointer", fontWeight: 700 },
+  cancel: {
+    background: "#fff",
+    color: "#374151",
+    border: "1px solid #d1d5db",
+    borderRadius: 10,
+    padding: "10px 14px",
+    cursor: "pointer",
+    fontWeight: 700,
+  },
+  save: {
+    background: "#2166AC",
+    color: "#fff",
+    border: "none",
+    borderRadius: 10,
+    padding: "10px 14px",
+    cursor: "pointer",
+    fontWeight: 700,
+  },
   secondary: {
     background: "#f0f9ff",
     color: "#0369a1",
@@ -928,9 +1125,13 @@ const styles = {
     cursor: "pointer",
     fontWeight: 700,
   },
-  errorBox: { background: "#fee2e2", color: "#991b1b", padding: "8px 10px", borderRadius: 10, marginBottom: 10 },
-
-  // SMS modal styles
+  errorBox: {
+    background: "#fee2e2",
+    color: "#991b1b",
+    padding: "8px 10px",
+    borderRadius: 10,
+    marginBottom: 10,
+  },
   smsOverlay: {
     position: "fixed",
     inset: 0,
