@@ -211,6 +211,11 @@ export default function SparePartsPage() {
   }));
   const [colPickerOpen, setColPickerOpen] = useState(false);
 
+  // ✅ NYT: lokationsliste på tværs af hele systemet
+  const [allLocations, setAllLocations] = useState([]);
+  const [locationsLoading, setLocationsLoading] = useState(false);
+  const locationsAbortRef = useRef(null);
+
   const LIMITS = [200, 100, 50, 25];
   const totalPages = useMemo(() => {
     if (unknownTotal) return page + (parts.length >= pageSize ? 1 : 0);
@@ -232,18 +237,72 @@ export default function SparePartsPage() {
     return `${q}::${loc}::${limit}::${p}`;
   }
 
-  const locationOptions = useMemo(() => {
-    const set = new Set();
-    parts.forEach((p) => {
-      if (p.location) set.add(String(p.location));
-    });
-    return Array.from(set).sort((a, b) => a.localeCompare(b, "da"));
-  }, [parts]);
-
   const isPageVisible = () =>
     typeof document !== "undefined"
       ? document.visibilityState === "visible"
       : true;
+
+  /** ✅ NYT: hent alle lokationer fra hele datasættet */
+  async function fetchAllLocations({ bustCache = false } = {}) {
+    try {
+      if (locationsAbortRef.current) locationsAbortRef.current.abort();
+      const controller = new AbortController();
+      locationsAbortRef.current = controller;
+
+      setLocationsLoading(true);
+
+      const limit = 200; // må gerne være max (vi pager)
+      let offset = 0;
+      let safety = 0;
+
+      const set = new Set();
+
+      while (true) {
+        safety += 1;
+        if (safety > 200) break; // safety: stopper hvis API’et opfører sig mærkeligt
+
+        const data = await apiList(
+          {
+            offset,
+            limit,
+            search: "", // lokations-dropdown skal være global (ikke afhængig af søgning)
+            lokation: "",
+            cb: bustCache ? String(Date.now()) : "",
+          },
+          controller.signal
+        );
+
+        const items = Array.isArray(data?.items) ? data.items : [];
+        for (const row of items) {
+          const v = row?.location;
+          if (v !== undefined && v !== null && String(v).trim() !== "") {
+            set.add(String(v));
+          }
+        }
+
+        // Stopkriterier:
+        // 1) hvis server total findes og vi er færdige
+        // 2) eller hvis vi får færre end limit tilbage
+        const srvTotal = typeof data?.total === "number" ? data.total : null;
+        offset += items.length;
+
+        if (srvTotal != null) {
+          if (offset >= srvTotal) break;
+        } else {
+          if (items.length < limit) break;
+        }
+      }
+
+      const arr = Array.from(set).sort((a, b) => a.localeCompare(b, "da"));
+      setAllLocations(arr);
+    } catch (e) {
+      if (e.name === "AbortError") return;
+      // Vi vil ikke blokere UI hvis lokationslisten fejler – dropdown kan stadig virke med “Alle”
+      console.warn("Kunne ikke hente alle lokationer:", e);
+    } finally {
+      setLocationsLoading(false);
+    }
+  }
 
   async function fetchPage({
     pageArg = page,
@@ -320,10 +379,13 @@ export default function SparePartsPage() {
       loc: locationFilter,
       bustCache: true,
     });
+    // ✅ opdatér også lokationer globalt
+    fetchAllLocations({ bustCache: true });
   }
 
   useEffect(() => {
     fetchPage({ pageArg: 1, query: "", loc: "" }); // eslint-disable-next-line
+    fetchAllLocations({ bustCache: true }); // ✅ hent lokationer ved load
   }, []);
 
   useEffect(() => {
@@ -412,10 +474,9 @@ export default function SparePartsPage() {
 
     const onResize = () => computeLocMenuPos();
 
-    // ✅ FIX: ignorér scroll der kommer fra dropdown-menuen selv
     const onScroll = (e) => {
       const menu = locMenuRef.current;
-      if (menu && e?.target && menu.contains(e.target)) return; // ignore internal menu scroll
+      if (menu && e?.target && menu.contains(e.target)) return;
       computeLocMenuPos();
     };
 
@@ -440,7 +501,6 @@ export default function SparePartsPage() {
     };
 
     window.addEventListener("resize", onResize);
-    // capture scroll events (men vi filtrerer menu-scroll fra)
     window.addEventListener("scroll", onScroll, true);
     window.addEventListener("keydown", onKeyDown);
     document.addEventListener("mousedown", onMouseDown);
@@ -483,6 +543,9 @@ export default function SparePartsPage() {
       );
       setHistory((h) => [{ id, field, old: before, newVal: normalized }, ...h.slice(0, 49)]);
       pageCacheRef.current.clear();
+
+      // ✅ hvis lokation ændres på en række, så opdatér global lokationsliste
+      if (field === "location") fetchAllLocations({ bustCache: true });
     } catch (e) {
       if (e.status === 409) {
         alert("Rækken er ændret siden sidst. Indlæser igen.");
@@ -529,6 +592,10 @@ export default function SparePartsPage() {
       pageCacheRef.current.clear();
       setPage(1);
       setCreateOpen(false);
+
+      // ✅ ny række kan introducere ny lokation
+      fetchAllLocations({ bustCache: true });
+
       fetchPage({
         pageArg: 1,
         query: debouncedSearch,
@@ -546,6 +613,10 @@ export default function SparePartsPage() {
       await apiRemove(id);
       setParts((prev) => prev.filter((p) => p.id !== id));
       pageCacheRef.current.clear();
+
+      // ✅ slet kan også påvirke lokationsliste
+      fetchAllLocations({ bustCache: true });
+
       fetchPage({
         pageArg: page,
         query: debouncedSearch,
@@ -669,9 +740,10 @@ export default function SparePartsPage() {
     );
   }
 
-  /** LocationFilter: menu renderes fixed + scroll works */
+  /** LocationFilter: bruger nu global lokationsliste */
   function LocationFilter({ buttonStyle }) {
-    const filt = locationOptions.filter((l) =>
+    const list = allLocations; // ✅ global liste
+    const filt = list.filter((l) =>
       l.toLowerCase().includes(locationQuery.toLowerCase())
     );
 
@@ -687,13 +759,18 @@ export default function SparePartsPage() {
             alignItems: "center",
             justifyContent: "space-between",
             gap: 8,
+            opacity: locationsLoading ? 0.85 : 1,
           }}
           onClick={() => {
             setLocationOpen((o) => !o);
             setTimeout(() => computeLocMenuPos(), 0);
           }}
+          title={locationsLoading ? "Henter lokationer…" : "Vælg lokation"}
         >
-          <span>Lokation: {locationFilter || "Alle"}</span>
+          <span>
+            Lokation: {locationFilter || "Alle"}
+            {locationsLoading ? " (henter…)" : ""}
+          </span>
           <FaChevronDown style={{ fontSize: 12 }} />
         </button>
 
@@ -712,7 +789,6 @@ export default function SparePartsPage() {
               padding: 10,
               boxShadow: "0 10px 24px rgba(0,0,0,0.16)",
             }}
-            // ✅ FIX: stop wheel bubbling så tabellen bagved ikke “stjæler” scroll
             onWheel={(e) => e.stopPropagation()}
           >
             <input
@@ -723,9 +799,9 @@ export default function SparePartsPage() {
               autoFocus
               onWheel={(e) => e.stopPropagation()}
             />
+
             <div
               style={{ maxHeight: 260, overflowY: "auto" }}
-              // ✅ FIX: stop scroll bubbling (nogle browsere sender scroll videre)
               onScroll={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
             >
@@ -764,11 +840,29 @@ export default function SparePartsPage() {
                 </div>
               ))}
 
-              {!filt.length && (
+              {!locationsLoading && filt.length === 0 && (
                 <div style={{ padding: "6px 8px", color: "#64748b" }}>
                   Ingen match
                 </div>
               )}
+
+              {locationsLoading && (
+                <div style={{ padding: "6px 8px", color: "#64748b" }}>
+                  Henter lokationer…
+                </div>
+              )}
+            </div>
+
+            {/* lille "refresh lokationer" hvis du vil have den */}
+            <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end" }}>
+              <button
+                style={{ ...btnGhost, padding: "6px 10px" }}
+                onClick={() => fetchAllLocations({ bustCache: true })}
+                disabled={locationsLoading}
+                title="Genindlæs lokationslisten"
+              >
+                Opdater lokationer
+              </button>
             </div>
           </div>
         )}
@@ -893,7 +987,11 @@ export default function SparePartsPage() {
         </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
           <label>Pr. side</label>
-          <select style={inputStyle} value={pageSize} onChange={(e) => setPageSize(parseInt(e.target.value, 10))}>
+          <select
+            style={inputStyle}
+            value={pageSize}
+            onChange={(e) => setPageSize(parseInt(e.target.value, 10))}
+          >
             {LIMITS.map((n) => (
               <option key={n} value={n}>
                 {n}
@@ -907,7 +1005,11 @@ export default function SparePartsPage() {
             min={1}
             max={totalPages}
             value={page}
-            onChange={(e) => setPage(Math.max(1, Math.min(totalPages, parseInt(e.target.value || "1", 10))))}
+            onChange={(e) =>
+              setPage(
+                Math.max(1, Math.min(totalPages, parseInt(e.target.value || "1", 10)))
+              )
+            }
             onBlur={() => fetchPage({ pageArg: page, query: debouncedSearch, loc: locationFilter })}
           />
           <span style={chip}>af {totalPages}</span>
@@ -1010,7 +1112,11 @@ export default function SparePartsPage() {
                         onChange={(e) =>
                           setNewRow((prev) => ({
                             ...prev,
-                            [c]: num ? (e.target.value === "" ? "" : e.target.valueAsNumber) : e.target.value,
+                            [c]: num
+                              ? e.target.value === ""
+                                ? ""
+                                : e.target.valueAsNumber
+                              : e.target.value,
                           }))
                         }
                         style={{ ...inputStyle, width: "100%" }}
@@ -1081,7 +1187,11 @@ export default function SparePartsPage() {
 
       {/* Pagination (BOTTOM) */}
       <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", justifyContent: "flex-end" }}>
-        <button style={btnGhost} onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
+        <button
+          style={btnGhost}
+          onClick={() => setPage((p) => Math.max(1, p - 1))}
+          disabled={page <= 1}
+        >
           Forrige
         </button>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1092,12 +1202,20 @@ export default function SparePartsPage() {
             min={1}
             max={totalPages}
             value={page}
-            onChange={(e) => setPage(Math.max(1, Math.min(totalPages, parseInt(e.target.value || "1", 10))))}
+            onChange={(e) =>
+              setPage(
+                Math.max(1, Math.min(totalPages, parseInt(e.target.value || "1", 10)))
+              )
+            }
             onBlur={() => fetchPage({ pageArg: page, query: debouncedSearch, loc: locationFilter })}
           />
           <span style={chip}>af {totalPages}</span>
         </div>
-        <button style={btnGhost} onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>
+        <button
+          style={btnGhost}
+          onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+          disabled={page >= totalPages}
+        >
           Næste
         </button>
       </div>
