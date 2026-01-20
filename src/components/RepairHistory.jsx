@@ -182,9 +182,15 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
         });
       }
 
-      setEditableLines((prev) =>
-        prev.filter((l) => l.idx !== line.idx).map((l, i) => ({ ...l, idx: i }))
+      // Fjern fra UI
+      setEditableLines(prev =>
+        prev
+          .filter(l => l.idx !== line.idx)
+          .map((l, i) => ({ ...l, idx: i }))
       );
+
+      // 🔁 refresh parent list (RepairsPage)
+      await Promise.resolve(onAfterSave?.());
     } catch (e) {
       console.error(e);
       alert(e?.message || "Kunne ikke slette linjen.");
