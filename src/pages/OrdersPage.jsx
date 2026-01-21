@@ -22,11 +22,12 @@ function Card({ children }) {
   );
 }
 
-function Button({ children, onClick, style, type = "button" }) {
+function Button({ children, onClick, style, type = "button", title }) {
   return (
     <button
       type={type}
       onClick={onClick}
+      title={title}
       style={{
         background: blue,
         color: "#fff",
@@ -143,6 +144,7 @@ export default function OrdersPage() {
         o.item,
         o.customer_name,
         o.customer_phone,
+        o.customer_email,
         o.status,
         String(o.price),
         String(o.deposit_amount),
@@ -154,8 +156,24 @@ export default function OrdersPage() {
 
   return (
     <div style={{ padding: 20, maxWidth: 1200, margin: "0 auto" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 10 }}>
+      {/* Dashboard-knap (fast POS-regel) */}
+      <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: 12 }}>
+        <Link to="/" style={{ textDecoration: "none" }}>
+          <Button style={{ width: "fit-content" }}>Dashboard</Button>
+        </Link>
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 12,
+          alignItems: "center",
+          marginBottom: 10,
+        }}
+      >
         <h1 style={{ margin: 0 }}>Bestillinger</h1>
+
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <input
             type="text"
@@ -204,7 +222,9 @@ export default function OrdersPage() {
                 <strong>{o.item || "Vare (ukendt)"}</strong>
                 <StatusPill
                   label={o.status || "åben"}
-                  tone={o.status === "afsluttet" ? "closed" : o.status === "afventer" ? "awaiting" : "open"}
+                  tone={
+                    o.status === "afsluttet" ? "closed" : o.status === "afventer" ? "awaiting" : "open"
+                  }
                 />
               </div>
 
@@ -215,15 +235,23 @@ export default function OrdersPage() {
               </div>
 
               <div style={{ display: "flex", gap: 16, fontSize: 14, marginBottom: 8 }}>
-                <div><strong>Pris:</strong> {formatCurrency(o.price)}</div>
+                <div>
+                  <strong>Pris:</strong> {formatCurrency(o.price)}
+                </div>
                 {o.deposit_amount ? (
-                  <div><strong>Depositum:</strong> {formatCurrency(o.deposit_amount)}</div>
+                  <div>
+                    <strong>Depositum:</strong> {formatCurrency(o.deposit_amount)}
+                  </div>
                 ) : null}
               </div>
 
               <div style={{ fontSize: 13, color: "#555", marginBottom: 12 }}>
-                <div><strong>Forventet klar:</strong> {formatDateTime(o.eta)}</div>
-                <div><strong>Oprettet:</strong> {formatDateTime(o.created_at)}</div>
+                <div>
+                  <strong>Forventet klar:</strong> {formatDateTime(o.eta)}
+                </div>
+                <div>
+                  <strong>Oprettet:</strong> {formatDateTime(o.created_at)}
+                </div>
               </div>
 
               <div style={{ display: "flex", gap: 8 }}>
@@ -233,6 +261,7 @@ export default function OrdersPage() {
                 >
                   Print kvittering ×2
                 </Button>
+
                 <Link
                   to="#"
                   style={{ marginLeft: "auto", fontSize: 14, textDecoration: "underline", color: blue }}
@@ -274,19 +303,22 @@ function CreateOrderModal({ onClose, onCreated }) {
     customer_email: "",
     note: "",
   });
+
   const [saving, setSaving] = useState(false);
   const canSave = form.item.trim() && String(form.price).trim();
 
   async function handleSubmit(e) {
     e.preventDefault();
     if (!canSave || saving) return;
+
     setSaving(true);
     try {
       const payload = {
         ...form,
-        price: Number(form.price || 0),
-        deposit_amount: Number(form.deposit_amount || 0),
+        price: Number(String(form.price || "").replace(",", ".")) || 0,
+        deposit_amount: Number(String(form.deposit_amount || "").replace(",", ".")) || 0,
       };
+
       const created = await api.createOrder(payload);
       if (!created) throw new Error("Create failed");
       onCreated?.(created);
@@ -331,6 +363,7 @@ function CreateOrderModal({ onClose, onCreated }) {
           <h2 style={{ margin: 0, fontSize: 18 }}>Opret bestilling</h2>
           <button
             onClick={onClose}
+            type="button"
             style={{
               background: "transparent",
               border: "none",
@@ -339,6 +372,7 @@ function CreateOrderModal({ onClose, onCreated }) {
               lineHeight: 1,
             }}
             aria-label="Luk"
+            title="Luk"
           >
             ×
           </button>
@@ -346,9 +380,20 @@ function CreateOrderModal({ onClose, onCreated }) {
 
         <form onSubmit={handleSubmit} style={{ display: "grid", gap: 10 }}>
           <Input label="Vare" value={form.item} onChange={(v) => set("item", v)} required />
+
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <Input label="Pris (kr.)" value={form.price} onChange={(v) => set("price", v.replace(",", "."))} required />
-            <Input label="Forventet klar (dato/tid)" type="datetime-local" value={form.eta} onChange={(v) => set("eta", v)} />
+            <Input
+              label="Pris (kr.)"
+              value={form.price}
+              onChange={(v) => set("price", v)}
+              required
+            />
+            <Input
+              label="Forventet klar (dato/tid)"
+              type="datetime-local"
+              value={form.eta}
+              onChange={(v) => set("eta", v)}
+            />
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -365,20 +410,38 @@ function CreateOrderModal({ onClose, onCreated }) {
             <Input
               label="Depositum (kr.)"
               value={form.deposit_amount}
-              onChange={(v) => set("deposit_amount", v.replace(",", "."))}
+              onChange={(v) => set("deposit_amount", v)}
               placeholder="0 hvis ikke relevant"
             />
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <Input label="Kundens navn" value={form.customer_name} onChange={(v) => set("customer_name", v)} />
-            <Input label="Telefon" value={form.customer_phone} onChange={(v) => set("customer_phone", v)} />
+            <Input
+              label="Kundens navn"
+              value={form.customer_name}
+              onChange={(v) => set("customer_name", v)}
+            />
+            <Input
+              label="Telefon"
+              value={form.customer_phone}
+              onChange={(v) => set("customer_phone", v)}
+            />
           </div>
-          <Input label="E-mail" value={form.customer_email} onChange={(v) => set("customer_email", v)} />
+
+          <Input
+            label="E-mail"
+            value={form.customer_email}
+            onChange={(v) => set("customer_email", v)}
+          />
+
           <Textarea label="Bemærkning" value={form.note} onChange={(v) => set("note", v)} />
 
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 6 }}>
-            <Button onClick={onClose} style={{ background: "#fff", color: blue }}>
+            <Button
+              onClick={onClose}
+              style={{ background: "#fff", color: blue }}
+              type="button"
+            >
               Annuller
             </Button>
             <Button type="submit">{saving ? "Gemmer…" : "Gem bestilling"}</Button>
@@ -392,7 +455,10 @@ function CreateOrderModal({ onClose, onCreated }) {
 function Input({ label, value, onChange, type = "text", required, placeholder }) {
   return (
     <label style={{ display: "grid", gap: 6, fontSize: 14 }}>
-      <span style={{ fontWeight: 600 }}>{label}{required ? " *" : ""}</span>
+      <span style={{ fontWeight: 600 }}>
+        {label}
+        {required ? " *" : ""}
+      </span>
       <input
         type={type}
         value={value}
@@ -443,6 +509,7 @@ function Select({ label, value, onChange, options = [] }) {
           padding: "10px 12px",
           outline: "none",
           background: "#fff",
+          appearance: "auto",
         }}
       >
         {options.map((o) => (
