@@ -1,6 +1,6 @@
 // src/components/RepairHistory.jsx
 import React, { useEffect, useRef, useState, useMemo } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { FaTimes } from "react-icons/fa";
 import { api, proxyFetch } from "../data/apiClient";
 
@@ -42,8 +42,18 @@ function mapPriceTime(fields = {}) {
   return f;
 }
 
+/* Normaliser telefon til DK-format (Twilio kræver E.164) */
+function normalizePhoneLocalOrDK(phone) {
+  const digits = String(phone || "").replace(/\D+/g, "");
+  if (!digits) return "";
+  if (digits.length === 8) return `+45${digits}`;
+  if (digits.length >= 10) return `+${digits.replace(/^0+/, "")}`;
+  return phone;
+}
+
 export default function RepairHistory({ repair, onClose, onAfterSave }) {
   const overlayRef = useRef(null);
+  const navigate = useNavigate();
 
   const initialLines = useMemo(() => {
     const arr = Array.isArray(repair?.lines) ? repair.lines : [];
@@ -151,7 +161,6 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
             body: { repair_id: id },
           });
 
-
       if (!res || res.status !== "deleted") {
         throw new Error(
           `Slet mislykkedes. Forventede {status:"deleted"} men fik: ${JSON.stringify(res)}`
@@ -206,6 +215,65 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
     return Array.from(new Set(ids.filter(Boolean)));
   }, [repair?.id, editableLines]);
 
+  /* ---------- SMS modal state + helpers ---------- */
+  const [smsOpen, setSmsOpen] = useState(false);
+  const [smsPhone, setSmsPhone] = useState("");
+  const [smsText, setSmsText] = useState("");
+  const [smsSending, setSmsSending] = useState(false);
+  const [smsError, setSmsError] = useState("");
+
+  function defaultSmsText() {
+    return `Kære ${repair.customer || "kunde"},
+
+Din reparation #${repair.order_id} er klar til afhentning. 
+
+Telegiganten
+Taastrup hovedgade 66
+2630 Taastrup
+Tlf. 70 70 78 56
+Åbningstider: Man - Fre 10-18, Lør 10-14`;
+  }
+
+  function openSmsBox() {
+    const phonePrefill = edited.contact?.trim() || edited.phone?.trim() || "";
+    setSmsPhone(normalizePhoneLocalOrDK(phonePrefill));
+    setSmsText(defaultSmsText());
+    setSmsError("");
+    setSmsOpen(true);
+  }
+
+  async function handleSmsSend() {
+    setSmsSending(true);
+    setSmsError("");
+    try {
+      const to = normalizePhoneLocalOrDK(smsPhone);
+      if (!to) throw new Error("Telefonnummer mangler.");
+      if (!smsText.trim()) throw new Error("SMS-tekst mangler.");
+
+      // Forventer api.sendSMS({ to, body, repair_id })
+      await api.sendSMS({
+        to,
+        body: smsText,
+        repair_id: primaryRepairId || repair.id || null,
+      });
+
+      setSmsOpen(false);
+    } catch (e) {
+      setSmsError(e?.message || "Kunne ikke sende SMS.");
+    } finally {
+      setSmsSending(false);
+    }
+  }
+
+  async function copySmsToClipboard() {
+    try {
+      await navigator.clipboard.writeText(`${smsPhone}\n\n${smsText}`);
+      setSmsError("Tekst kopieret til udklipsholder.");
+    } catch {
+      setSmsError("Kunne ikke kopiere til udklipsholder.");
+    }
+  }
+
   const handleSave = async () => {
     setSaving(true);
     setError("");
@@ -232,14 +300,19 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
         }
 
         const created = api.createRepairWithHistory
-          ? await api.createRepairWithHistory({ fields, change_note: "Ny linje tilføjet via RepairHistory" })
+          ? await api.createRepairWithHistory({
+              fields,
+              change_note: "Ny linje tilføjet via RepairHistory",
+            })
           : await api.createRepair(fields);
 
         const newId = created?.repair_id || created?.id || created?.post_id || created?.ID || null;
 
         setEditableLines((prev) =>
           prev.map((x) =>
-            x.idx === ln.idx ? { ...x, source_id: newId ? Number(newId) : null, _new: false, _dirty: false } : x
+            x.idx === ln.idx
+              ? { ...x, source_id: newId ? Number(newId) : null, _new: false, _dirty: false }
+              : x
           )
         );
       }
@@ -276,7 +349,7 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
         });
       }
 
-      // 3) Status broadcast til alle (stadig relevant)
+      // 3) Status broadcast til alle
       const statusVal = String(edited.status || "").toLowerCase();
       for (const id of allRepairIds) {
         await api.updateRepairWithHistory({
@@ -317,7 +390,9 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
           <div>
             <h2 style={{ margin: 0 }}>
               Redigér reparation – Ordre-ID #{repair.order_id}
-              {repair.id ? <span style={{ fontSize: "0.8rem", color: "#666" }}> (post #{repair.id})</span> : null}
+              {repair.id ? (
+                <span style={{ fontSize: "0.8rem", color: "#666" }}> (post #{repair.id})</span>
+              ) : null}
             </h2>
             <div style={{ fontSize: "0.85rem", opacity: 0.9 }}>
               Oprettet: {formatDateTime(repair.created_at)}
@@ -526,16 +601,91 @@ export default function RepairHistory({ repair, onClose, onAfterSave }) {
             />
           </div>
 
+          {/* Footer */}
           <div style={styles.footer}>
-            <button onClick={onClose} disabled={saving} style={styles.cancel}>
-              Annullér
-            </button>
-            <button onClick={handleSave} style={styles.save} disabled={saving}>
-              {saving ? "Gemmer…" : "Gem ændringer"}
-            </button>
+            {/* Venstre knapper: Print + SMS (genindført) */}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                style={styles.secondary}
+                onClick={() => navigate(`/print-slip/${repair.order_id}`, { state: { order: repair } })}
+              >
+                Print slip
+              </button>
+              <button style={styles.secondary} onClick={openSmsBox} title="Send SMS til kunden">
+                Send SMS
+              </button>
+            </div>
+
+            {/* Højre knapper */}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={onClose} disabled={saving} style={styles.cancel}>
+                Annullér
+              </button>
+              <button onClick={handleSave} style={styles.save} disabled={saving}>
+                {saving ? "Gemmer…" : "Gem ændringer"}
+              </button>
+            </div>
           </div>
         </div>
       </div>
+
+      {/* ---------- SMS modal (genindført) ---------- */}
+      {smsOpen && (
+        <div
+          style={styles.smsOverlay}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setSmsOpen(false);
+          }}
+        >
+          <div style={styles.smsModal} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0, marginBottom: 8 }}>Send SMS</h3>
+
+            {smsError && (
+              <div style={styles.errorBox} role="alert">
+                {smsError}
+              </div>
+            )}
+
+            <div style={{ display: "grid", gap: 8 }}>
+              <label>
+                <strong>Telefon</strong>
+              </label>
+              <input
+                style={styles.input}
+                value={smsPhone}
+                onChange={(e) => setSmsPhone(e.target.value)}
+                placeholder="+45xxxxxxxx"
+              />
+
+              <label>
+                <strong>Besked</strong>
+              </label>
+              <textarea
+                rows={8}
+                style={{ ...styles.input, resize: "vertical" }}
+                value={smsText}
+                onChange={(e) => setSmsText(e.target.value)}
+              />
+            </div>
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}>
+              <button onClick={() => setSmsOpen(false)} style={styles.cancel}>
+                Luk
+              </button>
+              <button onClick={copySmsToClipboard} style={styles.secondary}>
+                Kopiér
+              </button>
+              <button
+                onClick={handleSmsSend}
+                style={styles.save}
+                disabled={smsSending || !smsPhone || !smsText.trim()}
+              >
+                {smsSending ? "Sender…" : "Send SMS"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -610,7 +760,7 @@ const styles = {
     borderRadius: 12,
     background: "#fff",
   },
-  footer: { display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 },
+  footer: { display: "flex", gap: 8, justifyContent: "space-between", marginTop: 12 },
   cancel: {
     background: "#fff",
     color: "#374151",
@@ -644,5 +794,25 @@ const styles = {
     padding: "8px 10px",
     borderRadius: 10,
     marginBottom: 10,
+  },
+
+  // SMS modal styles
+  smsOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,.45)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1100,
+  },
+  smsModal: {
+    width: "min(560px, 94vw)",
+    maxHeight: "85vh",
+    overflow: "auto",
+    background: "#fff",
+    borderRadius: 16,
+    padding: 16,
+    boxShadow: "0 20px 60px rgba(0,0,0,.25)",
   },
 };
