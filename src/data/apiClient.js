@@ -107,34 +107,6 @@ async function httpJson(url, options = {}) {
 }
 
 /**
- * Direkte WP fetch (uden proxy) – bruges kun som fallback til Orders.
- * Denne rammer /wp-json/... på samme origin (Vercel), og afhænger derfor af dit vercel.json rewrite.
- */
-async function wpDirectFetch({ path, method = "GET", query, body, headers = {} } = {}) {
-  if (!path || typeof path !== "string") throw new Error("wpDirectFetch: 'path' er påkrævet");
-
-  const relPath = toWpRelative(path);
-  const finalPath = withQuery(relPath, query);
-
-  const res = await fetch(withBypass(finalPath), {
-    method,
-    credentials: "omit",
-    headers: { "Content-Type": "application/json", ...(headers || {}) },
-    body: body == null ? undefined : JSON.stringify(body),
-  });
-
-  const ct = res.headers.get("content-type") || "";
-  const data = ct.includes("application/json") ? await res.json().catch(() => null) : await res.text();
-
-  if (!res.ok) {
-    const msg = typeof data === "string" ? data : JSON.stringify(data);
-    throw new Error(`WP direct fejl: ${res.status} - ${msg}`);
-  }
-
-  return normalizeEntities(data);
-}
-
-/**
  * Sender en request gennem WP-proxyen.
  * - path: fx "/wp-json/telegiganten/v1/customers" (kan være absolut til WP_ORIGIN – konverteres)
  */
@@ -533,6 +505,8 @@ export const api = {
   getTopModels: () => proxyFetch({ path: "/wp-json/telegiganten/v1/top-models" }),
 
   getPopularModelsTop: async (limit = 25) => {
+    // NOTE: POPULAR_MODELS_URL constant eksisterer, men din oprindelige logik brugte top-models.
+    // Vi bevarer original opførsel.
     const data = await proxyFetch({
       path: "/wp-json/telegiganten/v1/top-models",
       method: "GET",
@@ -733,59 +707,23 @@ export const api = {
   },
 
   /* -------- Bestillinger -------- */
+  getOrders: () => proxyFetch({ path: "/wp-json/telegiganten/v1/orders" }),
 
-  // Kun Orders: prøv proxy først → fallback til direct (så vi ikke rører alt andet)
-  getOrders: async () => {
-    try {
-      return await proxyFetch({ path: "/wp-json/telegiganten/v1/orders" });
-    } catch (e) {
-      console.warn("[orders] proxy fejlede, prøver direct:", e?.message || e);
-      return wpDirectFetch({ path: "/wp-json/telegiganten/v1/orders" });
-    }
-  },
+  getOrderById: (order_id) => proxyFetch({ path: `/wp-json/telegiganten/v1/orders/${order_id}` }),
 
-  getOrderById: async (order_id) => {
-    try {
-      return await proxyFetch({ path: `/wp-json/telegiganten/v1/orders/${order_id}` });
-    } catch (e) {
-      console.warn("[orders] proxy fejlede, prøver direct:", e?.message || e);
-      return wpDirectFetch({ path: `/wp-json/telegiganten/v1/orders/${order_id}` });
-    }
-  },
+  createOrder: (payload) =>
+    proxyFetch({
+      path: "/wp-json/telegiganten/v1/orders",
+      method: "POST",
+      body: payload,
+    }),
 
-  createOrder: async (payload) => {
-    try {
-      return await proxyFetch({
-        path: "/wp-json/telegiganten/v1/orders",
-        method: "POST",
-        body: payload,
-      });
-    } catch (e) {
-      console.warn("[orders] proxy fejlede, prøver direct:", e?.message || e);
-      return wpDirectFetch({
-        path: "/wp-json/telegiganten/v1/orders",
-        method: "POST",
-        body: payload,
-      });
-    }
-  },
-
-  updateOrder: async ({ order_id, fields }) => {
-    try {
-      return await proxyFetch({
-        path: `/wp-json/telegiganten/v1/orders/${order_id}`,
-        method: "POST",
-        body: { fields },
-      });
-    } catch (e) {
-      console.warn("[orders] proxy fejlede, prøver direct:", e?.message || e);
-      return wpDirectFetch({
-        path: `/wp-json/telegiganten/v1/orders/${order_id}`,
-        method: "POST",
-        body: { fields },
-      });
-    }
-  },
+  updateOrder: ({ order_id, fields }) =>
+    proxyFetch({
+      path: `/wp-json/telegiganten/v1/orders/${order_id}`,
+      method: "POST",
+      body: { fields },
+    }),
 
   /* ---------------------- SMS ---------------------- */
   sendSMS: ({ to, body, repair_id }) =>
