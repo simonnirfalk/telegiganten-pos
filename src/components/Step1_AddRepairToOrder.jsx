@@ -32,6 +32,11 @@ function norm(str = "") {
     .replace(/\s+/g, " ")
     .trim();
 }
+
+function escapeRegExp(s = "") {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function deriveShortCodes(titleNorm) {
   const codes = new Set();
   const compact = titleNorm.replace(/\s+/g, "");
@@ -46,6 +51,7 @@ function deriveShortCodes(titleNorm) {
   }
   return Array.from(codes);
 }
+
 function buildHaystack(model, brandTitle) {
   const raw = `${brandTitle || ""} ${model?.title || ""} ${
     Array.isArray(model?.aliases) ? model.aliases.join(" ") : ""
@@ -56,6 +62,7 @@ function buildHaystack(model, brandTitle) {
   const hay = [base, withoutGalaxy, shortCodes.join(" ")].join(" ");
   return hay.replace(/\s+/g, " ").trim();
 }
+
 function tokenize(q = "") {
   const n = norm(q);
   if (!n) return [];
@@ -65,7 +72,24 @@ function tokenize(q = "") {
 // Strengt ord-match: token skal optræde som helt ord i hay
 function tokenMatchStrict(hay, token) {
   if (!token) return true;
-  const re = new RegExp(`\\b${token}\\b`, "i");
+  const re = new RegExp(`\\b${escapeRegExp(token)}\\b`, "i");
+  return re.test(hay);
+}
+
+/**
+ * Løsere match (prefix pr. ord):
+ * - "10" matcher "10c"
+ * - "sams" matcher "samsung"
+ * Vi bruger word boundary + token, men UDEN afsluttende boundary.
+ *
+ * For helt korte tokens (1 tegn) holder vi det strengt, så søgningen ikke bliver alt for bred.
+ */
+function tokenMatchLoose(hay, token) {
+  if (!token) return true;
+  const t = String(token);
+  if (t.length <= 1) return tokenMatchStrict(hay, t);
+
+  const re = new RegExp(`\\b${escapeRegExp(t)}`, "i");
   return re.test(hay);
 }
 
@@ -138,6 +162,7 @@ function CustomRepairModal({ open, onClose, onAdd }) {
     </div>
   );
 }
+
 const m = {
   overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", display: "grid", placeItems: "center", zIndex: 1000 },
   modal: { width: "min(520px, 92vw)", background: "#fff", borderRadius: 12, padding: 16, boxShadow: "0 8px 32px rgba(0,0,0,.2)" },
@@ -401,14 +426,12 @@ export default function Step1_AddRepairToOrder({
         const hayAll   = buildHaystack(m, m.__brand);   // brand + model + aliases + shortcodes
         const hayModel = buildModelOnlyHay(m);          // model + aliases + shortcodes (uden brand)
 
-        // 1) ALLE tokens skal findes (strengt) et eller andet sted i hayAll
-        const allTokensHit = searchTokens.every((t) => tokenMatchStrict(hayAll, t));
-
+        // 1) ALLE tokens skal findes (loose/prefix) et eller andet sted i hayAll
+        const allTokensHit = searchTokens.every((t) => tokenMatchLoose(hayAll, t));
         if (!allTokensHit) return false;
 
         // 2) Mindst ÉT token skal matche model/aliases (for at undgå brand-only hits)
-        const oneTokenHitsModel = searchTokens.some((t) => tokenMatchStrict(hayModel, t));
-
+        const oneTokenHitsModel = searchTokens.some((t) => tokenMatchLoose(hayModel, t));
         return oneTokenHitsModel;
       });
 
@@ -423,7 +446,6 @@ export default function Step1_AddRepairToOrder({
         return res !== 0 ? res : String(a.title || "").localeCompare(String(b.title || ""), "da");
       });
     }
-
 
     // C) Kategori ≠ Alle og ingen søgning → vis ALLE modeller i den kategori
     return [...modelsWithBrand].sort((a, b) => {
