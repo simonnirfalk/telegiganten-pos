@@ -20,10 +20,12 @@ const PAYMENT_OPTIONS = [
   { value: "garanti", label: "Garanti (ingen betaling)" },
 ];
 
-const STATUS_OPTIONS = ["under reparation", "klar til afhentning", "afsluttet", "annulleret"].map((s) => ({
-  value: s,
-  label: s,
-}));
+const STATUS_OPTIONS = ["under reparation", "klar til afhentning", "afsluttet", "annulleret"].map(
+  (s) => ({
+    value: s,
+    label: s,
+  })
+);
 
 function sum(arr, key) {
   return (arr || []).reduce((acc, it) => acc + (Number(it?.[key]) || 0), 0);
@@ -49,6 +51,28 @@ function normalizePhoneLocalOrDK(phone) {
   if (digits.length === 8) return `+45${digits}`;
   if (digits.length >= 10) return `+${digits.replace(/^0+/, "")}`;
   return phone;
+}
+
+function getHistoryTimestamp(entry) {
+  return (
+    entry?.timestamp ||
+    entry?.ts ||
+    entry?.date ||
+    entry?.created_at ||
+    entry?.time ||
+    entry?.at ||
+    ""
+  );
+}
+
+function formatHistoryEntry(entry) {
+  const field = entry?.field || entry?.key || entry?.meta_key || "Felt";
+  const oldVal = entry?.old ?? entry?.from ?? entry?.prev ?? "";
+  const newVal = entry?.new ?? entry?.to ?? entry?.next ?? "";
+  const note = entry?.note || entry?.change_note || entry?.message || "";
+  const by = entry?.by || entry?.user || entry?.author || "";
+
+  return { field, oldVal, newVal, note, by };
 }
 
 export default function RepairHistory({ repair, onClose, onAfterSave }) {
@@ -377,6 +401,18 @@ Tlf. 70 70 78 56
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  /* ---------- Historik (nyeste først) ---------- */
+  const history = useMemo(() => {
+    const arr = Array.isArray(repair?.history) ? [...repair.history] : [];
+    return arr
+      .filter(Boolean)
+      .sort((a, b) => {
+        const ta = new Date(getHistoryTimestamp(a) || 0).getTime();
+        const tb = new Date(getHistoryTimestamp(b) || 0).getTime();
+        return tb - ta;
+      });
+  }, [repair?.history]);
+
   return (
     <div
       ref={overlayRef}
@@ -411,7 +447,11 @@ Tlf. 70 70 78 56
               <strong>Kunde:</strong>
             </label>
             {repair.customer_id ? (
-              <Link to={`/customers/${repair.customer_id}`} style={styles.linkBox} title="Åbn kundens side">
+              <Link
+                to={`/customers/${repair.customer_id}`}
+                style={styles.linkBox}
+                title="Åbn kundens side"
+              >
                 {repair.customer || "—"}
               </Link>
             ) : (
@@ -500,7 +540,14 @@ Tlf. 70 70 78 56
                     />
                   </div>
 
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginTop: 6,
+                    }}
+                  >
                     <div style={{ fontSize: 12, color: "#6b7280" }}>
                       model_id: {Number(ln.model_id || fallbackModelId || 0) || "—"}
                     </div>
@@ -603,7 +650,7 @@ Tlf. 70 70 78 56
 
           {/* Footer */}
           <div style={styles.footer}>
-            {/* Venstre knapper: Print + SMS (genindført) */}
+            {/* Venstre knapper: Print + SMS */}
             <div style={{ display: "flex", gap: 8 }}>
               <button
                 style={styles.secondary}
@@ -626,10 +673,53 @@ Tlf. 70 70 78 56
               </button>
             </div>
           </div>
+
+          {/* ✅ Historik (genindført) */}
+          {!!history?.length && (
+            <div style={{ marginTop: 14 }}>
+              <h3 style={{ margin: "0 0 8px" }}>Historik</h3>
+              <div style={{ display: "grid", gap: 8 }}>
+                {history.map((entry, idx) => {
+                  const ts = getHistoryTimestamp(entry);
+                  const { field, oldVal, newVal, note, by } = formatHistoryEntry(entry);
+                  return (
+                    <div
+                      key={idx}
+                      style={{
+                        border: "1px solid #e5e7eb",
+                        borderRadius: 12,
+                        padding: 10,
+                        background: "#fff",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                        <div style={{ fontWeight: 800, color: "#111827" }}>{field}</div>
+                        <div style={{ fontSize: 12, color: "#6b7280" }}>{formatDateTime(ts)}</div>
+                      </div>
+
+                      <div style={{ marginTop: 6, fontSize: 13, color: "#111827" }}>
+                        <span style={{ color: "#6b7280" }}>Fra:</span>{" "}
+                        <span style={{ fontWeight: 700 }}>{String(oldVal ?? "")}</span>{" "}
+                        <span style={{ color: "#6b7280" }}>→ Til:</span>{" "}
+                        <span style={{ fontWeight: 700 }}>{String(newVal ?? "")}</span>
+                      </div>
+
+                      {(note || by) && (
+                        <div style={{ marginTop: 6, fontSize: 12, color: "#6b7280" }}>
+                          {by ? <span style={{ fontWeight: 700 }}>{String(by)}:</span> : null}{" "}
+                          {note ? String(note) : ""}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* ---------- SMS modal (genindført) ---------- */}
+      {/* ---------- SMS modal ---------- */}
       {smsOpen && (
         <div
           style={styles.smsOverlay}
