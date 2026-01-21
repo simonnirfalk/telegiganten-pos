@@ -1,5 +1,12 @@
 {
   "rewrites": [
-    { "source": "/wp-json/(.*)", "destination": "https://telegiganten.dk/wp-json/$1" }
+    {
+      "source": "/wp-json/(.*)",
+      "destination": "https://telegiganten.dk/wp-json/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
   ]
 }
