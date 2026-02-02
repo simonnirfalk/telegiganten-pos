@@ -666,6 +666,31 @@ export const api = {
       },
     }),
 
+  /* ---------------------- Booking availability config (opening hours + slots) ---------------------- */
+  getBookingAvailabilityConfig: () =>
+    proxyFetch({
+      path: "/wp-json/tg-booking/v2/availability-config",
+      method: "GET",
+    }),
+
+  updateBookingAvailabilityConfig: ({
+    timezone = "Europe/Copenhagen",
+    slot_minutes = 30,
+    weekly = {},
+    overrides = {},
+    adminKey = "",
+  } = {}) =>
+    proxyFetch({
+      path: "/wp-json/tg-booking/v2/availability-config",
+      method: "POST",
+      headers: adminKey ? { "x-tg-pos-key": adminKey } : {},
+      body: {
+        timezone,
+        slot_minutes,
+        weekly,
+        overrides,
+      },
+    }),
 
   /* ---------------------- Spareparts (v2 + GAS fallback) ---------------------- */
   async getSpareParts(params = {}) {
