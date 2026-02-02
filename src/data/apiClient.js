@@ -646,6 +646,27 @@ export const api = {
   /* ---------------------- Bookinger ---------------------- */
   getBookings: (args = {}) => fetchBookings(args),
 
+  /* ---------------------- Booking availability rules (booking-v2 plugin) ---------------------- */
+  getBookingAvailabilityRules: () =>
+    proxyFetch({
+      path: "/wp-json/tg-booking/v2/availability-rules",
+      method: "GET",
+    }),
+
+  updateBookingAvailabilityRules: ({ closed_weekdays = [], closed_dates = [], adminKey = "" } = {}) =>
+    proxyFetch({
+      path: "/wp-json/tg-booking/v2/availability-rules",
+      method: "POST",
+      headers: adminKey ? { "x-tg-pos-key": adminKey } : {},
+      body: {
+        closures: {
+          closed_weekdays,
+          closed_dates,
+        },
+      },
+    }),
+
+
   /* ---------------------- Spareparts (v2 + GAS fallback) ---------------------- */
   async getSpareParts(params = {}) {
     if (SPAREPARTS_MODE === "wp") {

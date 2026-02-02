@@ -18,6 +18,7 @@ const SparePartsPage = lazy(() => import("./pages/SparePartsPage"));
 const RepairSlipPrint = lazy(() => import("./pages/RepairSlipPrint"));
 const BookingsPage = lazy(() => import("./pages/BookingsPage"));
 const ImportExportPage = lazy(() => import("./pages/ImportExportPage"));
+const BookingSettingsPage = lazy(() => import("./pages/BookingSettingsPage"));
 
 export default function App() {
   const [customers, setCustomers] = useState([]);
@@ -58,6 +59,7 @@ export default function App() {
               <Route path="/orders" element={<OrdersPage />} />
               <Route path="/orders/:id/print" element={<OrderPrint />} />
               <Route path="/buyback-admin" element={<BuybackAdminPage />} />
+              <Route path="/booking-settings" element={<BookingSettingsPage />} />
               {/* 404 fallback */}
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
@@ -191,6 +193,13 @@ function HeaderFoldout() {
               onClick={() => {
                 setOpen(false);
                 navigate("/import-export");
+              }}
+            />
+            <MenuItem
+              label="Booking-indstillinger"
+              onClick={() => {
+                setOpen(false);
+                navigate("/booking-settings");
               }}
             />
           </div>
