@@ -76,6 +76,12 @@ export default function BookingSettingsPage() {
   useEffect(() => {
     (async () => {
       try {
+        console.log("[booking settings] api keys:", Object.keys(api));
+        console.log(
+          "[booking settings] has getBookingAvailabilityConfig:",
+          typeof api.getBookingAvailabilityConfig
+        );
+    
         // 1) Rules (closures + range)
         const rulesRes = await api.getBookingAvailabilityRules();
         if (rulesRes?.ok) {
