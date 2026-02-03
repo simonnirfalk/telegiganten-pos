@@ -646,7 +646,8 @@ export const api = {
   /* ---------------------- Bookinger ---------------------- */
   getBookings: (args = {}) => fetchBookings(args),
 
-  /* ---------------------- Booking availability rules (booking-v2 plugin) ---------------------- */
+  /* ---------------------- Booking availability (tg-booking/v2) ---------------------- */
+
   getBookingAvailabilityRules: () =>
     proxyFetch({
       path: "/wp-json/tg-booking/v2/availability-rules",
@@ -657,16 +658,16 @@ export const api = {
     proxyFetch({
       path: "/wp-json/tg-booking/v2/availability-rules",
       method: "POST",
-      headers: adminKey ? { "x-tg-pos-key": adminKey } : {},
+      headers: adminKey ? { "x-tg-pos-key": String(adminKey) } : {},
+      // Backend forventer closures.{closed_weekdays, closed_dates}
       body: {
         closures: {
-          closed_weekdays,
-          closed_dates,
+          closed_weekdays: Array.isArray(closed_weekdays) ? closed_weekdays : [],
+          closed_dates: Array.isArray(closed_dates) ? closed_dates : [],
         },
       },
     }),
 
-  /* ---------------------- Booking availability config (opening hours + slots) ---------------------- */
   getBookingAvailabilityConfig: () =>
     proxyFetch({
       path: "/wp-json/tg-booking/v2/availability-config",
@@ -683,14 +684,15 @@ export const api = {
     proxyFetch({
       path: "/wp-json/tg-booking/v2/availability-config",
       method: "POST",
-      headers: adminKey ? { "x-tg-pos-key": adminKey } : {},
+      headers: adminKey ? { "x-tg-pos-key": String(adminKey) } : {},
       body: {
         timezone,
-        slot_minutes,
+        slot_minutes: Number(slot_minutes) || 30,
         weekly,
         overrides,
       },
     }),
+
 
   /* ---------------------- Spareparts (v2 + GAS fallback) ---------------------- */
   async getSpareParts(params = {}) {
