@@ -263,7 +263,7 @@ export default function BookingSettingsPage() {
     <div style={{ maxWidth: 980, margin: "0 auto" }}>
       <h1 style={{ marginBottom: 8 }}>Booking-indstillinger</h1>
       <p style={{ marginTop: 0, color: "#444" }}>
-        Styr lukkedage og åbningstider for booking.
+        Styr lukkedage og åbningstider for booking. Hej.
       </p>
 
       <div style={cardStyle}>
