@@ -654,19 +654,29 @@ export const api = {
       method: "GET",
     }),
 
-  updateBookingAvailabilityRules: ({ closed_weekdays = [], closed_dates = [], adminKey = "" } = {}) =>
+  updateBookingAvailabilityRules: ({
+    closed_weekdays = [],
+    closed_dates = [],
+    interval_min = null,
+    adminKey = "",
+  } = {}) =>
     proxyFetch({
       path: "/wp-json/tg-booking/v2/availability-rules",
       method: "POST",
       headers: adminKey ? { "x-tg-pos-key": String(adminKey) } : {},
-      // Backend forventer closures.{closed_weekdays, closed_dates}
+      // Backend forventer closures.{closed_weekdays, closed_dates} + optional interval_min
       body: {
+        interval_min:
+          interval_min === null || typeof interval_min === "undefined"
+            ? undefined
+            : Number(interval_min) || undefined,
         closures: {
           closed_weekdays: Array.isArray(closed_weekdays) ? closed_weekdays : [],
           closed_dates: Array.isArray(closed_dates) ? closed_dates : [],
         },
       },
     }),
+
 
   getBookingAvailabilityConfig: () =>
     proxyFetch({

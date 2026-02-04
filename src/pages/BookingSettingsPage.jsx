@@ -28,6 +28,11 @@ function isValidTime(s) {
   return /^\d{2}:\d{2}$/.test(String(s || ""));
 }
 
+function isValidInterval(n) {
+  const v = Number(n);
+  return Number.isFinite(v) && v >= 5 && v <= 240;
+}
+
 export default function BookingSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -101,6 +106,10 @@ export default function BookingSettingsPage() {
           setClosedDates(
             cd.map(String).filter((d) => isValidDate(d))
           );
+          // Interval minutes comes from availability-rules (used by backend holds/validation)
+          if (isValidInterval(rulesRes?.interval_min)) {
+            setSlotMinutes(Number(rulesRes.interval_min));
+          }
         }
 
         // 2) Config (opening hours + slot minutes)
@@ -108,7 +117,7 @@ export default function BookingSettingsPage() {
         if (cfgRes?.ok && cfgRes?.config) {
           const cfg = cfgRes.config;
           if (cfg.timezone) setTimezone(String(cfg.timezone));
-          if ([15, 30, 60].includes(Number(cfg.slot_minutes))) setSlotMinutes(Number(cfg.slot_minutes));
+          if (isValidInterval(cfg.slot_minutes)) setSlotMinutes(Number(cfg.slot_minutes));
 
           // Weekly
           if (cfg.weekly && typeof cfg.weekly === "object") {
@@ -230,6 +239,7 @@ export default function BookingSettingsPage() {
       const res1 = await api.updateBookingAvailabilityRules({
         closed_weekdays: closedWeekdays,
         closed_dates: closedDates,
+        interval_min: slotMinutes,
         adminKey: adminKey.trim(),
       });
 
@@ -371,8 +381,12 @@ export default function BookingSettingsPage() {
               onChange={(e) => setSlotMinutes(Number(e.target.value))}
               style={{ ...inputStyle, maxWidth: 220 }}
             >
+              <option value={5}>5 min</option>
+              <option value={10}>10 min</option>
               <option value={15}>15 min</option>
+              <option value={20}>20 min</option>
               <option value={30}>30 min</option>
+              <option value={45}>45 min</option>
               <option value={60}>60 min</option>
             </select>
           </div>
